@@ -1,0 +1,662 @@
+import { execSync, execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+
+const execFileAsync = promisify(execFile);
+
+export type MuxBackend = "cmux" | "tmux" | "zellij" | "wezterm";
+
+const commandAvailability = new Map<string, { path: string; available: boolean }>();
+
+function hasCommand(command: string): boolean {
+  const path = process.env.PATH ?? "";
+  const cached = commandAvailability.get(command);
+  if (cached && cached.path === path) {
+    return cached.available;
+  }
+
+  let available = false;
+  try {
+    execSync(`command -v ${command}`, { stdio: "ignore" });
+    available = true;
+  } catch {
+    available = false;
+  }
+
+  commandAvailability.set(command, { path, available });
+  return available;
+}
+
+function muxPreference(): MuxBackend | null {
+  const pref = (process.env.PI_SUBAGENT_MUX ?? "").trim().toLowerCase();
+  if (pref === "cmux" || pref === "tmux" || pref === "zellij" || pref === "wezterm") return pref;
+  return null;
+}
+
+function isCmuxRuntimeAvailable(): boolean {
+  return !!process.env.CMUX_SOCKET_PATH && hasCommand("cmux");
+}
+
+function isTmuxRuntimeAvailable(): boolean {
+  return !!process.env.TMUX && hasCommand("tmux");
+}
+
+function isZellijRuntimeAvailable(): boolean {
+  return !!(process.env.ZELLIJ || process.env.ZELLIJ_SESSION_NAME) && hasCommand("zellij");
+}
+
+function isWezTermRuntimeAvailable(): boolean {
+  return !!process.env.WEZTERM_UNIX_SOCKET && hasCommand("wezterm");
+}
+
+export function isCmuxAvailable(): boolean {
+  return isCmuxRuntimeAvailable();
+}
+
+export function isTmuxAvailable(): boolean {
+  return isTmuxRuntimeAvailable();
+}
+
+export function isZellijAvailable(): boolean {
+  return isZellijRuntimeAvailable();
+}
+
+export function isWezTermAvailable(): boolean {
+  return isWezTermRuntimeAvailable();
+}
+
+export function getMuxBackend(): MuxBackend | null {
+  const pref = muxPreference();
+  if (pref === "cmux") return isCmuxRuntimeAvailable() ? "cmux" : null;
+  if (pref === "tmux") return isTmuxRuntimeAvailable() ? "tmux" : null;
+  if (pref === "zellij") return isZellijRuntimeAvailable() ? "zellij" : null;
+  if (pref === "wezterm") return isWezTermRuntimeAvailable() ? "wezterm" : null;
+
+  if (isCmuxRuntimeAvailable()) return "cmux";
+  if (isTmuxRuntimeAvailable()) return "tmux";
+  if (isZellijRuntimeAvailable()) return "zellij";
+  if (isWezTermRuntimeAvailable()) return "wezterm";
+  return null;
+}
+
+export function isMuxAvailable(): boolean {
+  return getMuxBackend() !== null;
+}
+
+export function muxSetupHint(): string {
+  const pref = muxPreference();
+  if (pref === "cmux") {
+    return "Start pi inside cmux (`cmux pi`).";
+  }
+  if (pref === "tmux") {
+    return "Start pi inside tmux (`tmux new -A -s pi 'pi'`).";
+  }
+  if (pref === "zellij") {
+    return "Start pi inside zellij (`zellij --session pi`, then run `pi`).";
+  }
+  if (pref === "wezterm") {
+    return "Start pi inside WezTerm.";
+  }
+  return "Start pi inside cmux (`cmux pi`), tmux (`tmux new -A -s pi 'pi'`), zellij (`zellij --session pi`, then run `pi`), or WezTerm.";
+}
+
+function requireMuxBackend(): MuxBackend {
+  const backend = getMuxBackend();
+  if (!backend) {
+    throw new Error(`No supported terminal multiplexer found. ${muxSetupHint()}`);
+  }
+  return backend;
+}
+
+export function isFishShell(): boolean {
+  const shell = process.env.SHELL ?? "";
+  return basename(shell) === "fish";
+}
+
+export function exitStatusVar(): string {
+  return isFishShell() ? "$status" : "$?";
+}
+
+export function shellEscape(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+function tailLines(text: string, lines: number): string {
+  const split = text.split("\n");
+  if (split.length <= lines) return text;
+  return split.slice(-lines).join("\n");
+}
+
+function zellijPaneId(surface: string): string {
+  return surface.startsWith("pane:") ? surface.slice("pane:".length) : surface;
+}
+
+function zellijEnv(surface?: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (surface) {
+    env.ZELLIJ_PANE_ID = zellijPaneId(surface);
+  }
+  return env;
+}
+
+function waitForFile(path: string, timeoutMs = 5000): string {
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (existsSync(path)) {
+      return readFileSync(path, "utf8").trim();
+    }
+    Atomics.wait(sleeper, 0, 0, 20);
+  }
+  throw new Error(`Timed out waiting for zellij pane id file: ${path}`);
+}
+
+function zellijActionSync(args: string[], surface?: string): string {
+  return execFileSync("zellij", ["action", ...args], {
+    encoding: "utf8",
+    env: zellijEnv(surface),
+  });
+}
+
+async function zellijActionAsync(args: string[], surface?: string): Promise<string> {
+  const { stdout } = await execFileAsync("zellij", ["action", ...args], {
+    encoding: "utf8",
+    env: zellijEnv(surface),
+  });
+  return stdout;
+}
+
+let cmuxSubagentPane: string | null = null;
+
+export function createSurface(name: string): string {
+  const backend = getMuxBackend();
+
+  if (backend === "cmux" && cmuxSubagentPane) {
+    try {
+      const tree = execSync(`cmux tree`, { encoding: "utf8" });
+      if (tree.includes(cmuxSubagentPane)) {
+        return createSurfaceInPane(name, cmuxSubagentPane);
+      }
+    } catch {}
+    cmuxSubagentPane = null;
+  }
+
+  const surface = createSurfaceSplit(name, "right");
+
+  if (backend === "cmux") {
+    try {
+      const info = execSync(`cmux identify --surface ${shellEscape(surface)}`, {
+        encoding: "utf8",
+      });
+      const parsed = JSON.parse(info);
+      const paneRef = parsed?.caller?.pane_ref;
+      if (paneRef) {
+        cmuxSubagentPane = paneRef;
+      }
+    } catch {}
+  }
+
+  return surface;
+}
+
+function createSurfaceInPane(name: string, pane: string): string {
+  const out = execSync(`cmux new-surface --pane ${shellEscape(pane)}`, {
+    encoding: "utf8",
+  }).trim();
+  const match = out.match(/surface:\d+/);
+  if (!match) {
+    throw new Error(`Unexpected cmux new-surface output: ${out}`);
+  }
+  const surface = match[0];
+  execSync(`cmux rename-tab --surface ${shellEscape(surface)} ${shellEscape(name)}`, {
+    encoding: "utf8",
+  });
+  return surface;
+}
+
+export function createSurfaceSplit(
+  name: string,
+  direction: "left" | "right" | "up" | "down",
+  fromSurface?: string,
+): string {
+  const backend = requireMuxBackend();
+
+  if (backend === "cmux") {
+    const surfaceArg = fromSurface ? ` --surface ${shellEscape(fromSurface)}` : "";
+    const out = execSync(`cmux new-split ${direction}${surfaceArg}`, {
+      encoding: "utf8",
+    }).trim();
+    const match = out.match(/surface:\d+/);
+    if (!match) {
+      throw new Error(`Unexpected cmux new-split output: ${out}`);
+    }
+    const surface = match[0];
+    execSync(`cmux rename-tab --surface ${shellEscape(surface)} ${shellEscape(name)}`, {
+      encoding: "utf8",
+    });
+    return surface;
+  }
+
+  if (backend === "tmux") {
+    const args = ["split-window"];
+    if (direction === "left" || direction === "right") {
+      args.push("-h");
+    } else {
+      args.push("-v");
+    }
+    if (direction === "left" || direction === "up") {
+      args.push("-b");
+    }
+    if (fromSurface) {
+      args.push("-t", fromSurface);
+    }
+    args.push("-P", "-F", "#{pane_id}");
+
+    const pane = execFileSync("tmux", args, { encoding: "utf8" }).trim();
+    if (!pane.startsWith("%")) {
+      throw new Error(`Unexpected tmux split-window output: ${pane}`);
+    }
+
+    try {
+      execFileSync("tmux", ["select-pane", "-t", pane, "-T", name], { encoding: "utf8" });
+    } catch {}
+    return pane;
+  }
+
+  if (backend === "wezterm") {
+    const args = ["cli", "split-pane"];
+    if (direction === "left") args.push("--left");
+    else if (direction === "right") args.push("--right");
+    else if (direction === "up") args.push("--top");
+    else args.push("--bottom");
+    args.push("--cwd", process.cwd());
+    if (fromSurface) {
+      args.push("--pane-id", fromSurface);
+    }
+    const paneId = execFileSync("wezterm", args, { encoding: "utf8" }).trim();
+    if (!paneId || !/^\d+$/.test(paneId)) {
+      throw new Error(`Unexpected wezterm split-pane output: ${paneId || "(empty)"}`);
+    }
+    try {
+      execFileSync("wezterm", ["cli", "set-tab-title", "--pane-id", paneId, name], {
+        encoding: "utf8",
+      });
+    } catch {}
+    return paneId;
+  }
+
+  const directionArg = direction === "left" || direction === "right" ? "right" : "down";
+  const tokenPath = join(
+    tmpdir(),
+    `pi-subagent-zellij-pane-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
+  );
+  const args = ["new-pane", "--direction", directionArg, "--name", name, "--cwd", process.cwd()];
+
+  try {
+    zellijActionSync(args, fromSurface);
+  } catch {
+    if (!fromSurface) throw new Error("Failed to create zellij pane");
+    zellijActionSync(args);
+  }
+
+  const captureIdCmd = `echo "$ZELLIJ_PANE_ID" > ${shellEscape(tokenPath)}`;
+  zellijActionSync(["write-chars", captureIdCmd]);
+  zellijActionSync(["write", "13"]);
+
+  const paneId = waitForFile(tokenPath);
+  try {
+    rmSync(tokenPath, { force: true });
+  } catch {}
+
+  if (!paneId || !/^\d+$/.test(paneId)) {
+    throw new Error(`Unexpected zellij pane id: ${paneId || "(empty)"}`);
+  }
+
+  const surface = `pane:${paneId}`;
+
+  if (direction === "left" || direction === "up") {
+    try {
+      zellijActionSync(["move-pane", direction], surface);
+    } catch {}
+  }
+
+  try {
+    zellijActionSync(["rename-pane", name], surface);
+  } catch {}
+
+  return surface;
+}
+
+export function renameCurrentTab(title: string): void {
+  const backend = requireMuxBackend();
+
+  if (backend === "cmux") {
+    const surfaceId = process.env.CMUX_SURFACE_ID;
+    if (!surfaceId) throw new Error("CMUX_SURFACE_ID not set");
+    execSync(`cmux rename-tab --surface ${shellEscape(surfaceId)} ${shellEscape(title)}`, {
+      encoding: "utf8",
+    });
+    return;
+  }
+
+  if (backend === "tmux") {
+    if (process.env.PI_SUBAGENT_RENAME_TMUX_WINDOW !== "1") {
+      return;
+    }
+    const paneId = process.env.TMUX_PANE;
+    if (!paneId) throw new Error("TMUX_PANE not set");
+    const windowId = execFileSync("tmux", ["display-message", "-p", "-t", paneId, "#{window_id}"], {
+      encoding: "utf8",
+    }).trim();
+    execFileSync("tmux", ["rename-window", "-t", windowId, title], { encoding: "utf8" });
+    return;
+  }
+
+  if (backend === "wezterm") {
+    const paneId = process.env.WEZTERM_PANE;
+    const args = ["cli", "set-tab-title"];
+    if (paneId) args.push("--pane-id", paneId);
+    args.push(title);
+    execFileSync("wezterm", args, { encoding: "utf8" });
+    return;
+  }
+
+  zellijActionSync(["rename-tab", title]);
+}
+
+export function renameWorkspace(title: string): void {
+  const backend = requireMuxBackend();
+
+  if (backend === "cmux") {
+    execSync(`cmux workspace-action --action rename --title ${shellEscape(title)}`, {
+      encoding: "utf8",
+    });
+    return;
+  }
+
+  if (backend === "tmux") {
+    if (process.env.PI_SUBAGENT_RENAME_TMUX_SESSION !== "1") {
+      return;
+    }
+
+    const paneId = process.env.TMUX_PANE;
+    if (!paneId) throw new Error("TMUX_PANE not set");
+    const sessionId = execFileSync(
+      "tmux",
+      ["display-message", "-p", "-t", paneId, "#{session_id}"],
+      {
+        encoding: "utf8",
+      },
+    ).trim();
+    execFileSync("tmux", ["rename-session", "-t", sessionId, title], { encoding: "utf8" });
+    return;
+  }
+
+  if (backend === "wezterm") {
+    const paneId = process.env.WEZTERM_PANE;
+    const args = ["cli", "set-window-title"];
+    if (paneId) args.push("--pane-id", paneId);
+    args.push(title);
+    try {
+      execFileSync("wezterm", args, { encoding: "utf8" });
+    } catch {}
+    return;
+  }
+
+  // Skip session rename for zellij.
+}
+
+export function sendCommand(surface: string, command: string): void {
+  const backend = requireMuxBackend();
+
+  if (backend === "cmux") {
+    execSync(`cmux send --surface ${shellEscape(surface)} ${shellEscape(command + "\n")}`, {
+      encoding: "utf8",
+    });
+    return;
+  }
+
+  if (backend === "tmux") {
+    execFileSync("tmux", ["send-keys", "-t", surface, "-l", command], { encoding: "utf8" });
+    execFileSync("tmux", ["send-keys", "-t", surface, "Enter"], { encoding: "utf8" });
+    return;
+  }
+
+  if (backend === "wezterm") {
+    execFileSync("wezterm", ["cli", "send-text", "--pane-id", surface, "--no-paste", command + "\n"], {
+      encoding: "utf8",
+    });
+    return;
+  }
+
+  zellijActionSync(["write-chars", command], surface);
+  zellijActionSync(["write", "13"], surface);
+}
+
+export function interruptSurface(surface: string): void {
+  const backend = requireMuxBackend();
+
+  if (backend === "cmux") {
+    execSync(`cmux send --surface ${shellEscape(surface)} ${shellEscape("\u0003")}`, {
+      encoding: "utf8",
+    });
+    return;
+  }
+
+  if (backend === "tmux") {
+    execFileSync("tmux", ["send-keys", "-t", surface, "C-c"], { encoding: "utf8" });
+    return;
+  }
+
+  if (backend === "wezterm") {
+    execFileSync("wezterm", ["cli", "send-text", "--pane-id", surface, "--no-paste", "\u0003"], {
+      encoding: "utf8",
+    });
+    return;
+  }
+
+  zellijActionSync(["write", "3"], surface);
+}
+
+export function readScreen(surface: string, lines = 50): string {
+  const backend = requireMuxBackend();
+
+  if (backend === "cmux") {
+    return execSync(`cmux read-screen --surface ${shellEscape(surface)} --lines ${lines}`, {
+      encoding: "utf8",
+    });
+  }
+
+  if (backend === "tmux") {
+    return execFileSync(
+      "tmux",
+      ["capture-pane", "-p", "-t", surface, "-S", `-${Math.max(1, lines)}`],
+      {
+        encoding: "utf8",
+      },
+    );
+  }
+
+  if (backend === "wezterm") {
+    const raw = execFileSync(
+      "wezterm",
+      ["cli", "get-text", "--pane-id", surface],
+      { encoding: "utf8" },
+    );
+    return tailLines(raw, lines);
+  }
+
+  const paneId = zellijPaneId(surface);
+  const raw = execFileSync(
+    "zellij",
+    ["action", "dump-screen", "--pane-id", paneId],
+    { encoding: "utf8" },
+  );
+  return tailLines(raw, lines);
+}
+
+export async function readScreenAsync(surface: string, lines = 50): Promise<string> {
+  const backend = requireMuxBackend();
+
+  if (backend === "cmux") {
+    const { stdout } = await execFileAsync(
+      "cmux",
+      ["read-screen", "--surface", surface, "--lines", String(lines)],
+      { encoding: "utf8" },
+    );
+    return stdout;
+  }
+
+  if (backend === "tmux") {
+    const { stdout } = await execFileAsync(
+      "tmux",
+      ["capture-pane", "-p", "-t", surface, "-S", `-${Math.max(1, lines)}`],
+      { encoding: "utf8" },
+    );
+    return stdout;
+  }
+
+  if (backend === "wezterm") {
+    const { stdout } = await execFileAsync(
+      "wezterm",
+      ["cli", "get-text", "--pane-id", surface],
+      { encoding: "utf8" },
+    );
+    return tailLines(stdout, lines);
+  }
+
+  const paneId = zellijPaneId(surface);
+  const { stdout } = await execFileAsync(
+    "zellij",
+    ["action", "dump-screen", "--pane-id", paneId],
+    { encoding: "utf8" },
+  );
+  return tailLines(stdout, lines);
+}
+
+export function closeSurface(surface: string): void {
+  const backend = requireMuxBackend();
+
+  if (backend === "cmux") {
+    execSync(`cmux close-surface --surface ${shellEscape(surface)}`, {
+      encoding: "utf8",
+    });
+    return;
+  }
+
+  if (backend === "tmux") {
+    execFileSync("tmux", ["kill-pane", "-t", surface], { encoding: "utf8" });
+    return;
+  }
+
+  if (backend === "wezterm") {
+    execFileSync("wezterm", ["cli", "kill-pane", "--pane-id", surface], {
+      encoding: "utf8",
+    });
+    return;
+  }
+
+  zellijActionSync(["close-pane"], surface);
+}
+
+export interface PollResult {
+  reason: "done" | "ping" | "sentinel";
+  exitCode: number;
+  outputTokens?: number;
+  ping?: { name: string; message: string };
+}
+
+export function consumeSubagentExitSignal(sessionFile: string): PollResult | null {
+  const exitFile = `${sessionFile}.exit`;
+  if (!existsSync(exitFile)) return null;
+
+  try {
+    const parsed = JSON.parse(readFileSync(exitFile, "utf8"));
+    if (parsed?.type === "ping") {
+      rmSync(exitFile, { force: true });
+      return {
+        reason: "ping",
+        exitCode: 0,
+        outputTokens: typeof parsed.outputTokens === "number" ? parsed.outputTokens : undefined,
+        ping: {
+          name: parsed.name ?? "subagent",
+          message: parsed.message ?? "",
+        },
+      };
+    }
+    if (parsed?.type === "done") {
+      rmSync(exitFile, { force: true });
+      return {
+        reason: "done",
+        exitCode: 0,
+        outputTokens: typeof parsed.outputTokens === "number" ? parsed.outputTokens : undefined,
+      };
+    }
+  } catch {}
+
+  return null;
+}
+
+export async function pollForExit(
+  surface: string,
+  signal: AbortSignal,
+  options: {
+    interval: number;
+    sessionFile?: string;
+    doneSentinelFile?: string;
+    onTick?: (elapsed: number) => void;
+  },
+): Promise<PollResult> {
+  const start = Date.now();
+
+  while (true) {
+    if (signal.aborted) {
+      throw new Error("Aborted while waiting for subagent to finish");
+    }
+
+    if (options.sessionFile) {
+      const exitSignal = consumeSubagentExitSignal(options.sessionFile);
+      if (exitSignal) return exitSignal;
+    }
+
+    if (options.doneSentinelFile && existsSync(options.doneSentinelFile)) {
+      const fileText = readFileSync(options.doneSentinelFile, "utf8");
+      const fileMatch = fileText.match(/__SUBAGENT_DONE_(\d+)__/);
+      if (fileMatch) {
+        return { reason: "sentinel", exitCode: parseInt(fileMatch[1], 10) };
+      }
+    }
+
+    try {
+      const screen = await readScreenAsync(surface, 5);
+      const match = screen.match(/__SUBAGENT_DONE_(\d+)__/);
+      if (match) {
+        return { reason: "sentinel", exitCode: parseInt(match[1], 10) };
+      }
+    } catch {
+      if (options.sessionFile) {
+        const exitSignal = consumeSubagentExitSignal(options.sessionFile);
+        if (exitSignal) return exitSignal;
+      }
+      throw new Error("Failed to read subagent surface while polling for exit");
+    }
+
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    options.onTick?.(elapsed);
+
+    await new Promise<void>((resolve, reject) => {
+      if (signal.aborted) return reject(new Error("Aborted"));
+      const timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, options.interval);
+      function onAbort() {
+        clearTimeout(timer);
+        reject(new Error("Aborted"));
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+}

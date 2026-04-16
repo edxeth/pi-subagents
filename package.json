@@ -1,0 +1,37 @@
+{
+	"name": "pi-subagents",
+	"version": "1.0.0",
+	"description": "Serious subagent runtime for pi with interactive and background child agents",
+	"keywords": [
+		"pi-package"
+	],
+	"license": "MIT",
+	"author": "edxeth",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/edxeth/pi-subagents"
+	},
+	"type": "module",
+	"scripts": {
+		"test": "node --test test/test.ts test/system-prompt-mode.test.ts test/session-artifacts/index.test.ts test/subagents/sync.test.ts test/subagents/widget.test.ts test/live-test-guard.test.ts",
+		"test:e2e-live": "node scripts/test-e2e-live.mjs",
+		"test:e2e-live-blocking": "node scripts/test-e2e-live-blocking.mjs",
+		"test:e2e-live-mix-blocking": "node scripts/test-e2e-live-mix-blocking.mjs",
+		"test:e2e-live-deny-tools": "node scripts/test-e2e-live-deny-tools.mjs"
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "*",
+		"@mariozechner/pi-tui": "*",
+		"@sinclair/typebox": "*"
+	},
+	"devDependencies": {
+		"@mariozechner/pi-coding-agent": "^0.67.3",
+		"@mariozechner/pi-tui": "^0.67.3",
+		"@sinclair/typebox": "^0.34.49"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	}
+}
