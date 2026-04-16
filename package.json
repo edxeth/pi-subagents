@@ -1,6 +1,6 @@
 {
 	"name": "pi-subagents",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "Serious subagent runtime for pi with interactive and background child agents",
 	"keywords": [
 		"pi-package"
