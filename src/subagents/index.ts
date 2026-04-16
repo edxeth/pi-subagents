@@ -197,6 +197,7 @@ interface AgentDefaults {
 	mode?: "interactive" | "background";
 	fork?: boolean;
 	blocking?: boolean;
+	noContextFiles?: boolean;
 	timeout?: number;
 }
 
@@ -272,6 +273,7 @@ function parseAgentDefinition(
 	const modeRaw = get("mode");
 	const forkRaw = get("fork");
 	const blockingRaw = get("blocking");
+	const noContextFilesRaw = get("no-context-files");
 	const timeoutRaw = get("timeout");
 	const systemPromptRaw = get("system-prompt");
 	const body = content.replace(/^---\n[\s\S]*?\n---\n*/, "").trim();
@@ -297,6 +299,7 @@ function parseAgentDefinition(
 		body: body || undefined,
 		fork: forkRaw != null ? forkRaw === "true" : undefined,
 		blocking: blockingRaw != null ? blockingRaw === "true" : undefined,
+		noContextFiles: noContextFilesRaw != null ? noContextFilesRaw === "true" : undefined,
 		mode:
 			modeRaw === "background" || modeRaw === "interactive"
 				? modeRaw
@@ -865,6 +868,14 @@ export function resolveSubagentBlockingForTest(
 	agentDefs: AgentDefaults | null,
 ) {
 	return resolveSubagentBlocking(params, agentDefs);
+}
+
+function resolveSubagentNoContextFiles(agentDefs: AgentDefaults | null): boolean {
+	return agentDefs?.noContextFiles ?? false;
+}
+
+export function resolveSubagentNoContextFilesForTest(agentDefs: AgentDefaults | null) {
+	return resolveSubagentNoContextFiles(agentDefs);
 }
 
 function enforceAgentFrontmatter(
@@ -1887,6 +1898,10 @@ function launchBackgroundSubagent(
 		args.push("--model", model);
 	}
 
+	if (resolveSubagentNoContextFiles(prepared.agentDefs)) {
+		args.push("--no-context-files");
+	}
+
 	if (prepared.identityInSystemPrompt && prepared.identity) {
 		args.push(
 			prepared.agentDefs?.systemPromptMode === "replace"
@@ -2129,6 +2144,10 @@ async function launchSubagent(
 	const model = getPreparedModel(prepared);
 	if (model) {
 		parts.push("--model", shellEscape(model));
+	}
+
+	if (resolveSubagentNoContextFiles(prepared.agentDefs)) {
+		parts.push("--no-context-files");
 	}
 
 	if (prepared.identityInSystemPrompt && prepared.identity) {

@@ -85,6 +85,7 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `deny-tools` | unset | Denies specific child-session tools by name | Use for surgical restrictions without rewriting the whole tool set |
 | `auto-exit` | `false` | Child exits automatically after a normal completion | Best for autonomous agents, especially background scouts and reviewers |
 | `blocking` | `false` | Makes the parent wait for that agent by default | Use when the parent genuinely cannot continue without that answer |
+| `no-context-files` | `false` | Disables automatic `AGENTS.md` / `CLAUDE.md` discovery for spawned child sessions | Use only when you want a clean child run without project context injection |
 | `cwd` | parent cwd | Default working directory for the child | Use for role directories, monorepo packages, or project-specific specialists |
 | `mode` | `interactive` | `interactive` pane or `background` headless child | Use `background` for autonomous work; keep `interactive` when visibility matters |
 | `fork` | `false` | Gives the child a fork of the parent session by default | Use when the child needs the full conversation branch, not just the task |

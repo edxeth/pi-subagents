@@ -62,6 +62,7 @@ import {
   getSubagentAgentOverrideErrorForTest,
   joinSubagentsForTest,
   loadAgentDefaults,
+  resolveSubagentNoContextFilesForTest,
   renderSubagentWidgetForTest,
   resetSubagentStateForTest,
   resolveSubagentBlockingForTest,
@@ -134,6 +135,7 @@ function loadAgentDefaultsForTest(agentName: string, cwdHint?: string | null) {
       return m ? m[1].trim() : undefined;
     };
     const systemPromptRaw = get("system-prompt");
+    const noContextFilesRaw = get("no-context-files");
     const modeRaw = get("mode");
     return {
       systemPromptMode:
@@ -142,6 +144,12 @@ function loadAgentDefaultsForTest(agentName: string, cwdHint?: string | null) {
           : undefined,
       cwd: get("cwd"),
       cwdBase,
+      noContextFiles:
+        noContextFilesRaw === "true"
+          ? true
+          : noContextFilesRaw === "false"
+            ? false
+            : undefined,
       mode: modeRaw === "background" || modeRaw === "interactive" ? modeRaw : undefined,
     };
   }
@@ -903,6 +911,33 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(defs?.cwdBase, configDir);
     assert.equal(defs?.mode, "background");
     assert.equal(defs?.blocking, true);
+  });
+
+  it("defaults context-file injection to on and can disable it in agent frontmatter", () => {
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+
+    writeFileSync(
+      join(agentsDir, "tester.md"),
+      `---\nname: tester\nno-context-files: true\n---\n\nYou are the tester.`,
+    );
+
+    const defs = loadAgentDefaults("tester");
+    assert.equal(defs?.noContextFiles, true);
+    assert.equal(resolveSubagentNoContextFilesForTest(defs), true);
+    assert.equal(resolveSubagentNoContextFilesForTest(null), false);
+
+    writeFileSync(
+      join(agentsDir, "tester.md"),
+      `---\nname: tester\n---\n\nYou are the tester.`,
+    );
+
+    const defaults = loadAgentDefaults("tester");
+    assert.equal(defaults?.noContextFiles, undefined);
+    assert.equal(resolveSubagentNoContextFilesForTest(defaults), false);
   });
 
   it("reads skills from skills frontmatter only", () => {
