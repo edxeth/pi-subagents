@@ -35,6 +35,7 @@ import {
   readScreen,
   readScreenAsync,
   renameCurrentTab,
+  sendShellCommand,
   renameWorkspace,
   sendCommand,
   shellEscape,
@@ -3057,6 +3058,51 @@ esac
       assert.match(log, /send/);
       assert.match(log, /read-screen/);
       assert.match(log, /close-surface/);
+    });
+
+    it("stages long cmux shell commands through a temp script", () => {
+      const dir = createTestDir();
+      const logFile = join(dir, "cmux-stage.log");
+      writeExecutable(
+        dir,
+        "cmux",
+        `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_CMUX_LOG"
+`,
+      );
+
+      process.env.PATH = `${dir}:${ORIGINAL_ENV.PATH}`;
+      process.env.PI_SUBAGENT_MUX = "cmux";
+      process.env.CMUX_SOCKET_PATH = "/tmp/fake-cmux.sock";
+      process.env.CMUX_WORKSPACE_ID = "workspace:8";
+      process.env.FAKE_CMUX_LOG = logFile;
+      process.env.SHELL = "/bin/sh";
+
+      let stagedPath: string | null = null;
+      try {
+        const longCommand = `FILLER='${"x".repeat(8000)}' pi --session /tmp/session.jsonl @/tmp/prompt.md; echo '__SUBAGENT_DONE_'$?'__'`;
+        sendShellCommand("surface:42", longCommand);
+
+        const log = readFileSync(logFile, "utf8");
+        assert.match(log, /send --surface surface:42/);
+        assert.doesNotMatch(log, /FILLER='x{100}/);
+        assert.match(log, /pi-subagent-cmux-/);
+        assert.match(log, /rm -f/);
+
+        const pathMatch = log.match(/(\/[^\s']*pi-subagent-cmux-[^\s']+\.(?:sh|fish))/);
+        assert.ok(pathMatch);
+        stagedPath = pathMatch[1];
+        assert.equal(existsSync(stagedPath), true);
+
+        const stagedCommand = readFileSync(stagedPath, "utf8");
+        assert.match(stagedCommand, /^#!\/bin\/sh\n/);
+        assert.match(stagedCommand, /FILLER='x{100}/);
+        assert.match(stagedCommand, /pi --session \/tmp\/session\.jsonl/);
+        assert.match(stagedCommand, /__SUBAGENT_DONE_/);
+      } finally {
+        if (stagedPath && existsSync(stagedPath)) rmSync(stagedPath, { force: true });
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it("exercises the wezterm backend with a fake wezterm binary", async () => {

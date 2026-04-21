@@ -23,6 +23,7 @@ import {
 	muxSetupHint,
 	createSurface,
 	sendCommand,
+	sendShellCommand,
 	interruptSurface,
 	pollForExit,
 	consumeSubagentExitSignal,
@@ -2188,7 +2189,7 @@ async function launchSubagent(
 
 	const piCommand = cdPrefix + envPrefix + parts.join(" ");
 	const command = `${piCommand}; printf '__SUBAGENT_DONE_'${exitStatusVar()}'__\\n' | tee ${shellEscape(doneSentinelFile)}`;
-	sendCommand(surface, command);
+	sendShellCommand(surface, command);
 
 	const running: RunningSubagent = {
 		id,
@@ -3172,7 +3173,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				);
 				const resumeEnvPrefix = `${resumeEnvParts.join(" ")} `;
 				const command = `${resumeEnvPrefix}${parts.join(" ")}${cleanupMsgFile ? `; rm -f ${shellEscape(cleanupMsgFile)}` : ""}; echo '__SUBAGENT_DONE_'${exitStatusVar()}'__'`;
-				sendCommand(surface, command);
+				sendShellCommand(surface, command);
 
 				const id = Math.random().toString(16).slice(2, 10);
 				const running: RunningSubagent = {

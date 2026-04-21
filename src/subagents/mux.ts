@@ -1,6 +1,6 @@
 import { execSync, execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -433,6 +433,40 @@ export function sendCommand(surface: string, command: string): void {
 
   zellijActionSync(["write-chars", command], surface);
   zellijActionSync(["write", "13"], surface);
+}
+
+function stageShellCommand(command: string): string {
+  const shell = (process.env.SHELL ?? "/bin/sh").trim() || "/bin/sh";
+  const ext = isFishShell() ? ".fish" : ".sh";
+  const scriptPath = join(
+    tmpdir(),
+    `pi-subagent-cmux-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`,
+  );
+  writeFileSync(scriptPath, `#!${shell}\n${command}\n`, "utf8");
+  chmodSync(scriptPath, 0o700);
+  return scriptPath;
+}
+
+function buildStagedShellCommand(scriptPath: string): string {
+  return `${shellEscape(scriptPath)}; rm -f ${shellEscape(scriptPath)}`;
+}
+
+export function sendShellCommand(surface: string, command: string): void {
+  const backend = requireMuxBackend();
+  if (backend !== "cmux") {
+    sendCommand(surface, command);
+    return;
+  }
+
+  const scriptPath = stageShellCommand(command);
+  try {
+    sendCommand(surface, buildStagedShellCommand(scriptPath));
+  } catch (error) {
+    try {
+      rmSync(scriptPath, { force: true });
+    } catch {}
+    throw error;
+  }
 }
 
 export function interruptSurface(surface: string): void {
