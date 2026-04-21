@@ -80,6 +80,7 @@ import {
   waitForSubagentForTest,
   writeSystemPromptArtifactForTest,
   getTerminalAssistantSummaryForTest,
+  isCoordinatorOnlyTurnDisabledForTest,
 } from "../src/subagents/index.ts";
 import {
   getArtifactProjectName,
@@ -1244,6 +1245,73 @@ describe("subagents/index.ts helpers", () => {
     assert.match(tool.promptSnippet, /Handle trivial single-file reads, quick direct answers, and tiny one-shot edits yourself instead of delegating/);
     assert.match(tool.promptSnippet, /do not fabricate unfinished child results/);
     assert.match(tool.promptSnippet, /subagent_wait or subagent_join only when the outputs are real dependencies/);
+    assert.match(tool.promptSnippet, /PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1/);
+  });
+
+  it("blocks same-response parent tools by default after a detached launch and allows opting out", () => {
+    const prev = process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN;
+
+    const init = () => {
+      const handlers = new Map<string, any>();
+      subagentsExtension({
+        on(event: string, handler: any) {
+          handlers.set(event, handler);
+        },
+        registerCommand() {},
+        registerMessageRenderer() {},
+        sendMessage() {},
+        registerTool() {},
+      } as any);
+      return handlers;
+    };
+
+    try {
+      delete process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN;
+      assert.equal(isCoordinatorOnlyTurnDisabledForTest(), false);
+      let handlers = init();
+      handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_subagent",
+        toolName: "subagent",
+        input: { name: "Child", task: "Do work" },
+      });
+      const blocked = handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_read",
+        toolName: "read",
+        input: { path: "README.md" },
+      });
+      assert.equal(blocked.block, true);
+      assert.match(blocked.reason, /already owns the delegated work for this response/);
+      handlers.get("agent_end")?.({ type: "agent_end", messages: [] });
+      const allowedAfterAgentEnd = handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_read_after_end",
+        toolName: "read",
+        input: { path: "README.md" },
+      });
+      assert.deepEqual(allowedAfterAgentEnd, {});
+
+      process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN = "1";
+      assert.equal(isCoordinatorOnlyTurnDisabledForTest(), true);
+      handlers = init();
+      handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_subagent_2",
+        toolName: "subagent",
+        input: { name: "Child", task: "Do work" },
+      });
+      const allowed = handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_read_2",
+        toolName: "read",
+        input: { path: "README.md" },
+      });
+      assert.deepEqual(allowed, {});
+    } finally {
+      if (prev == null) delete process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN;
+      else process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN = prev;
+    }
   });
 
   it("injects one hidden startup catalog for top-level actionable sessions", () => {

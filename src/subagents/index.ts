@@ -634,6 +634,14 @@ function isPostDetachedCoordinationTool(toolName: string): boolean {
 	return false;
 }
 
+function isCoordinatorOnlyTurnDisabled(): boolean {
+	return process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN === "1";
+}
+
+export function isCoordinatorOnlyTurnDisabledForTest(): boolean {
+	return isCoordinatorOnlyTurnDisabled();
+}
+
 function getDetachedLaunchBlockReason(toolName: string): string {
 	const launched = detachedLaunchBoundary?.launched ?? [];
 	const pending = detachedLaunchBoundary?.pending ?? 0;
@@ -646,10 +654,11 @@ function getDetachedLaunchBlockReason(toolName: string): string {
 				? "a detached subagent launch"
 				: `${pending} detached subagent launches`;
 	return (
-		`${launchedText} already owns the delegated work for this turn. ` +
+		`${launchedText} already owns the delegated work for this response. ` +
 		`Do not call ${toolName} now or redo that work yourself. ` +
 		`Either end your response, launch another independent subagent, or use subagent_wait/subagent_join if you truly need child results before replying. ` +
-		`Normal parent-side tool work can resume on the user's next message; suggest \"continue\" as a shortcut if needed.`
+		`Normal parent-side tool work can resume on the user's next message; suggest \"continue\" as a shortcut if needed. ` +
+		`Set PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1 to disable this guard entirely.`
 	);
 }
 
@@ -1175,6 +1184,12 @@ function getStartedSubagentDetails(running: RunningSubagent) {
 }
 
 function getStartedSubagentResult(running: RunningSubagent) {
+	const coordinatorOnlyText = isCoordinatorOnlyTurnDisabled()
+		? `Coordinator-only response enforcement is disabled in this session via PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1, so same-response parent tools remain available. ` +
+			`Even so, do not redo overlapping work yourself; prefer independent work, subagent_wait/subagent_join for real dependencies, or ending your response.`
+		: `This response is now coordinator-only: do not call read/bash/edit/write/grep/find/ls or redo overlapping work yourself. ` +
+			`Either launch more independent subagents, use subagent_wait/subagent_join if you truly need child results before replying, or end your response now. ` +
+			`On the user's next message, normal parent-side tool work resumes; suggest replying with \"continue\" as a shortcut if they want you to keep going while the sub-agent runs.`;
 	return {
 		content: [
 			{
@@ -1183,9 +1198,7 @@ function getStartedSubagentResult(running: RunningSubagent) {
 					`Sub-agent "${running.name}" launched. ` +
 					`Do NOT generate or assume any results — you have no idea what the sub-agent will do or produce. ` +
 					`The results will be delivered to you automatically as a steer message when the sub-agent finishes. ` +
-					`This turn is now coordinator-only: do not call read/bash/edit/write/grep/find/ls or redo overlapping work yourself. ` +
-					`Either launch more independent subagents, use subagent_wait/subagent_join if you truly need child results before replying, or end your response now. ` +
-					`On the user's next message, normal parent-side tool work resumes; suggest replying with \"continue\" as a shortcut if they want you to keep going while the sub-agent runs.`,
+					coordinatorOnlyText,
 			},
 		],
 		details: getStartedSubagentDetails(running),
@@ -2706,6 +2719,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// Capture the UI context early so the widget keeps a stable slot above tasks.
 	pi.on("session_start", (event, ctx) => {
+		resetDetachedLaunchBoundary();
 		attachWidgetContext(ctx);
 		if (isAmbientAwarenessDisabled()) {
 			pendingAmbientCatalogReminder = null;
@@ -2760,14 +2774,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_switch", (_event, ctx) => {
+		resetDetachedLaunchBoundary();
 		attachWidgetContext(ctx);
 	});
 
-	pi.on("turn_start", () => {
+	pi.on("input", () => {
 		resetDetachedLaunchBoundary();
+		return { action: "continue" as const };
 	});
 
-	pi.on("turn_end", () => {
+	pi.on("agent_end", () => {
 		resetDetachedLaunchBoundary();
 	});
 
@@ -2806,11 +2822,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						typeof input.cwd === "string" ? input.cwd : undefined,
 					)
 					: null;
-			if (!resolveSubagentBlocking(input, agentDefs)) {
+			if (!isCoordinatorOnlyTurnDisabled() && !resolveSubagentBlocking(input, agentDefs)) {
 				notePendingDetachedLaunch();
 			}
 			return {};
 		}
+		if (isCoordinatorOnlyTurnDisabled()) return {};
 		if (!detachedLaunchBoundary) return {};
 		if (isPostDetachedCoordinationTool(event.toolName)) return {};
 		return {
@@ -2821,6 +2838,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	pi.on("tool_result", (event) => {
 		if (event.toolName !== "subagent") return {};
+		if (isCoordinatorOnlyTurnDisabled()) return {};
 		const details = event.details as StartedSubagentToolDetails | undefined;
 		if (details?.blocking === false && details?.status === "started") {
 			recordDetachedLaunch(details.id ?? "pending", details.name ?? "subagent");
@@ -2843,7 +2861,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				"Keep launches explicit, prefer one call per child, and launch independent children in parallel. " +
 				"Interactive agents run in panes; background agents run headlessly; named-agent frontmatter is authoritative for runtime settings, and conflicting call-time execution overrides are rejected. " +
 				"Handle trivial single-file reads, quick direct answers, and tiny one-shot edits yourself instead of delegating. " +
-				"If the launch is non-blocking, do not fabricate unfinished child results or perform overlapping work in the same turn: launch more independent subagents, use subagent_wait or subagent_join only when the outputs are real dependencies, otherwise end your response and wait for the later steer result. On the user's next message, normal parent-side tool work resumes; suggest \"continue\" as a shortcut when that helps.",
+				"If the launch is non-blocking, do not fabricate unfinished child results or perform overlapping work in the same response: launch more independent subagents, use subagent_wait or subagent_join only when the outputs are real dependencies, otherwise end your response and wait for the later steer result. On the user's next message, normal parent-side tool work resumes; suggest \"continue\" as a shortcut when that helps. Set PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1 to disable the hard same-response guard when you deliberately want full parent control.",
 			parameters: SubagentParams,
 
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {

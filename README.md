@@ -21,7 +21,7 @@ pi install git:github.com/edxeth/pi-subagents
 ## What it gives pi
 
 - named subagents instead of ad-hoc prompt blobs
-- detached async execution by default, with same-turn coordinator-only guarding
+- detached async execution by default, with same-response coordinator-only guarding
 - true blocking execution when you actually need sequential behavior
 - interactive foreground children and headless background children
 - explicit `wait`, `join`, and `detach` semantics
@@ -167,9 +167,11 @@ Use this for scouts, reviewers, analyzers, and other autonomous workers that do 
 
 Detached is the default. The child runs and the result comes back later.
 
-There is one important runtime guard: after a detached launch, the parent's **current turn** becomes coordinator-only. In that same turn, the parent should launch more independent subagents, use `subagent_wait` / `subagent_join` when the child result is a real dependency, or end the response. It should **not** use direct file or shell tools to redo overlapping work itself.
+There is one important runtime guard: after a detached launch, the parent's **current response** becomes coordinator-only by default. In that same response, the parent should launch more independent subagents, use `subagent_wait` / `subagent_join` when the child result is a real dependency, or end the response. It should **not** use direct file or shell tools to redo overlapping work itself.
 
 On the next user message, normal parent-side tool work resumes even if detached children are still running. If you want a lightweight shorthand, replying with `continue` is enough to wake the parent back up for ordinary work.
+
+If you want to disable the hard same-response guard and take full control yourself, set `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1`. The guidance still tells the parent not to overlap delegated work, but enforcement becomes advisory instead of blocking.
 
 Session seeding defaults to `standalone`, but agents can choose `session-mode: lineage-only` or `session-mode: fork`. An explicit tool-call `fork: true` still forces fork mode for that specific launch.
 
@@ -241,6 +243,7 @@ These are the ones worth knowing.
 - `PI_SUBAGENT_MUX` — force the mux backend: `cmux`, `tmux`, `zellij`, or `wezterm`
 - `PI_CODING_AGENT_DIR` — override the global pi agent config root
 - `PI_SUBAGENT_DISABLE_AMBIENT_AWARENESS` — disable the hidden top-level subagent catalog
+- `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN` — disable the same-response coordinator-only guard after detached launches
 - `PI_ARTIFACT_PROJECT_ROOT` — override artifact root resolution
 - `PI_SUBAGENT_SHELL_READY_DELAY_MS` — override the interactive shell startup delay before sending a child command (default `500`)
 - `PI_SUBAGENT_ENABLE_SET_TAB_TITLE` — opt in to registering the `set_tab_title` tool
