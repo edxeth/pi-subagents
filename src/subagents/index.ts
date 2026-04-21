@@ -574,6 +574,85 @@ let pendingAmbientCatalogReminder: {
 	supersedes?: true;
 } | null = null;
 
+const POST_DETACHED_COORDINATION_TOOLS = new Set([
+	"subagent",
+	"subagents_list",
+	"subagent_wait",
+	"subagent_join",
+	"subagent_detach",
+	"subagent_kill",
+	"subagent_resume",
+]);
+
+let detachedLaunchBoundary:
+	| {
+		pending: number;
+		launched: Array<{ id: string; name: string }>;
+	}
+	| null = null;
+
+function resetDetachedLaunchBoundary(): void {
+	detachedLaunchBoundary = null;
+}
+
+function ensureDetachedLaunchBoundary() {
+	if (!detachedLaunchBoundary) {
+		detachedLaunchBoundary = { pending: 0, launched: [] };
+	}
+	return detachedLaunchBoundary;
+}
+
+function notePendingDetachedLaunch(): void {
+	ensureDetachedLaunchBoundary().pending += 1;
+}
+
+function resolvePendingDetachedLaunch(): void {
+	if (!detachedLaunchBoundary) return;
+	detachedLaunchBoundary.pending = Math.max(0, detachedLaunchBoundary.pending - 1);
+	if (detachedLaunchBoundary.pending === 0 && detachedLaunchBoundary.launched.length === 0) {
+		resetDetachedLaunchBoundary();
+	}
+}
+
+function recordDetachedLaunch(id: string, name: string): void {
+	const boundary = ensureDetachedLaunchBoundary();
+	if (!boundary.launched.some((entry) => entry.id === id)) {
+		boundary.launched.push({ id, name });
+	}
+}
+
+function markDetachedLaunchBoundary(running: RunningSubagent): void {
+	if (running.blocking) return;
+	if (running.deliveryState !== "detached") return;
+	recordDetachedLaunch(running.id, running.name);
+}
+
+function isPostDetachedCoordinationTool(toolName: string): boolean {
+	if (POST_DETACHED_COORDINATION_TOOLS.has(toolName)) return true;
+	if (toolName === "ask_user_question") return true;
+	if (toolName.startsWith("task_")) return true;
+	return false;
+}
+
+function getDetachedLaunchBlockReason(toolName: string): string {
+	const launched = detachedLaunchBoundary?.launched ?? [];
+	const pending = detachedLaunchBoundary?.pending ?? 0;
+	const launchedText =
+		launched.length > 0
+			? launched.length === 1
+				? `detached subagent \"${launched[0].name}\"`
+				: `${launched.length} detached subagents`
+			: pending === 1
+				? "a detached subagent launch"
+				: `${pending} detached subagent launches`;
+	return (
+		`${launchedText} already owns the delegated work for this turn. ` +
+		`Do not call ${toolName} now or redo that work yourself. ` +
+		`Either end your response, launch another independent subagent, or use subagent_wait/subagent_join if you truly need child results before replying. ` +
+		`Normal parent-side tool work can resume on the user's next message; suggest \"continue\" as a shortcut if needed.`
+	);
+}
+
 export function getCompletedSubagentResultForTest(
 	id: string,
 ): CompletedSubagentResult | undefined {
@@ -583,6 +662,7 @@ export function getCompletedSubagentResultForTest(
 export function resetSubagentStateForTest(): void {
 	lastAmbientCatalogSignature = null;
 	pendingAmbientCatalogReminder = null;
+	resetDetachedLaunchBoundary();
 	for (const agent of runningSubagents.values()) {
 		clearSubagentShutdownTimer(agent);
 		agent.abortController?.abort();
@@ -1103,7 +1183,9 @@ function getStartedSubagentResult(running: RunningSubagent) {
 					`Sub-agent "${running.name}" launched. ` +
 					`Do NOT generate or assume any results — you have no idea what the sub-agent will do or produce. ` +
 					`The results will be delivered to you automatically as a steer message when the sub-agent finishes. ` +
-					`Until then, move on to other work or tell the user you're waiting.`,
+					`This turn is now coordinator-only: do not call read/bash/edit/write/grep/find/ls or redo overlapping work yourself. ` +
+					`Either launch more independent subagents, use subagent_wait/subagent_join if you truly need child results before replying, or end your response now. ` +
+					`On the user's next message, normal parent-side tool work resumes; suggest replying with \"continue\" as a shortcut if they want you to keep going while the sub-agent runs.`,
 			},
 		],
 		details: getStartedSubagentDetails(running),
@@ -2681,10 +2763,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		attachWidgetContext(ctx);
 	});
 
+	pi.on("turn_start", () => {
+		resetDetachedLaunchBoundary();
+	});
+
+	pi.on("turn_end", () => {
+		resetDetachedLaunchBoundary();
+	});
+
 	// Clean up on session shutdown
 	pi.on("session_shutdown", (_event, ctx) => {
 		moduleAbortController.abort();
 		widgetManager.reset();
+		resetDetachedLaunchBoundary();
 		shutdownSubagentsForParentExit();
 		if (ctx.hasUI) {
 			ctx.ui.setWidget("subagent-status", undefined);
@@ -2705,6 +2796,39 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		!isAmbientAwarenessDisabled() &&
 		shouldRegister("subagent");
 
+	pi.on("tool_call", (event) => {
+		if (event.toolName === "subagent") {
+			const input = event.input as Partial<SubagentParamsInput>;
+			const agentDefs =
+				typeof input.agent === "string"
+					? loadAgentDefaults(
+						input.agent,
+						typeof input.cwd === "string" ? input.cwd : undefined,
+					)
+					: null;
+			if (!resolveSubagentBlocking(input, agentDefs)) {
+				notePendingDetachedLaunch();
+			}
+			return {};
+		}
+		if (!detachedLaunchBoundary) return {};
+		if (isPostDetachedCoordinationTool(event.toolName)) return {};
+		return {
+			block: true,
+			reason: getDetachedLaunchBlockReason(event.toolName),
+		};
+	});
+
+	pi.on("tool_result", (event) => {
+		if (event.toolName !== "subagent") return {};
+		const details = event.details as StartedSubagentToolDetails | undefined;
+		if (details?.blocking === false && details?.status === "started") {
+			recordDetachedLaunch(details.id ?? "pending", details.name ?? "subagent");
+		}
+		resolvePendingDetachedLaunch();
+		return {};
+	});
+
 	// ── subagent tool ──
 	if (shouldRegister("subagent"))
 		pi.registerTool({
@@ -2719,7 +2843,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				"Keep launches explicit, prefer one call per child, and launch independent children in parallel. " +
 				"Interactive agents run in panes; background agents run headlessly; named-agent frontmatter is authoritative for runtime settings, and conflicting call-time execution overrides are rejected. " +
 				"Handle trivial single-file reads, quick direct answers, and tiny one-shot edits yourself instead of delegating. " +
-				"If the launch is non-blocking, move on and wait for the later steer result; do not fabricate unfinished child results, and use subagent_wait or subagent_join only when the outputs are real dependencies.",
+				"If the launch is non-blocking, do not fabricate unfinished child results or perform overlapping work in the same turn: launch more independent subagents, use subagent_wait or subagent_join only when the outputs are real dependencies, otherwise end your response and wait for the later steer result. On the user's next message, normal parent-side tool work resumes; suggest \"continue\" as a shortcut when that helps.",
 			parameters: SubagentParams,
 
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -2826,6 +2950,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					wireSteerBack(running, running.completionPromise);
 				}
 
+				if (!running.blocking) markDetachedLaunchBoundary(running);
 				return getLaunchedSubagentResult(running, signal);
 			},
 

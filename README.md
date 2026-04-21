@@ -21,7 +21,7 @@ pi install git:github.com/edxeth/pi-subagents
 ## What it gives pi
 
 - named subagents instead of ad-hoc prompt blobs
-- detached async execution by default
+- detached async execution by default, with same-turn coordinator-only guarding
 - true blocking execution when you actually need sequential behavior
 - interactive foreground children and headless background children
 - explicit `wait`, `join`, and `detach` semantics
@@ -165,7 +165,11 @@ Use this for scouts, reviewers, analyzers, and other autonomous workers that do 
 
 ### Detached, awaited, joined, blocking
 
-Detached is the default. The parent keeps working and the result comes back later.
+Detached is the default. The child runs and the result comes back later.
+
+There is one important runtime guard: after a detached launch, the parent's **current turn** becomes coordinator-only. In that same turn, the parent should launch more independent subagents, use `subagent_wait` / `subagent_join` when the child result is a real dependency, or end the response. It should **not** use direct file or shell tools to redo overlapping work itself.
+
+On the next user message, normal parent-side tool work resumes even if detached children are still running. If you want a lightweight shorthand, replying with `continue` is enough to wake the parent back up for ordinary work.
 
 Session seeding defaults to `standalone`, but agents can choose `session-mode: lineage-only` or `session-mode: fork`. An explicit tool-call `fork: true` still forces fork mode for that specific launch.
 
