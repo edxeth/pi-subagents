@@ -55,6 +55,7 @@ import {
   getAmbientCatalogEntriesForTest,
   getCompletedSubagentResultForTest,
   getEffectiveAgentDefinitionsForTest,
+  getExtensionLaunchArgsForTest,
   getSubagentCatalogSignatureForTest,
   renderSubagentCatalogReminderForTest,
   getLaunchedSubagentResultForTest,
@@ -63,6 +64,7 @@ import {
   getSubagentAgentOverrideErrorForTest,
   joinSubagentsForTest,
   loadAgentDefaults,
+  resolveSubagentExtensionsForTest,
   resolveSubagentNoContextFilesForTest,
   renderSubagentWidgetForTest,
   resetSubagentStateForTest,
@@ -137,6 +139,7 @@ function loadAgentDefaultsForTest(agentName: string, cwdHint?: string | null) {
     };
     const systemPromptRaw = get("system-prompt");
     const noContextFilesRaw = get("no-context-files");
+    const extensionsRaw = get("extensions");
     const modeRaw = get("mode");
     return {
       systemPromptMode:
@@ -145,6 +148,7 @@ function loadAgentDefaultsForTest(agentName: string, cwdHint?: string | null) {
           : undefined,
       cwd: get("cwd"),
       cwdBase,
+      extensions: extensionsRaw,
       noContextFiles:
         noContextFilesRaw === "true"
           ? true
@@ -939,6 +943,40 @@ describe("subagents/index.ts helpers", () => {
     const defaults = loadAgentDefaults("tester");
     assert.equal(defaults?.noContextFiles, undefined);
     assert.equal(resolveSubagentNoContextFilesForTest(defaults), false);
+  });
+
+  it("reads extensions from extensions frontmatter", () => {
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(
+      join(agentsDir, "tester.md"),
+      `---\nname: tester\nextensions: ./extensions/caveman.ts, npm:@foo/bar, https://example.com/ext.ts\n---\n\nYou are the tester.`,
+    );
+    process.env.PI_CODING_AGENT_DIR = configDir;
+
+    const defs = loadAgentDefaults("tester");
+    assert.equal(defs?.extensions, "./extensions/caveman.ts, npm:@foo/bar, https://example.com/ext.ts");
+    assert.deepEqual(resolveSubagentExtensionsForTest(defs), [
+      join(configDir, "extensions", "caveman.ts"),
+      "npm:@foo/bar",
+      "https://example.com/ext.ts",
+    ]);
+    assert.deepEqual(
+      getExtensionLaunchArgsForTest(resolveSubagentExtensionsForTest(defs), "/tmp/subagent-done.ts"),
+      [
+        "--no-extensions",
+        "-e",
+        "/tmp/subagent-done.ts",
+        "-e",
+        join(configDir, "extensions", "caveman.ts"),
+        "-e",
+        "npm:@foo/bar",
+        "-e",
+        "https://example.com/ext.ts",
+      ],
+    );
   });
 
   it("reads skills from skills frontmatter only", () => {

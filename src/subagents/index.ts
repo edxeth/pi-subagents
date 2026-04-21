@@ -5,7 +5,7 @@ import type {
 import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { Box, Text } from "@mariozechner/pi-tui";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
 	readdirSync,
 	statSync,
@@ -186,6 +186,7 @@ interface AgentDefaults {
 	model?: string;
 	tools?: string;
 	skills?: string;
+	extensions?: string;
 	thinking?: string;
 	denyTools?: string;
 	spawning?: boolean;
@@ -277,6 +278,7 @@ function parseAgentDefinition(
 	const noContextFilesRaw = get("no-context-files");
 	const timeoutRaw = get("timeout");
 	const systemPromptRaw = get("system-prompt");
+	const extensionsRaw = get("extensions");
 	const body = content.replace(/^---\n[\s\S]*?\n---\n*/, "").trim();
 	return {
 		name: get("name") ?? basename(path, ".md"),
@@ -287,6 +289,7 @@ function parseAgentDefinition(
 		model: get("model"),
 		tools: get("tools"),
 		skills: get("skills"),
+		extensions: extensionsRaw,
 		thinking: get("thinking"),
 		denyTools: get("deny-tools"),
 		spawning: spawningRaw != null ? spawningRaw === "true" : undefined,
@@ -877,6 +880,35 @@ function resolveSubagentNoContextFiles(agentDefs: AgentDefaults | null): boolean
 
 export function resolveSubagentNoContextFilesForTest(agentDefs: AgentDefaults | null) {
 	return resolveSubagentNoContextFiles(agentDefs);
+}
+
+function isSchemeLikePath(value: string): boolean {
+	return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value) && !/^[a-zA-Z]:[\\/]/.test(value);
+}
+
+function resolveSubagentExtensionSource(source: string, baseDir: string): string {
+	const trimmed = source.trim();
+	if (!trimmed) return trimmed;
+	if (isSchemeLikePath(trimmed)) return trimmed;
+	if (trimmed === "~") return homedir();
+	if (trimmed.startsWith("~/")) return join(homedir(), trimmed.slice(2));
+	if (trimmed.startsWith("~\\")) return join(homedir(), trimmed.slice(2));
+	return resolve(baseDir, trimmed);
+}
+
+function resolveSubagentExtensions(agentDefs: AgentDefaults | null): string[] | undefined {
+	if (!agentDefs?.extensions) return undefined;
+	const baseDir = agentDefs.cwdBase ?? process.cwd();
+	const resolved = agentDefs.extensions
+		.split(",")
+		.map((source) => source.trim())
+		.filter(Boolean)
+		.map((source) => resolveSubagentExtensionSource(source, baseDir));
+	return resolved.length > 0 ? [...new Set(resolved)] : [];
+}
+
+export function resolveSubagentExtensionsForTest(agentDefs: AgentDefaults | null) {
+	return resolveSubagentExtensions(agentDefs);
 }
 
 function enforceAgentFrontmatter(
@@ -1771,6 +1803,7 @@ interface PreparedSubagentLaunch {
 	runtimePaths: ResolvedSubagentRuntimePaths;
 	subagentSessionFile: string;
 	denySet: Set<string>;
+	effectiveExtensions?: string[];
 	identity: string;
 	identityInSystemPrompt: boolean;
 }
@@ -1801,6 +1834,7 @@ function prepareSubagentLaunch(
 	);
 	const subagentSessionFile = generateSubagentSessionFile(runtimePaths.sessionDir);
 	const denySet = resolveDenyTools(agentDefs);
+	const effectiveExtensions = resolveSubagentExtensions(agentDefs);
 	const identity = buildIdentityBlock(agentDefs, params.systemPrompt);
 	const identityInSystemPrompt = !!(agentDefs?.systemPromptMode && identity);
 
@@ -1815,6 +1849,7 @@ function prepareSubagentLaunch(
 		runtimePaths,
 		subagentSessionFile,
 		denySet,
+		effectiveExtensions,
 		identity,
 		identityInSystemPrompt,
 	};
@@ -1839,6 +1874,34 @@ function getPreparedBuiltinTools(prepared: PreparedSubagentLaunch): string[] {
 	return getBuiltinTools(prepared.effectiveTools);
 }
 
+function parseSubagentExtensionList(raw: string | undefined): string[] | undefined {
+	if (raw == null) return undefined;
+	return raw
+		.split(",")
+		.map((source) => source.trim())
+		.filter(Boolean);
+}
+
+function getExtensionLaunchArgs(extensionSpecs: string[] | undefined, mandatoryExtensionPath: string): string[] {
+	const args: string[] = [];
+	if (extensionSpecs !== undefined) {
+		args.push("--no-extensions");
+	}
+	args.push("-e", mandatoryExtensionPath);
+	for (const extension of extensionSpecs ?? []) {
+		args.push("-e", extension);
+	}
+	return args;
+}
+
+export function getExtensionLaunchArgsForTest(extensionSpecs: string[] | undefined, mandatoryExtensionPath: string): string[] {
+	return getExtensionLaunchArgs(extensionSpecs, mandatoryExtensionPath);
+}
+
+function getPreparedExtensionLaunchArgs(prepared: PreparedSubagentLaunch, mandatoryExtensionPath: string): string[] {
+	return getExtensionLaunchArgs(prepared.effectiveExtensions, mandatoryExtensionPath);
+}
+
 function getPreparedRoleBlock(prepared: PreparedSubagentLaunch): string {
 	return prepared.identity && !prepared.identityInSystemPrompt
 		? `\n\n${prepared.identity}`
@@ -1857,6 +1920,9 @@ function getBaseSubagentEnvVars(
 		envVars.PI_CODING_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
 	}
 	if (prepared.denySet.size > 0) envVars.PI_DENY_TOOLS = [...prepared.denySet].join(",");
+	if (prepared.effectiveExtensions !== undefined) {
+		envVars.PI_SUBAGENT_EXTENSIONS = prepared.effectiveExtensions.join(",");
+	}
 	envVars.PI_SUBAGENT_NAME = params.name;
 	if (params.agent) envVars.PI_SUBAGENT_AGENT = params.agent;
 	envVars.PI_ARTIFACT_PROJECT_ROOT = resolveArtifactProjectRoot(ctx.cwd);
@@ -1885,7 +1951,7 @@ function launchBackgroundSubagent(
 		? params.task
 		: `${roleBlock}\n\nComplete your task autonomously.\n\n${params.task}\n\nYour FINAL assistant message should summarize what you accomplished.`;
 
-	const args: string[] = ["-p", "--session", prepared.subagentSessionFile, "-e", subagentDonePath];
+	const args: string[] = ["-p", "--session", prepared.subagentSessionFile, ...getPreparedExtensionLaunchArgs(prepared, subagentDonePath)];
 	if (params.fork) {
 		createForkSessionFile(
 			prepared.sessionFile,
@@ -2140,7 +2206,9 @@ async function launchSubagent(
 		dirname(new URL(import.meta.url).pathname),
 		"subagent-done.ts",
 	);
-	parts.push("-e", shellEscape(subagentDonePath));
+	for (const arg of getPreparedExtensionLaunchArgs(prepared, subagentDonePath)) {
+		parts.push(shellEscape(arg));
+	}
 
 	const model = getPreparedModel(prepared);
 	if (model) {
@@ -3148,7 +3216,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					dirname(new URL(import.meta.url).pathname),
 					"subagent-done.ts",
 				);
-				parts.push("-e", shellEscape(subagentDonePath));
+				for (const arg of getExtensionLaunchArgs(parseSubagentExtensionList(process.env.PI_SUBAGENT_EXTENSIONS), subagentDonePath)) {
+					parts.push(shellEscape(arg));
+				}
 
 				let cleanupMsgFile: string | undefined;
 				if (task) {
@@ -3164,6 +3234,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				}
 				if (process.env.PI_DENY_TOOLS) {
 					resumeEnvParts.push(`PI_DENY_TOOLS=${shellEscape(process.env.PI_DENY_TOOLS)}`);
+				}
+				if (process.env.PI_SUBAGENT_EXTENSIONS) {
+					resumeEnvParts.push(`PI_SUBAGENT_EXTENSIONS=${shellEscape(process.env.PI_SUBAGENT_EXTENSIONS)}`);
 				}
 				resumeEnvParts.push(`PI_SUBAGENT_NAME=${shellEscape(name)}`);
 				resumeEnvParts.push(`PI_SUBAGENT_SESSION=${shellEscape(sessionFile)}`);

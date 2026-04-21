@@ -17,7 +17,8 @@
 		"test:e2e-live": "node scripts/test-e2e-live.mjs",
 		"test:e2e-live-blocking": "node scripts/test-e2e-live-blocking.mjs",
 		"test:e2e-live-mix-blocking": "node scripts/test-e2e-live-mix-blocking.mjs",
-		"test:e2e-live-deny-tools": "node scripts/test-e2e-live-deny-tools.mjs"
+		"test:e2e-live-deny-tools": "node scripts/test-e2e-live-deny-tools.mjs",
+		"test:e2e-live-extensions": "node scripts/test-e2e-live-extensions.mjs"
 	},
 	"peerDependencies": {
 		"@mariozechner/pi-coding-agent": "*",

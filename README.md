@@ -80,6 +80,7 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `thinking` | model default | Sets pi thinking level | Raise it for scouts/reviewers, lower it for cheap utility agents |
 | `tools` | session default | Built-in pi tools only: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` | Lock the agent down to only the tools it actually needs |
 | `skills` | unset | Auto-loads named skills | Use when an agent always needs the same external guidance |
+| `extensions` | unset | Comma-separated extension allowlist for child launch; if unset, child loads all extensions | Use to keep child agents off extensions |
 | `system-prompt` | task-body routing | `append` uses `--append-system-prompt`; `replace` uses `--system-prompt` | Use `replace` for hard role isolation, `append` when you want to preserve more surrounding context |
 | `spawning` | `true` | Allows or denies subagent-spawning tools | Set `false` for workers that should do the job themselves |
 | `deny-tools` | unset | Denies specific child-session tools by name | Use for surgical restrictions without rewriting the whole tool set |
@@ -91,13 +92,46 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `fork` | `false` | Gives the child a fork of the parent session by default | Use when the child needs the full conversation branch, not just the task |
 | `timeout` | unset | Background timeout in seconds | Use only for background agents that should never run forever |
 
+#### How `extensions` works
+
+You only need to define `extensions` for agents that should be restricted.
+If an agent does not set `extensions`, the child session behaves exactly as before and loads all extensions available to that child environment.
+
+When you do set `extensions`, treat it as a comma-separated allowlist of normal `pi -e` extension sources.
+The child session starts with `--no-extensions` and then adds only the listed sources back, plus the internal `subagent-done` helper that this package loads automatically.
+You do **not** need to list `subagent-done` yourself.
+
+Use local paths for local extensions:
+
+```md
+---
+name: reviewer
+extensions: .pi/extensions/my-safe-ext, ~/.pi/agent/extensions/other-ext
+---
+```
+
+Use source prefixes for package or remote sources:
+
+```md
+---
+name: reviewer
+extensions: npm:@foo/bar, git:github.com/user/repo
+---
+```
+
+Important details:
+
+- Local paths do not need `npm:` or `git:` prefixes.
+- Package and remote sources should keep their normal `npm:`, `git:`, `https:`, or `ssh:` prefixes.
+- Bare names such as `subagents` are treated as paths, not package lookups. If you mean an installed or remote package, use its full source string.
+
 ### Practical presets
 
 - **Scout / reviewer / analyzer**: `mode: background`, `auto-exit: true`, usually `spawning: false`
 - **Interactive specialist**: `mode: interactive`, usually no `auto-exit`
 - **Sequential gatekeeper**: `blocking: true`
 - **Monorepo role agent**: `cwd: ./packages/...`
-- **Locked-down worker**: narrow `tools`, `spawning: false`, maybe `deny-tools`
+- **Locked-down worker**: narrow `tools`, `spawning: false`, maybe `deny-tools`, maybe `extensions`
 
 If you want a concrete example of the style this package is built for, look at this scout agent:
 
@@ -209,6 +243,7 @@ These are the ones worth knowing.
 These are normally set by the extension itself, but they matter if you are reading the codebase or debugging behavior:
 
 - `PI_DENY_TOOLS`
+- `PI_SUBAGENT_EXTENSIONS`
 - `PI_SUBAGENT_NAME`
 - `PI_SUBAGENT_AGENT`
 - `PI_SUBAGENT_SESSION`
@@ -242,6 +277,7 @@ PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:e2e-live
 PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:e2e-live-blocking
 PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:e2e-live-mix-blocking
 npm run test:e2e-live-deny-tools
+npm run test:e2e-live-extensions
 ```
 
 The live tests are intentionally gated so they do not spray terminal windows all over your machine by accident.
