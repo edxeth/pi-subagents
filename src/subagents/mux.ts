@@ -141,27 +141,31 @@ function zellijEnv(surface?: string): NodeJS.ProcessEnv {
   return env;
 }
 
-function waitForFile(path: string, timeoutMs = 5000): string {
-  const sleeper = new Int32Array(new SharedArrayBuffer(4));
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (existsSync(path)) {
-      return readFileSync(path, "utf8").trim();
-    }
-    Atomics.wait(sleeper, 0, 0, 20);
-  }
-  throw new Error(`Timed out waiting for zellij pane id file: ${path}`);
+const ZELLIJ_PANE_SCOPED_ACTIONS = new Set([
+  "close-pane",
+  "dump-screen",
+  "move-pane",
+  "rename-pane",
+  "write",
+  "write-chars",
+]);
+
+function zellijActionArgs(args: string[], surface?: string): string[] {
+  if (!surface || args.includes("--pane-id")) return args;
+  const [action] = args;
+  if (!action || !ZELLIJ_PANE_SCOPED_ACTIONS.has(action)) return args;
+  return [action, "--pane-id", zellijPaneId(surface), ...args.slice(1)];
 }
 
 function zellijActionSync(args: string[], surface?: string): string {
-  return execFileSync("zellij", ["action", ...args], {
+  return execFileSync("zellij", ["action", ...zellijActionArgs(args, surface)], {
     encoding: "utf8",
     env: zellijEnv(surface),
   });
 }
 
 async function zellijActionAsync(args: string[], surface?: string): Promise<string> {
-  const { stdout } = await execFileAsync("zellij", ["action", ...args], {
+  const { stdout } = await execFileAsync("zellij", ["action", ...zellijActionArgs(args, surface)], {
     encoding: "utf8",
     env: zellijEnv(surface),
   });
@@ -183,7 +187,11 @@ export function createSurface(name: string): string {
     cmuxSubagentPane = null;
   }
 
-  const surface = createSurfaceSplit(name, "right");
+  const surface = createSurfaceSplit(
+    name,
+    "right",
+    backend === "tmux" ? process.env.TMUX_PANE : undefined,
+  );
 
   if (backend === "cmux") {
     try {
@@ -288,30 +296,20 @@ export function createSurfaceSplit(
   }
 
   const directionArg = direction === "left" || direction === "right" ? "right" : "down";
-  const tokenPath = join(
-    tmpdir(),
-    `pi-subagent-zellij-pane-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
-  );
   const args = ["new-pane", "--direction", directionArg, "--name", name, "--cwd", process.cwd()];
 
+  let paneOut = "";
   try {
-    zellijActionSync(args, fromSurface);
+    paneOut = zellijActionSync(args, fromSurface);
   } catch {
     if (!fromSurface) throw new Error("Failed to create zellij pane");
-    zellijActionSync(args);
+    paneOut = zellijActionSync(args);
   }
 
-  const captureIdCmd = `echo "$ZELLIJ_PANE_ID" > ${shellEscape(tokenPath)}`;
-  zellijActionSync(["write-chars", captureIdCmd]);
-  zellijActionSync(["write", "13"]);
-
-  const paneId = waitForFile(tokenPath);
-  try {
-    rmSync(tokenPath, { force: true });
-  } catch {}
-
+  const paneIdMatch = paneOut.match(/(?:terminal_)?(\d+)/);
+  const paneId = paneIdMatch?.[1] ?? "";
   if (!paneId || !/^\d+$/.test(paneId)) {
-    throw new Error(`Unexpected zellij pane id: ${paneId || "(empty)"}`);
+    throw new Error(`Unexpected zellij pane id: ${paneOut.trim() || "(empty)"}`);
   }
 
   const surface = `pane:${paneId}`;
@@ -360,6 +358,12 @@ export function renameCurrentTab(title: string): void {
     if (paneId) args.push("--pane-id", paneId);
     args.push(title);
     execFileSync("wezterm", args, { encoding: "utf8" });
+    return;
+  }
+
+  const paneId = process.env.ZELLIJ_PANE_ID;
+  if (paneId) {
+    zellijActionSync(["rename-pane", title], `pane:${paneId}`);
     return;
   }
 

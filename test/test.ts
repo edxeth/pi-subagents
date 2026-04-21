@@ -51,11 +51,13 @@ import subagentDoneExtension, {
   shouldRegisterSubagentDone,
 } from "../src/subagents/subagent-done.ts";
 import {
+  buildPiPromptArgsForTest,
   detachSubagentForTest,
   getAmbientCatalogEntriesForTest,
   getCompletedSubagentResultForTest,
   getEffectiveAgentDefinitionsForTest,
   getExtensionLaunchArgsForTest,
+  getShellReadyDelayMs,
   getSubagentCatalogSignatureForTest,
   renderSubagentCatalogReminderForTest,
   getLaunchedSubagentResultForTest,
@@ -64,6 +66,7 @@ import {
   getSubagentAgentOverrideErrorForTest,
   joinSubagentsForTest,
   loadAgentDefaults,
+  resolveEffectiveSessionModeForTest,
   resolveSubagentExtensionsForTest,
   resolveSubagentNoContextFilesForTest,
   renderSubagentWidgetForTest,
@@ -994,6 +997,31 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(defs?.skills, "pua");
   });
 
+  it("parses session-mode frontmatter and lets fork override it per launch", () => {
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+
+    writeFileSync(
+      join(agentsDir, "tester.md"),
+      `---\nname: tester\nsession-mode: lineage-only\n---\n\nYou are the tester.`,
+    );
+
+    const defs = loadAgentDefaults("tester");
+    assert.equal(defs?.sessionMode, "lineage-only");
+    assert.equal(resolveEffectiveSessionModeForTest({ agent: "tester" }, defs), "lineage-only");
+    assert.equal(resolveEffectiveSessionModeForTest({ agent: "tester", fork: true }, defs), "fork");
+
+    writeFileSync(
+      join(agentsDir, "compat.md"),
+      `---\nname: compat\nfork: true\n---\n\nCompatibility body.`,
+    );
+    const compat = loadAgentDefaults("compat");
+    assert.equal(compat?.sessionMode, "fork");
+  });
+
   it("skips disabled agents and falls back to the next available definition", () => {
     const dir = createTestDir();
     const configDir = join(dir, "agent-root");
@@ -1478,7 +1506,7 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(unknown?.details.agent, "does-not-exist");
   });
 
-  it("rejects all frontmatter-governed call-time overrides for named agents", () => {
+  it("rejects frontmatter-governed call-time overrides for named agents except fork", () => {
     const defs = {
       path: "/tmp/reviewer.md",
       mode: "interactive" as const,
@@ -1496,7 +1524,6 @@ describe("subagents/index.ts helpers", () => {
         skills: "debugger",
         tools: "bash",
         cwd: "packages/worker",
-        fork: true,
       },
       defs,
     );
@@ -1509,7 +1536,6 @@ describe("subagents/index.ts helpers", () => {
       "tools",
       "cwd",
       "background",
-      "fork",
       "blocking",
     ]);
     assert.match(override?.content[0].text ?? "", /named agent "reviewer" rejects call-time overrides/);
@@ -1517,6 +1543,22 @@ describe("subagents/index.ts helpers", () => {
     assert.match(override?.content[0].text ?? "", /cwd: \.\/agents\/reviewer/);
     assert.match(override?.content[0].text ?? "", /mode: interactive/);
     assert.match(override?.content[0].text ?? "", /blocking: false/);
+  });
+
+  it("allows fork as an explicit launch-time session override", () => {
+    const defs = {
+      path: "/tmp/reviewer.md",
+      mode: "interactive" as const,
+      blocking: false,
+      sessionMode: "lineage-only" as const,
+    };
+
+    assert.equal(
+      getSubagentAgentOverrideErrorForTest({ agent: "reviewer", fork: true }, defs),
+      null,
+    );
+    assert.equal(resolveEffectiveSessionModeForTest({ agent: "reviewer" }, defs), "lineage-only");
+    assert.equal(resolveEffectiveSessionModeForTest({ agent: "reviewer", fork: true }, defs), "fork");
   });
 
   it("still resolves blocking from named-agent frontmatter", () => {
@@ -2770,6 +2812,61 @@ describe("subagents/index.ts helpers", () => {
   });
 });
 
+describe("launch helpers", () => {
+  it("uses a configurable shell-ready delay", () => {
+    delete process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS;
+    assert.equal(getShellReadyDelayMs(), 500);
+
+    process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS = "2500";
+    assert.equal(getShellReadyDelayMs(), 2500);
+
+    process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS = "nope";
+    assert.equal(getShellReadyDelayMs(), 500);
+  });
+
+  it("inserts a separator before skill prompts for artifact-backed launches", () => {
+    assert.deepEqual(
+      buildPiPromptArgsForTest(["debugger", "pua"], "@/tmp/task.md", false),
+      ["", "/skill:debugger", "/skill:pua", "@/tmp/task.md"],
+    );
+    assert.deepEqual(
+      buildPiPromptArgsForTest(["debugger"], "do work", true),
+      ["/skill:debugger", "do work"],
+    );
+  });
+
+  it("registers set_tab_title only when explicitly enabled", () => {
+    const tools = new Map<string, any>();
+    delete process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE;
+
+    subagentsExtension({
+      on() {},
+      registerCommand() {},
+      registerMessageRenderer() {},
+      sendMessage() {},
+      registerTool(definition: any) {
+        tools.set(definition.name, definition);
+        return definition;
+      },
+    } as any);
+    assert.equal(tools.has("set_tab_title"), false);
+
+    process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE = "1";
+    tools.clear();
+    subagentsExtension({
+      on() {},
+      registerCommand() {},
+      registerMessageRenderer() {},
+      sendMessage() {},
+      registerTool(definition: any) {
+        tools.set(definition.name, definition);
+        return definition;
+      },
+    } as any);
+    assert.equal(tools.has("set_tab_title"), true);
+  });
+});
+
 describe("mux.ts", () => {
   describe("shellEscape", () => {
     it("wraps in single quotes", () => {
@@ -3198,19 +3295,15 @@ fi
 printf '%s | pane=%s\n' "$*" "\${ZELLIJ_PANE_ID:-}" >> "$FAKE_ZELLIJ_LOG"
 [ "$1" = "action" ] || exit 0
 action="$2"
-if [ "$action" = "write-chars" ]; then
-  text="$3"
-  path=""
-  case "$text" in
-    *"> "*)
-      path=$(printf '%s' "$text" | cut -d"'" -f2)
-      ;;
-  esac
-  if [ -n "$path" ]; then
-    printf '%s' "\${FAKE_ZELLIJ_PANE_ID:-7}" > "$path"
+if [ "$action" = "new-pane" ]; then
+  printf 'terminal_%s\n' "\${FAKE_ZELLIJ_PANE_ID:-7}"
+elif [ "$action" = "write-chars" ]; then
+  if [ "$3" = "--pane-id" ]; then
+    text="$5"
   else
-    printf '%s' "$text" > "$FAKE_ZELLIJ_SCREEN"
+    text="$3"
   fi
+  printf '%s' "$text" > "$FAKE_ZELLIJ_SCREEN"
 elif [ "$action" = "dump-screen" ]; then
   cat "$FAKE_ZELLIJ_SCREEN"
 fi
@@ -3223,6 +3316,7 @@ fi
       process.env.FAKE_ZELLIJ_LOG = logFile;
       process.env.FAKE_ZELLIJ_SCREEN = screenFile;
       process.env.FAKE_ZELLIJ_PANE_ID = "7";
+      process.env.ZELLIJ_PANE_ID = "3";
 
       assert.equal(isZellijAvailable(), true);
       const surface = createSurfaceSplit("Fake Zellij", "up", "pane:3");
@@ -3236,11 +3330,14 @@ fi
 
       const log = readFileSync(logFile, "utf8");
       assert.match(log, /new-pane/);
-      assert.match(log, /move-pane/);
-      assert.match(log, /rename-pane/);
-      assert.match(log, /rename-tab/);
-      assert.match(log, /dump-screen/);
-      assert.match(log, /close-pane/);
+      assert.match(log, /--pane-id 3/);
+      assert.match(log, /move-pane --pane-id 7/);
+      assert.match(log, /rename-pane --pane-id 7/);
+      assert.match(log, /rename-pane --pane-id 3 Zellij Tab/);
+      assert.doesNotMatch(log, /write-chars.*echo \"\$ZELLIJ_PANE_ID\"/);
+      assert.doesNotMatch(log, /rename-tab/);
+      assert.match(log, /dump-screen --pane-id 7/);
+      assert.match(log, /close-pane --pane-id 7/);
     });
   });
 });

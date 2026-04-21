@@ -102,7 +102,7 @@ const SubagentParams = Type.Object({
 	fork: Type.Optional(
 		Type.Boolean({
 			description:
-				"Fork the current session. Ignored when agent is selected; frontmatter wins.",
+				"Force a full-context fork for this spawn. When present, it overrides the agent default session seeding mode.",
 		}),
 	),
 	background: Type.Optional(
@@ -197,6 +197,7 @@ interface AgentDefaults {
 	path?: string;
 	body?: string;
 	mode?: "interactive" | "background";
+	sessionMode?: "standalone" | "lineage-only" | "fork";
 	fork?: boolean;
 	blocking?: boolean;
 	noContextFiles?: boolean;
@@ -273,6 +274,7 @@ function parseAgentDefinition(
 	const spawningRaw = get("spawning");
 	const autoExitRaw = get("auto-exit");
 	const modeRaw = get("mode");
+	const sessionModeRaw = get("session-mode");
 	const forkRaw = get("fork");
 	const blockingRaw = get("blocking");
 	const noContextFilesRaw = get("no-context-files");
@@ -301,6 +303,14 @@ function parseAgentDefinition(
 		cwd: get("cwd"),
 		cwdBase,
 		body: body || undefined,
+		sessionMode:
+			sessionModeRaw === "standalone" ||
+			sessionModeRaw === "lineage-only" ||
+			sessionModeRaw === "fork"
+				? sessionModeRaw
+				: forkRaw === "true"
+					? "fork"
+					: undefined,
 		fork: forkRaw != null ? forkRaw === "true" : undefined,
 		blocking: blockingRaw != null ? blockingRaw === "true" : undefined,
 		noContextFiles: noContextFilesRaw != null ? noContextFilesRaw === "true" : undefined,
@@ -405,6 +415,16 @@ function formatElapsed(seconds: number): string {
 	const m = Math.floor(seconds / 60);
 	const s = seconds % 60;
 	return `${m}m ${s}s`;
+}
+
+export function getShellReadyDelayMs(): number {
+	const raw = process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS?.trim();
+	const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : 500;
+}
+
+function isSetTabTitleToolEnabled(): boolean {
+	return process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE === "1";
 }
 
 export function getTerminalAssistantSummaryForTest(
@@ -520,6 +540,32 @@ function clearSubagentShutdownTimer(running: RunningSubagent): void {
 }
 
 const widgetManager = new SubagentWidgetManager(() => runningSubagents.values());
+const WIDGET_MANAGER_KEY = Symbol.for("pi-subagents/widget-manager");
+const MODULE_ABORT_KEY = Symbol.for("pi-subagents/poll-abort-controller");
+
+function initializeModuleReloadState(): AbortController {
+	const previousWidgetManager = (globalThis as Record<PropertyKey, unknown>)[WIDGET_MANAGER_KEY] as
+		| SubagentWidgetManager
+		| undefined;
+	previousWidgetManager?.reset();
+
+	const previousAbortController = (globalThis as Record<PropertyKey, unknown>)[MODULE_ABORT_KEY] as
+		| AbortController
+		| undefined;
+	previousAbortController?.abort();
+
+	const controller = new AbortController();
+	(globalThis as Record<PropertyKey, unknown>)[WIDGET_MANAGER_KEY] = widgetManager;
+	(globalThis as Record<PropertyKey, unknown>)[MODULE_ABORT_KEY] = controller;
+	return controller;
+}
+
+const moduleAbortController = initializeModuleReloadState();
+
+function getModuleAbortSignal(): AbortSignal {
+	return moduleAbortController.signal;
+}
+
 let lastAmbientCatalogSignature: string | null = null;
 let pendingAmbientCatalogReminder: {
 	signature: string;
@@ -617,6 +663,59 @@ function createSessionHeader(
 		cwd,
 		...(parentSessionFile ? { parentSession: parentSessionFile } : {}),
 	};
+}
+
+type SubagentSessionMode = "standalone" | "lineage-only" | "fork";
+
+function seedSubagentSessionFile(
+	mode: Exclude<SubagentSessionMode, "standalone">,
+	parentSessionFile: string,
+	childSessionFile: string,
+	cwd = process.cwd(),
+): void {
+	if (mode === "fork") {
+		createForkSessionFile(parentSessionFile, childSessionFile, cwd);
+		return;
+	}
+
+	const header = createSessionHeader(cwd, parentSessionFile);
+	mkdirSync(dirname(childSessionFile), { recursive: true });
+	writeFileSync(childSessionFile, JSON.stringify(header) + "\n", "utf8");
+}
+
+function resolveEffectiveSessionMode(
+	params: Partial<SubagentParamsInput>,
+	agentDefs: AgentDefaults | null,
+): SubagentSessionMode {
+	if (params.fork) return "fork";
+	if (agentDefs?.sessionMode) return agentDefs.sessionMode;
+	if (agentDefs?.fork) return "fork";
+	return "standalone";
+}
+
+export function resolveEffectiveSessionModeForTest(
+	params: Partial<SubagentParamsInput>,
+	agentDefs: AgentDefaults | null,
+) {
+	return resolveEffectiveSessionMode(params, agentDefs);
+}
+
+function buildPiPromptArgs(
+	skills: string[],
+	taskArg: string,
+	directTask: boolean,
+): string[] {
+	const skillPrompts = skills.map((skill) => `/skill:${skill}`);
+	const needsSeparator = !directTask && skillPrompts.length > 0;
+	return [...(needsSeparator ? [""] : []), ...skillPrompts, taskArg];
+}
+
+export function buildPiPromptArgsForTest(
+	skills: string[],
+	taskArg: string,
+	directTask: boolean,
+) {
+	return buildPiPromptArgs(skills, taskArg, directTask);
 }
 
 export function createForkSessionFile(
@@ -819,7 +918,6 @@ function getSubagentAgentOverrideError(
 	if (params.tools != null) disallowed.push("tools");
 	if (params.cwd != null) disallowed.push("cwd");
 	if (params.background != null) disallowed.push("background");
-	if (params.fork != null) disallowed.push("fork");
 	if (params.blocking != null) disallowed.push("blocking");
 	if (disallowed.length === 0) return null;
 
@@ -919,7 +1017,7 @@ function enforceAgentFrontmatter(
 		name: params.name,
 		task: params.task,
 		agent: params.agent,
-		fork: agentDefs?.fork,
+		fork: params.fork,
 		blocking: resolveSubagentBlocking(params, agentDefs),
 		parentClosePolicy: params.parentClosePolicy,
 	};
@@ -1947,13 +2045,16 @@ function launchBackgroundSubagent(
 		"subagent-done.ts",
 	);
 	const roleBlock = getPreparedRoleBlock(prepared);
-	const fullTask = params.fork
+	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
+	const directTask = sessionMode === "fork";
+	const fullTask = directTask
 		? params.task
 		: `${roleBlock}\n\nComplete your task autonomously.\n\n${params.task}\n\nYour FINAL assistant message should summarize what you accomplished.`;
 
 	const args: string[] = ["-p", "--session", prepared.subagentSessionFile, ...getPreparedExtensionLaunchArgs(prepared, subagentDonePath)];
-	if (params.fork) {
-		createForkSessionFile(
+	if (sessionMode !== "standalone") {
+		seedSubagentSessionFile(
+			sessionMode,
 			prepared.sessionFile,
 			prepared.subagentSessionFile,
 			prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
@@ -1981,15 +2082,11 @@ function launchBackgroundSubagent(
 	const builtins = getPreparedBuiltinTools(prepared);
 	if (builtins.length > 0) args.push("--tools", builtins.join(","));
 
-	for (const skill of getPreparedSkillList(prepared)) {
-		args.push(`/skill:${skill}`);
-	}
-
-	if (params.fork) {
-		args.push(fullTask);
-	} else {
-		const artifactPath = writeTaskArtifact(params.name, fullTask, ctx);
-		args.push(`@${artifactPath}`);
+	const taskArg = directTask
+		? fullTask
+		: `@${writeTaskArtifact(params.name, fullTask, ctx)}`;
+	for (const promptArg of buildPiPromptArgs(getPreparedSkillList(prepared), taskArg, directTask)) {
+		args.push(promptArg);
 	}
 
 	const envVars = getBaseSubagentEnvVars(prepared, ctx, params);
@@ -2172,9 +2269,11 @@ async function launchSubagent(
 	const surfacePreCreated = !!options?.surface;
 	const surface = options?.surface ?? createSurface(params.name);
 	if (!surfacePreCreated) {
-		await new Promise<void>((resolve) => setTimeout(resolve, 500));
+		await new Promise<void>((resolve) => setTimeout(resolve, getShellReadyDelayMs()));
 	}
 
+	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
+	const directTask = sessionMode === "fork";
 	const agentType = params.agent ?? params.name;
 	const modeHint = prepared.agentDefs?.autoExit
 		? "Complete your task autonomously."
@@ -2182,20 +2281,21 @@ async function launchSubagent(
 	const summaryInstruction = prepared.agentDefs?.autoExit
 		? "Your FINAL assistant message should summarize what you accomplished."
 		: "Your FINAL assistant message (before calling subagent_done or before the user exits) should summarize what you accomplished.";
-	const tabTitleInstruction = prepared.denySet.has("set_tab_title")
+	const tabTitleInstruction = !isSetTabTitleToolEnabled() || prepared.denySet.has("set_tab_title")
 		? ""
 		: `As your FIRST action, set the tab title using set_tab_title. ` +
 			`The title MUST start with [${agentType}] followed by a short description of your current task. ` +
 			`Example: "[${agentType}] Analyzing auth module". Keep it concise.`;
 	const roleBlock = getPreparedRoleBlock(prepared);
-	const fullTask = params.fork
+	const fullTask = directTask
 		? params.task
 		: `${roleBlock}\n\n${modeHint}\n\n${tabTitleInstruction}\n\n${params.task}\n\n${summaryInstruction}`;
 
 	// Build pi command (shell-escaped for sendCommand)
 	const parts: string[] = ["pi", "--session", shellEscape(prepared.subagentSessionFile)];
-	if (params.fork) {
-		createForkSessionFile(
+	if (sessionMode !== "standalone") {
+		seedSubagentSessionFile(
+			sessionMode,
 			prepared.sessionFile,
 			prepared.subagentSessionFile,
 			prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
@@ -2231,10 +2331,6 @@ async function launchSubagent(
 	if (builtins.length > 0)
 		parts.push("--tools", shellEscape(builtins.join(",")));
 
-	for (const skill of getPreparedSkillList(prepared)) {
-		parts.push(shellEscape(`/skill:${skill}`));
-	}
-
 	// Env vars (shell-escaped for inline prefix)
 	const envVars = getBaseSubagentEnvVars(prepared, ctx, params);
 	if (prepared.agentDefs?.autoExit) envVars.PI_SUBAGENT_AUTO_EXIT = "1";
@@ -2244,11 +2340,11 @@ async function launchSubagent(
 		.map(([key, value]) => `${key}=${shellEscape(value)}`)
 		.join(" ") + " ";
 
-	if (params.fork) {
-		parts.push(shellEscape(fullTask));
-	} else {
-		const artifactPath = writeTaskArtifact(params.name, fullTask, ctx);
-		parts.push(`@${artifactPath}`);
+	const taskArg = directTask
+		? fullTask
+		: `@${writeTaskArtifact(params.name, fullTask, ctx)}`;
+	for (const promptArg of buildPiPromptArgs(getPreparedSkillList(prepared), taskArg, directTask)) {
+		parts.push(shellEscape(promptArg));
 	}
 
 	const cdPrefix = prepared.runtimePaths.effectiveCwd
@@ -2587,6 +2683,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// Clean up on session shutdown
 	pi.on("session_shutdown", (_event, ctx) => {
+		moduleAbortController.abort();
 		widgetManager.reset();
 		shutdownSubagentsForParentExit();
 		if (ctx.hasUI) {
@@ -2708,7 +2805,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					running.abortController = watcherAbort;
 					running.completionPromise = watchBackgroundSubagent(
 						running,
-						watcherAbort.signal,
+						AbortSignal.any([watcherAbort.signal, getModuleAbortSignal()]),
 						agentDefs?.timeout,
 					);
 					startWidgetRefresh();
@@ -2723,7 +2820,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					running.abortController = watcherAbort;
 					running.completionPromise = watchSubagent(
 						running,
-						watcherAbort.signal,
+						AbortSignal.any([watcherAbort.signal, getModuleAbortSignal()]),
 					);
 					startWidgetRefresh();
 					wireSteerBack(running, running.completionPromise);
@@ -3063,7 +3160,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 
 	// ── set_tab_title tool ──
-	if (shouldRegister("set_tab_title"))
+	if (shouldRegister("set_tab_title") && isSetTabTitleToolEnabled())
 		pi.registerTool({
 			name: "set_tab_title",
 			label: "Set Tab Title",
@@ -3209,7 +3306,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 				const entryCountBefore = getEntryCount(sessionFile);
 				const surface = createSurface(name);
-				await new Promise<void>((resolve) => setTimeout(resolve, 500));
+				await new Promise<void>((resolve) => setTimeout(resolve, getShellReadyDelayMs()));
 
 				const parts = ["pi", "--session", shellEscape(sessionFile)];
 				const subagentDonePath = join(
@@ -3268,7 +3365,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const watcherAbort = new AbortController();
 				running.abortController = watcherAbort;
 
-				watchSubagent(running, watcherAbort.signal)
+				watchSubagent(running, AbortSignal.any([watcherAbort.signal, getModuleAbortSignal()]))
 					.then((result) => {
 						const allEntries = getNewEntries(sessionFile, entryCountBefore);
 						const summary =

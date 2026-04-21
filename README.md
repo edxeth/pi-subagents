@@ -79,7 +79,7 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `model` | pi default | Sets the model for that agent | Pin a model when the role needs a specific speed/quality tradeoff |
 | `thinking` | model default | Sets pi thinking level | Raise it for scouts/reviewers, lower it for cheap utility agents |
 | `tools` | session default | Built-in pi tools only: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` | Lock the agent down to only the tools it actually needs |
-| `skills` | unset | Auto-loads named skills | Use when an agent always needs the same external guidance |
+| `skills` | unset | Auto-loads one or more named skills from a comma-separated list | Use when an agent always needs the same external guidance |
 | `extensions` | unset | Comma-separated extension allowlist for child launch; if unset, child loads all extensions | Use to keep child agents off extensions |
 | `system-prompt` | task-body routing | `append` uses `--append-system-prompt`; `replace` uses `--system-prompt` | Use `replace` for hard role isolation, `append` when you want to preserve more surrounding context |
 | `spawning` | `true` | Allows or denies subagent-spawning tools | Set `false` for workers that should do the job themselves |
@@ -89,7 +89,8 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `no-context-files` | `false` | Disables automatic `AGENTS.md` / `CLAUDE.md` discovery for spawned child sessions | Use only when you want a clean child run without project context injection |
 | `cwd` | parent cwd | Default working directory for the child | Use for role directories, monorepo packages, or project-specific specialists |
 | `mode` | `interactive` | `interactive` pane or `background` headless child | Use `background` for autonomous work; keep `interactive` when visibility matters |
-| `fork` | `false` | Gives the child a fork of the parent session by default | Use when the child needs the full conversation branch, not just the task |
+| `session-mode` | `standalone` | Session seeding mode: `standalone`, `lineage-only`, or `fork` | Use `lineage-only` when you want parent/child lineage without inheriting the conversation; use `fork` when the child needs the full branch |
+| `fork` | `false` | Back-compat shorthand for `session-mode: fork` | Keep for older agents; prefer `session-mode` for new ones |
 | `timeout` | unset | Background timeout in seconds | Use only for background agents that should never run forever |
 
 #### How `extensions` works
@@ -166,6 +167,8 @@ Use this for scouts, reviewers, analyzers, and other autonomous workers that do 
 
 Detached is the default. The parent keeps working and the result comes back later.
 
+Session seeding defaults to `standalone`, but agents can choose `session-mode: lineage-only` or `session-mode: fork`. An explicit tool-call `fork: true` still forces fork mode for that specific launch.
+
 If the parent depends on a child result, you can claim ownership of delivery with `subagent_wait` or `subagent_join`.
 
 If a child should gate the parent immediately, use blocking execution.
@@ -235,6 +238,8 @@ These are the ones worth knowing.
 - `PI_CODING_AGENT_DIR` — override the global pi agent config root
 - `PI_SUBAGENT_DISABLE_AMBIENT_AWARENESS` — disable the hidden top-level subagent catalog
 - `PI_ARTIFACT_PROJECT_ROOT` — override artifact root resolution
+- `PI_SUBAGENT_SHELL_READY_DELAY_MS` — override the interactive shell startup delay before sending a child command (default `500`)
+- `PI_SUBAGENT_ENABLE_SET_TAB_TITLE` — opt in to registering the `set_tab_title` tool
 - `PI_SUBAGENT_RENAME_TMUX_WINDOW` — opt in to tmux window renaming
 - `PI_SUBAGENT_RENAME_TMUX_SESSION` — opt in to tmux session renaming
 

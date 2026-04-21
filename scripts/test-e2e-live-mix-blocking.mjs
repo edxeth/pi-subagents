@@ -39,7 +39,7 @@ const prompt = [
   "Use exactly this sequence.",
   'First call subagent with agent: "live-e2e-mix-async-a", name: "Mix Async A", task: "Follow your exact built-in instructions.", and parentClosePolicy: "terminate".',
   'Second call subagent with agent: "live-e2e-mix-async-b", name: "Mix Async B", task: "Follow your exact built-in instructions.", and parentClosePolicy: "terminate".',
-  'Third call subagent with agent: "live-e2e-mix-blocking", name: "Mix Blocking Child", task: "Follow your exact built-in instructions.", blocking: true, and parentClosePolicy: "terminate".',
+  'Third call subagent with agent: "live-e2e-mix-blocking", name: "Mix Blocking Child", task: "Follow your exact built-in instructions.", and parentClosePolicy: "terminate".',
   'Do not do any work that overlaps with Mix Blocking Child until it finishes.',
   'Do not inspect files, do not use any tool except subagent, and do not start any additional subagents.',
   'After the third call returns, reply with exactly "LIVE_E2E_MIX_OK" and nothing else.',
