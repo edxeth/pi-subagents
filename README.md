@@ -177,7 +177,7 @@ Session seeding defaults to `standalone`, but agents can choose `session-mode: l
 
 If the parent depends on a child result, you can claim ownership of delivery with `subagent_wait` or `subagent_join`.
 
-If a child should gate the parent immediately, use blocking execution.
+If a child should gate the parent immediately, use blocking execution. Agent frontmatter can set `blocking: true` to make that agent block by default, and a specific launch can pass `blocking: true` to opt into waiting. Passing `blocking: false` is accepted as a harmless explicit default, but it never disables an agent whose frontmatter already forces blocking.
 
 That does **not** turn the whole system into sequential mode. It only means that specific child is awaited at launch time. Detached siblings keep running.
 

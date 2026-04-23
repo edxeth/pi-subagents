@@ -114,7 +114,7 @@ const SubagentParams = Type.Object({
 	blocking: Type.Optional(
 		Type.Boolean({
 			description:
-				"Block on this child by waiting for completion before the tool returns. Agent frontmatter may force this on or off.",
+				"When true, wait for this launch to finish before returning. Agent frontmatter can also force blocking; passing false never disables a blocking agent.",
 		}),
 	),
 	parentClosePolicy: Type.Optional(
@@ -1007,7 +1007,6 @@ function getSubagentAgentOverrideError(
 	if (params.tools != null) disallowed.push("tools");
 	if (params.cwd != null) disallowed.push("cwd");
 	if (params.background != null) disallowed.push("background");
-	if (params.blocking != null) disallowed.push("blocking");
 	if (disallowed.length === 0) return null;
 
 	const effectiveMode = agentDefs.mode ?? "interactive";
@@ -1050,8 +1049,7 @@ function resolveSubagentBlocking(
 	params: Partial<SubagentParamsInput>,
 	agentDefs: AgentDefaults | null,
 ): boolean {
-	if (agentDefs?.blocking != null) return agentDefs.blocking;
-	return params.blocking ?? false;
+	return params.blocking === true || agentDefs?.blocking === true;
 }
 
 export function resolveSubagentBlockingForTest(
@@ -2822,7 +2820,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						typeof input.cwd === "string" ? input.cwd : undefined,
 					)
 					: null;
-			if (!isCoordinatorOnlyTurnDisabled() && !resolveSubagentBlocking(input, agentDefs)) {
+			const agentError = getSubagentAgentRequirementError(input, agentDefs);
+			const agentOverrideError = getSubagentAgentOverrideError(input, agentDefs);
+			if (
+				!agentError &&
+				!agentOverrideError &&
+				!isCoordinatorOnlyTurnDisabled() &&
+				!resolveSubagentBlocking(input, agentDefs)
+			) {
 				notePendingDetachedLaunch();
 			}
 			return {};
@@ -2855,7 +2860,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			description:
 				"Spawn a named sub-agent from an existing agent definition for specialist or parallelizable work. " +
 				"By default this returns immediately and results arrive later via steer. " +
-				"If blocking is true, or agent frontmatter sets blocking: true, this call waits for the child to finish.",
+				"If blocking is true, or agent frontmatter sets blocking: true, this call waits for the child to finish. Passing blocking false is accepted but never disables a blocking agent.",
 			promptSnippet:
 				"Use subagents for specialist, complex, or parallelizable work when the named-agent catalog suggests a good match. " +
 				"Keep launches explicit, prefer one call per child, and launch independent children in parallel. " +

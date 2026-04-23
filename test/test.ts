@@ -1248,8 +1248,17 @@ describe("subagents/index.ts helpers", () => {
     assert.match(tool.promptSnippet, /PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1/);
   });
 
-  it("blocks same-response parent tools by default after a detached launch and allows opting out", () => {
+  it("blocks same-response parent tools by default after a valid detached launch and allows opting out", () => {
     const prev = process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN;
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+    writeFileSync(
+      join(agentsDir, "scout.md"),
+      `---\nname: scout\nmode: background\nblocking: false\n---\n\nScout body.`,
+    );
 
     const init = () => {
       const handlers = new Map<string, any>();
@@ -1273,7 +1282,7 @@ describe("subagents/index.ts helpers", () => {
         type: "tool_call",
         toolCallId: "call_subagent",
         toolName: "subagent",
-        input: { name: "Child", task: "Do work" },
+        input: { name: "Child", agent: "scout", task: "Do work" },
       });
       const blocked = handlers.get("tool_call")({
         type: "tool_call",
@@ -1299,7 +1308,7 @@ describe("subagents/index.ts helpers", () => {
         type: "tool_call",
         toolCallId: "call_subagent_2",
         toolName: "subagent",
-        input: { name: "Child", task: "Do work" },
+        input: { name: "Child", agent: "scout", task: "Do work" },
       });
       const allowed = handlers.get("tool_call")({
         type: "tool_call",
@@ -1311,6 +1320,48 @@ describe("subagents/index.ts helpers", () => {
     } finally {
       if (prev == null) delete process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN;
       else process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not arm coordinator-only mode for invalid subagent launches", () => {
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+    writeFileSync(
+      join(agentsDir, "scout.md"),
+      `---\nname: scout\nmode: background\n---\n\nScout body.`,
+    );
+
+    const handlers = new Map<string, any>();
+    try {
+      subagentsExtension({
+        on(event: string, handler: any) {
+          handlers.set(event, handler);
+        },
+        registerCommand() {},
+        registerMessageRenderer() {},
+        sendMessage() {},
+        registerTool() {},
+      } as any);
+
+      handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_subagent_invalid",
+        toolName: "subagent",
+        input: { name: "Child", agent: "scout", task: "Do work", model: "override" },
+      });
+      const allowed = handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_find_after_invalid",
+        toolName: "find",
+        input: { pattern: "package.json" },
+      });
+      assert.deepEqual(allowed, {});
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -1604,7 +1655,6 @@ describe("subagents/index.ts helpers", () => {
       "tools",
       "cwd",
       "background",
-      "blocking",
     ]);
     assert.match(override?.content[0].text ?? "", /named agent "reviewer" rejects call-time overrides/);
     assert.match(override?.content[0].text ?? "", /\/tmp\/reviewer\.md/);
@@ -1629,17 +1679,24 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(resolveEffectiveSessionModeForTest({ agent: "reviewer", fork: true }, defs), "fork");
   });
 
-  it("still resolves blocking from named-agent frontmatter", () => {
-    assert.equal(resolveSubagentBlockingForTest({ blocking: true }, { blocking: false }), false);
+  it("allows blocking as parent-side synchronization policy without weakening blocking agents", () => {
+    assert.equal(resolveSubagentBlockingForTest({ blocking: true }, { blocking: false }), true);
     assert.equal(resolveSubagentBlockingForTest({ blocking: false }, { blocking: true }), true);
     assert.equal(resolveSubagentBlockingForTest({ blocking: true }, null), true);
+    assert.equal(resolveSubagentBlockingForTest({}, { blocking: true }), true);
     assert.equal(resolveSubagentBlockingForTest({}, null), false);
 
     const blockingOverride = getSubagentAgentOverrideErrorForTest(
       { agent: "reviewer", blocking: true },
       { path: "/tmp/reviewer.md", mode: "interactive" },
     );
-    assert.equal(blockingOverride?.details.error, "agent_param_conflict");
+    assert.equal(blockingOverride, null);
+
+    const harmlessFalse = getSubagentAgentOverrideErrorForTest(
+      { agent: "reviewer", blocking: false },
+      { path: "/tmp/reviewer.md", mode: "interactive", blocking: false },
+    );
+    assert.equal(harmlessFalse, null);
   });
 
   it("fails fast on named-agent overrides before session checks", async () => {
