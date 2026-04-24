@@ -89,9 +89,22 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `no-context-files` | `false` | Disables automatic `AGENTS.md` / `CLAUDE.md` discovery for spawned child sessions | Use only when you want a clean child run without project context injection |
 | `cwd` | parent cwd | Default working directory for the child | Use for role directories, monorepo packages, or project-specific specialists |
 | `mode` | `interactive` | `interactive` pane or `background` headless child | Use `background` for autonomous work; keep `interactive` when visibility matters |
-| `session-mode` | `standalone` | Session seeding mode: `standalone`, `lineage-only`, or `fork` | Use `lineage-only` when you want parent/child lineage without inheriting the conversation; use `fork` when the child needs the full branch |
+| `session-mode` | `standalone` | Session seeding mode: `standalone`, `lineage-only`, or `fork` | Use `standalone` for a clean unrelated child, `lineage-only` for a clean child that is still recorded as descended from the parent, and `fork` when the child needs the full parent context branch |
 | `fork` | `false` | Back-compat shorthand for `session-mode: fork` | Keep for older agents; prefer `session-mode` for new ones |
 | `timeout` | unset | Background timeout in seconds | Use only for background agents that should never run forever |
+
+#### How `session-mode` works
+
+`session-mode` controls how much of the parent session is seeded into the child.
+From the model's point of view, the main difference is simple: `standalone` and `lineage-only` both start the child without the parent transcript, while `fork` copies the parent context branch into the child.
+
+The difference between `standalone` and `lineage-only` is runtime bookkeeping, not model memory:
+
+- `standalone` starts a clean child session that is not tied to the parent by lineage metadata.
+- `lineage-only` starts the same kind of clean child, but records that it descended from the parent session. Use this when session trees, resume/debugging, artifact attribution, or orchestration history should show where the child came from without paying to copy the conversation.
+- `fork` starts a child with the parent context branch copied in. Use this when the child needs the prior conversation, decisions, or files already discussed by the parent.
+
+In short: `standalone` is a clean unrelated child, `lineage-only` is a clean related child, and `fork` is a related child with inherited context.
 
 #### How `extensions` works
 
