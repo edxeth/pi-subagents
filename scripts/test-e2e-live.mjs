@@ -32,7 +32,7 @@ const sourceConfigDir = envConfigDir && existsSync(join(envConfigDir, "auth.json
   : join(homedir(), ".pi", "agent");
 const tmuxSession = `pi-live-e2e-${process.pid}`;
 const keepTmp = process.env.PI_SUBAGENT_KEEP_E2E_TMP === "1";
-const deadline = Date.now() + 120_000;
+const deadline = Date.now() + 240_000;
 const liveAgentModel = LIVE_TEST_MODEL.split(":")[0];
 const stageOnePrompt = [
   "Use exactly this sequence.",
@@ -50,7 +50,7 @@ for (const name of ["auth.json", "settings.json", "models.json", "mcp.json"]) {
 }
 writeFileSync(
   join(configDir, "agents", "live-e2e-wait.md"),
-  `---\nname: live-e2e-wait\ndescription: Live Ghostty+tmux wait smoke test agent.\nmodel: ${liveAgentModel}\nthinking: high\nauto-exit: true\nmode: interactive\nblocking: false\nspawning: false\ntools: bash\n---\n\nFirst run a bash command that sleeps for 2 seconds.\nThen use write_artifact with name \`live-e2e/child.md\` and content \`LIVE_CHILD_ARTIFACT\`.\nThen reply with exactly \`LIVE_CHILD_OK\`.`,
+  `---\nname: live-e2e-wait\ndescription: Live Ghostty+tmux wait smoke test agent.\nmodel: ${liveAgentModel}\nthinking: high\nauto-exit: true\nmode: interactive\nblocking: false\nspawning: false\ntools: bash\n---\n\nFirst run a bash command exactly \`sleep 90\` with timeout at least 120 seconds.\nThen use write_artifact with name \`live-e2e/child.md\` and content \`LIVE_CHILD_ARTIFACT\`.\nThen reply with exactly \`LIVE_CHILD_OK\`.`,
   "utf8",
 );
 
@@ -229,7 +229,7 @@ try {
     const started = startResult.details ?? {};
     if (!stageTwoSent) {
       const stageTwoPrompt = [
-        `Call subagent_wait with id \"${started.id}\" and timeout 60.`,
+        `Call subagent_wait with id \"${started.id}\" and timeout 120.`,
         'Then call read_artifact with name "live-e2e/child.md".',
         'After both tools return, reply with exactly "LIVE_E2E_PARENT_OK" and nothing else.',
         'Do not call any other tools.',

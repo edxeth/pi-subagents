@@ -59,6 +59,7 @@ import {
   getExtensionLaunchArgsForTest,
   getShellReadyDelayMs,
   getSubagentCatalogSignatureForTest,
+  getSubagentToolAllowlistForTest,
   renderSubagentCatalogReminderForTest,
   getLaunchedSubagentResultForTest,
   getStartedSubagentDetailsForTest,
@@ -561,6 +562,33 @@ describe("subagent-done.ts", () => {
         filterToolNames(["read", "ask_user_question", "read", "write_artifact"], ["ask_user_question"]),
         ["read", "write_artifact"],
       );
+    });
+
+    it("keeps subagent protocol tools available when built-in tools are narrowed", () => {
+      assert.deepEqual(getSubagentToolAllowlistForTest("bash"), [
+        "bash",
+        "caller_ping",
+        "subagent_done",
+        "write_artifact",
+        "read_artifact",
+        "set_tab_title",
+      ]);
+    });
+
+    it("removes denied subagent protocol tools from the launch allowlist", () => {
+      assert.deepEqual(getSubagentToolAllowlistForTest("bash,read", ["write_artifact", "caller_ping"]), [
+        "bash",
+        "read",
+        "subagent_done",
+        "read_artifact",
+        "set_tab_title",
+      ]);
+    });
+
+    it("keeps non-requested built-ins out of narrowed child launch allowlists", () => {
+      assert.deepEqual(getSubagentToolAllowlistForTest("bash").includes("edit"), false);
+      assert.deepEqual(getSubagentToolAllowlistForTest("bash").includes("write"), false);
+      assert.deepEqual(getSubagentToolAllowlistForTest(undefined), []);
     });
 
     it("keeps denied tools out of the active set after registration and later setActiveTools calls", () => {

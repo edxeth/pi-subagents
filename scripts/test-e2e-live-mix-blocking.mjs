@@ -32,17 +32,27 @@ const sourceConfigDir = envConfigDir && existsSync(join(envConfigDir, "auth.json
   : join(homedir(), ".pi", "agent");
 const tmuxSession = `pi-live-mix-${process.pid}`;
 const keepTmp = process.env.PI_SUBAGENT_KEEP_E2E_TMP === "1";
-const deadline = Date.now() + 120_000;
+const deadline = Date.now() + 240_000;
 const liveAgentModel = LIVE_TEST_MODEL.split(":")[0];
+const parentSystemPrompt = [
+  "You are running an automated live test.",
+  "Follow the user-specified tool sequence literally.",
+  "When instructed to reply with an exact marker, your entire assistant message must be only that marker: no preface, no summary, no markdown, no quotes, no extra lines.",
+  "Do not start extra tools or extra subagents beyond the requested sequence.",
+].join(" ");
 const prompt = [
   "The subagent tool is available in this session.",
   "Use exactly this sequence.",
   'First call subagent with agent: "live-e2e-mix-async-a", name: "Mix Async A", task: "Follow your exact built-in instructions.", and parentClosePolicy: "terminate".',
   'Second call subagent with agent: "live-e2e-mix-async-b", name: "Mix Async B", task: "Follow your exact built-in instructions.", and parentClosePolicy: "terminate".',
-  'Third call subagent with agent: "live-e2e-mix-blocking", name: "Mix Blocking Child", task: "Follow your exact built-in instructions.", and parentClosePolicy: "terminate".',
+  'After both tools return, reply with exactly "LIVE_E2E_MIX_STAGE1_OK" and nothing else.',
+  'Do not call any other tools.',
+].join(" ");
+const stageTwoPrompt = [
+  'Call subagent with agent: "live-e2e-mix-blocking", name: "Mix Blocking Child", task: "Follow your exact built-in instructions.", and parentClosePolicy: "terminate".',
   'Do not do any work that overlaps with Mix Blocking Child until it finishes.',
   'Do not inspect files, do not use any tool except subagent, and do not start any additional subagents.',
-  'After the third call returns, reply with exactly "LIVE_E2E_MIX_OK" and nothing else.',
+  'After that tool returns, reply with exactly "LIVE_E2E_MIX_OK" and nothing else.',
 ].join(" ");
 
 mkdirSync(sessionDir, { recursive: true });
@@ -54,17 +64,17 @@ for (const name of ["auth.json", "settings.json", "models.json", "mcp.json"]) {
 }
 writeFileSync(
   join(configDir, "agents", "live-e2e-mix-async-a.md"),
-  `---\nname: live-e2e-mix-async-a\ndescription: Live async mix smoke test agent A.\nmodel: ${liveAgentModel}\nthinking: high\nsystem-prompt: replace\nauto-exit: true\nmode: background\nspawning: false\ntools: bash\n---\n\nFirst run a bash command that sleeps for 30 seconds.\nThen reply with exactly \`LIVE_MIX_ASYNC_A_OK\`.`,
+  `---\nname: live-e2e-mix-async-a\ndescription: Live async mix smoke test agent A.\nmodel: ${liveAgentModel}\nthinking: high\nsystem-prompt: replace\nauto-exit: true\nmode: background\nspawning: false\ntools: bash\n---\n\nFirst run a bash command exactly \`sleep 75\` with timeout at least 90 seconds.\nThen reply with exactly \`LIVE_MIX_ASYNC_A_OK\`.`,
   "utf8",
 );
 writeFileSync(
   join(configDir, "agents", "live-e2e-mix-async-b.md"),
-  `---\nname: live-e2e-mix-async-b\ndescription: Live async mix smoke test agent B.\nmodel: ${liveAgentModel}\nthinking: high\nsystem-prompt: replace\nauto-exit: true\nmode: background\nspawning: false\ntools: bash\n---\n\nFirst run a bash command that sleeps for 30 seconds.\nThen reply with exactly \`LIVE_MIX_ASYNC_B_OK\`.`,
+  `---\nname: live-e2e-mix-async-b\ndescription: Live async mix smoke test agent B.\nmodel: ${liveAgentModel}\nthinking: high\nsystem-prompt: replace\nauto-exit: true\nmode: background\nspawning: false\ntools: bash\n---\n\nFirst run a bash command exactly \`sleep 75\` with timeout at least 90 seconds.\nThen reply with exactly \`LIVE_MIX_ASYNC_B_OK\`.`,
   "utf8",
 );
 writeFileSync(
   join(configDir, "agents", "live-e2e-mix-blocking.md"),
-  `---\nname: live-e2e-mix-blocking\ndescription: Live blocking mix smoke test agent.\nmodel: ${liveAgentModel}\nthinking: high\nsystem-prompt: replace\nauto-exit: true\nmode: interactive\nblocking: true\nspawning: false\ntools: bash\n---\n\nFirst run a bash command that sleeps for 2 seconds.\nThen reply with exactly \`LIVE_MIX_BLOCKING_OK\`.`,
+  `---\nname: live-e2e-mix-blocking\ndescription: Live blocking mix smoke test agent.\nmodel: ${liveAgentModel}\nthinking: high\nsystem-prompt: replace\nauto-exit: true\nmode: interactive\nblocking: true\nspawning: false\ntools: bash\n---\n\nFirst run a bash command exactly \`sleep 2\`. Do not call read_artifact or any other tool.\nThen reply with exactly \`LIVE_MIX_BLOCKING_OK\`.`,
   "utf8",
 );
 
@@ -169,7 +179,7 @@ function getSubagentResults(events) {
 function getParentEvents() {
   for (const file of listJsonlFiles(sessionDir)) {
     const events = parseJsonl(file);
-    if (getUserText(events).includes("LIVE_E2E_MIX_OK")) {
+    if (getUserText(events).includes("LIVE_E2E_MIX_STAGE1_OK")) {
       return { file, events };
     }
   }
@@ -222,6 +232,8 @@ const piCommand = [
   `PI_CODING_AGENT_DIR=${shellQuote(configDir)}`,
   "pi",
   `--model ${LIVE_TEST_MODEL}`,
+  "--append-system-prompt",
+  shellQuote(parentSystemPrompt),
   "--no-extensions",
   "-e ./src/subagents/index.ts",
   "-e ./src/session-artifacts/index.ts",
@@ -261,6 +273,7 @@ const cleanup = installLiveTestCleanup({
 });
 
 let sawBlockingPane = false;
+let stageTwoSent = false;
 let verified = false;
 
 try {
@@ -285,15 +298,13 @@ try {
     const subagentResults = getSubagentResults(parent.events);
     const asyncA = subagentResults.find((message) => message.details?.name === "Mix Async A");
     const asyncB = subagentResults.find((message) => message.details?.name === "Mix Async B");
-    const blocking = subagentResults.find((message) => message.details?.name === "Mix Blocking Child");
-    if (!asyncA || !asyncB || !blocking || !assistantTexts.includes("LIVE_E2E_MIX_OK")) {
+    if (!asyncA || !asyncB || !assistantTexts.some((text) => text.includes("LIVE_E2E_MIX_STAGE1_OK"))) {
       await sleep(500);
       continue;
     }
 
     const asyncADetails = asyncA.details ?? {};
     const asyncBDetails = asyncB.details ?? {};
-    const blockingDetails = blocking.details ?? {};
     if (asyncADetails.status !== "started" || asyncBDetails.status !== "started") {
       throw new Error("Expected async children to return immediate started results.");
     }
@@ -306,6 +317,21 @@ try {
     if (asyncADetails.blocking !== false || asyncBDetails.blocking !== false) {
       throw new Error("Expected async children to stay non-blocking.");
     }
+    if (!stageTwoSent) {
+      execTmux(["send-keys", "-t", `${tmuxSession}:0.0`, "-l", stageTwoPrompt]);
+      execTmux(["send-keys", "-t", `${tmuxSession}:0.0`, "Enter"]);
+      stageTwoSent = true;
+      await sleep(500);
+      continue;
+    }
+
+    const blocking = subagentResults.find((message) => message.details?.name === "Mix Blocking Child");
+    if (!blocking || !assistantTexts.includes("LIVE_E2E_MIX_OK")) {
+      await sleep(500);
+      continue;
+    }
+
+    const blockingDetails = blocking.details ?? {};
     if (blockingDetails.status !== "completed" || blockingDetails.deliveryState !== "awaited" || blockingDetails.blocking !== true) {
       throw new Error("Expected blocking child to return awaited completed result.");
     }

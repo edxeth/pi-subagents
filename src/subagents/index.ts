@@ -225,6 +225,15 @@ const SPAWNING_TOOLS = new Set([
 	"subagent_resume",
 ]);
 
+const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+const SUBAGENT_PROTOCOL_TOOLS = [
+	"caller_ping",
+	"subagent_done",
+	"write_artifact",
+	"read_artifact",
+	"set_tab_title",
+];
+
 /**
  * Resolve the effective set of denied tool names from agent defaults.
  * `spawning: false` expands to all SPAWNING_TOOLS.
@@ -1966,13 +1975,21 @@ export function detachSubagentForTest(
 	return detachSubagentResult(params, pi);
 }
 
-function getBuiltinTools(tools?: string): string[] {
+function getSubagentToolAllowlist(tools?: string, deniedTools = new Set<string>()): string[] {
 	if (!tools) return [];
-	const builtinTools = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
-	return tools
+	const allowlist = tools
 		.split(",")
 		.map((tool) => tool.trim())
-		.filter((tool) => builtinTools.has(tool));
+		.filter((tool) => BUILTIN_TOOL_NAMES.has(tool));
+	if (allowlist.length === 0) return [];
+	for (const tool of SUBAGENT_PROTOCOL_TOOLS) {
+		if (!deniedTools.has(tool)) allowlist.push(tool);
+	}
+	return [...new Set(allowlist)];
+}
+
+export function getSubagentToolAllowlistForTest(tools?: string, deniedTools: Iterable<string> = []) {
+	return getSubagentToolAllowlist(tools, new Set(deniedTools));
 }
 
 interface SubagentLaunchContext {
@@ -2061,8 +2078,8 @@ function getPreparedSkillList(prepared: PreparedSubagentLaunch): string[] {
 		.filter(Boolean);
 }
 
-function getPreparedBuiltinTools(prepared: PreparedSubagentLaunch): string[] {
-	return getBuiltinTools(prepared.effectiveTools);
+function getPreparedToolAllowlist(prepared: PreparedSubagentLaunch): string[] {
+	return getSubagentToolAllowlist(prepared.effectiveTools, prepared.denySet);
 }
 
 function parseSubagentExtensionList(raw: string | undefined): string[] | undefined {
@@ -2172,8 +2189,8 @@ function launchBackgroundSubagent(
 		);
 	}
 
-	const builtins = getPreparedBuiltinTools(prepared);
-	if (builtins.length > 0) args.push("--tools", builtins.join(","));
+	const toolAllowlist = getPreparedToolAllowlist(prepared);
+	if (toolAllowlist.length > 0) args.push("--tools", toolAllowlist.join(","));
 
 	const taskArg = directTask
 		? fullTask
@@ -2420,9 +2437,9 @@ async function launchSubagent(
 		parts.push(flag, shellEscape(systemPromptPath));
 	}
 
-	const builtins = getPreparedBuiltinTools(prepared);
-	if (builtins.length > 0)
-		parts.push("--tools", shellEscape(builtins.join(",")));
+	const toolAllowlist = getPreparedToolAllowlist(prepared);
+	if (toolAllowlist.length > 0)
+		parts.push("--tools", shellEscape(toolAllowlist.join(",")));
 
 	// Env vars (shell-escaped for inline prefix)
 	const envVars = getBaseSubagentEnvVars(prepared, ctx, params);
