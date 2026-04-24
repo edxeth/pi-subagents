@@ -52,7 +52,7 @@ writeFileSync(
 writeFileSync(
   extensionFile,
   `import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 

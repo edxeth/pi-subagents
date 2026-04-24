@@ -76,10 +76,7 @@ export function installDeniedToolGuards(
 
   const applyDeniedTools = (): string[] => {
     const deniedTools = getDeniedToolNames(autoExit);
-    const allowedTools = filterToolNames(
-      pi.getAllTools().map((tool) => tool.name),
-      deniedTools,
-    );
+    const allowedTools = filterToolNames(pi.getActiveTools(), deniedTools);
     originalSetActiveTools(allowedTools);
     notify(allowedTools, deniedTools);
     return allowedTools;
@@ -103,7 +100,7 @@ export function installDeniedToolGuards(
 
 export default function (pi: ExtensionAPI) {
   const tui = optionalRequire("@mariozechner/pi-tui");
-  const typebox = optionalRequire("@sinclair/typebox");
+  const typebox = optionalRequire("typebox");
   const Box = tui?.Box;
   const Text = tui?.Text;
   const doneParams = typebox?.Type?.Object
@@ -200,10 +197,7 @@ export default function (pi: ExtensionAPI) {
   function refreshDeniedTools(ctx?: { ui: { setWidget: Function } } | null) {
     if (ctx) latestCtx = ctx;
     denied = getDeniedToolNames(autoExit);
-    toolNames = filterToolNames(
-      pi.getAllTools().map((tool) => tool.name),
-      denied,
-    );
+    toolNames = filterToolNames(pi.getActiveTools(), denied);
     try {
       pi.setActiveTools(toolNames);
     } catch {}

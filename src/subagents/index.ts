@@ -3,7 +3,7 @@ import type {
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import { keyHint } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { Box, Text } from "@mariozechner/pi-tui";
 import { basename, dirname, join, resolve } from "node:path";
 import {
@@ -1003,6 +1003,27 @@ export function getSubagentAgentRequirementErrorForTest(
 	return getSubagentAgentRequirementError(params, agentDefs);
 }
 
+function getSubagentToolsConfigError(tools?: string, agent?: string) {
+	const invalid = getInvalidSubagentToolNames(tools);
+	if (invalid.length === 0) return null;
+	const allowed = ["all", "none", ...BUILTIN_TOOL_NAMES].join(", ");
+	return {
+		content: [
+			{
+				type: "text" as const,
+				text:
+					`Error: invalid tools value${agent ? ` for agent "${agent}"` : ""}: ${invalid.join(", ")}. ` +
+					`Use all, none, or a comma-separated list of built-in tools: ${allowed}.`,
+			},
+		],
+		details: { error: "invalid_tools", invalid, allowed: ["all", "none", ...BUILTIN_TOOL_NAMES] },
+	};
+}
+
+export function getSubagentToolsConfigErrorForTest(tools?: string, agent?: string) {
+	return getSubagentToolsConfigError(tools, agent);
+}
+
 function getSubagentAgentOverrideError(
 	params: Partial<SubagentParamsInput>,
 	agentDefs: AgentDefaults | null,
@@ -1975,12 +1996,29 @@ export function detachSubagentForTest(
 	return detachSubagentResult(params, pi);
 }
 
-function getSubagentToolAllowlist(tools?: string, deniedTools = new Set<string>()): string[] {
-	if (!tools) return [];
-	const allowlist = tools
+function parseToolNames(tools: string): string[] {
+	return tools
 		.split(",")
 		.map((tool) => tool.trim())
-		.filter((tool) => BUILTIN_TOOL_NAMES.has(tool));
+		.filter(Boolean);
+}
+
+function normalizeToolMode(tools?: string): "default" | "all" | "none" | "list" {
+	if (!tools) return "default";
+	const normalized = tools.trim().toLowerCase();
+	if (normalized === "all") return "all";
+	if (normalized === "none") return "none";
+	return "list";
+}
+
+function getInvalidSubagentToolNames(tools?: string): string[] {
+	if (normalizeToolMode(tools) !== "list" || !tools) return [];
+	return parseToolNames(tools).filter((tool) => !BUILTIN_TOOL_NAMES.has(tool));
+}
+
+function getSubagentToolAllowlist(tools?: string, deniedTools = new Set<string>()): string[] {
+	if (normalizeToolMode(tools) !== "list" || !tools) return [];
+	const allowlist = parseToolNames(tools).filter((tool) => BUILTIN_TOOL_NAMES.has(tool));
 	if (allowlist.length === 0) return [];
 	for (const tool of SUBAGENT_PROTOCOL_TOOLS) {
 		if (!deniedTools.has(tool)) allowlist.push(tool);
@@ -1988,8 +2026,28 @@ function getSubagentToolAllowlist(tools?: string, deniedTools = new Set<string>(
 	return [...new Set(allowlist)];
 }
 
+function addToolModeDeniedNames(deniedTools: Set<string>, tools?: string) {
+	if (normalizeToolMode(tools) !== "none") return deniedTools;
+	for (const tool of BUILTIN_TOOL_NAMES) deniedTools.add(tool);
+	return deniedTools;
+}
+
+function getSubagentToolLaunchArgs(tools?: string, deniedTools = new Set<string>()): string[] {
+	if (normalizeToolMode(tools) === "none") return ["--no-builtin-tools"];
+	const allowlist = getSubagentToolAllowlist(tools, deniedTools);
+	return allowlist.length > 0 ? ["--tools", allowlist.join(",")] : [];
+}
+
 export function getSubagentToolAllowlistForTest(tools?: string, deniedTools: Iterable<string> = []) {
 	return getSubagentToolAllowlist(tools, new Set(deniedTools));
+}
+
+export function getSubagentToolLaunchArgsForTest(tools?: string, deniedTools: Iterable<string> = []) {
+	return getSubagentToolLaunchArgs(tools, new Set(deniedTools));
+}
+
+export function getSubagentToolDeniedNamesForTest(tools?: string, deniedTools: Iterable<string> = []) {
+	return [...addToolModeDeniedNames(new Set(deniedTools), tools)];
 }
 
 interface SubagentLaunchContext {
@@ -2041,7 +2099,7 @@ function prepareSubagentLaunch(
 		dirname(sessionFile),
 	);
 	const subagentSessionFile = generateSubagentSessionFile(runtimePaths.sessionDir);
-	const denySet = resolveDenyTools(agentDefs);
+	const denySet = addToolModeDeniedNames(resolveDenyTools(agentDefs), effectiveTools);
 	const effectiveExtensions = resolveSubagentExtensions(agentDefs);
 	const identity = buildIdentityBlock(agentDefs, params.systemPrompt);
 	const identityInSystemPrompt = !!(agentDefs?.systemPromptMode && identity);
@@ -2076,10 +2134,6 @@ function getPreparedSkillList(prepared: PreparedSubagentLaunch): string[] {
 		.split(",")
 		.map((skill) => skill.trim())
 		.filter(Boolean);
-}
-
-function getPreparedToolAllowlist(prepared: PreparedSubagentLaunch): string[] {
-	return getSubagentToolAllowlist(prepared.effectiveTools, prepared.denySet);
 }
 
 function parseSubagentExtensionList(raw: string | undefined): string[] | undefined {
@@ -2189,8 +2243,7 @@ function launchBackgroundSubagent(
 		);
 	}
 
-	const toolAllowlist = getPreparedToolAllowlist(prepared);
-	if (toolAllowlist.length > 0) args.push("--tools", toolAllowlist.join(","));
+	args.push(...getSubagentToolLaunchArgs(prepared.effectiveTools, prepared.denySet));
 
 	const taskArg = directTask
 		? fullTask
@@ -2437,9 +2490,9 @@ async function launchSubagent(
 		parts.push(flag, shellEscape(systemPromptPath));
 	}
 
-	const toolAllowlist = getPreparedToolAllowlist(prepared);
-	if (toolAllowlist.length > 0)
-		parts.push("--tools", shellEscape(toolAllowlist.join(",")));
+	for (const arg of getSubagentToolLaunchArgs(prepared.effectiveTools, prepared.denySet)) {
+		parts.push(shellEscape(arg));
+	}
 
 	// Env vars (shell-escaped for inline prefix)
 	const envVars = getBaseSubagentEnvVars(prepared, ctx, params);
@@ -2892,6 +2945,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (agentError) return agentError;
 				const agentOverrideError = getSubagentAgentOverrideError(params, agentDefs);
 				if (agentOverrideError) return agentOverrideError;
+				const toolsConfigError = getSubagentToolsConfigError(params.tools ?? agentDefs?.tools, params.agent);
+				if (toolsConfigError) return toolsConfigError;
 				const effectiveParams = enforceAgentFrontmatter(params, agentDefs);
 
 				// Prevent self-spawning (e.g. an agent spawning another copy of itself)

@@ -78,7 +78,7 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `enabled` | `true` | Hides the agent from discovery and blocks launch when `false` | Disable agents without deleting them |
 | `model` | pi default | Sets the model for that agent | Pin a model when the role needs a specific speed/quality tradeoff |
 | `thinking` | model default | Sets pi thinking level | Raise it for scouts/reviewers, lower it for cheap utility agents |
-| `tools` | session default | Built-in pi tools only: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` | Lock the agent down to only the tools it actually needs |
+| `tools` | `all` | Built-in pi tools only: `all`, `none`, or a comma-separated subset of `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` | Omit or set `all` for normal built-ins, set `none` to disable built-ins while keeping extension/protocol tools, or list only what the agent needs |
 | `skills` | unset | Auto-loads one or more named skills from a comma-separated list | Use when an agent always needs the same external guidance |
 | `extensions` | unset | Comma-separated extension allowlist for child launch; if unset, child loads all extensions | Use to keep child agents off extensions |
 | `system-prompt` | task-body routing | `append` uses `--append-system-prompt`; `replace` uses `--system-prompt` | Use `replace` for hard role isolation, `append` when you want to preserve more surrounding context |
@@ -289,6 +289,7 @@ PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:e2e-live
 PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:e2e-live-blocking
 PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:e2e-live-mix-blocking
 npm run test:e2e-live-deny-tools
+npm run test:e2e-live-tools
 npm run test:e2e-live-extensions
 ```
 

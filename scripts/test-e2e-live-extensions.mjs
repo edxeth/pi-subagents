@@ -63,7 +63,7 @@ writeFileSync(
 writeFileSync(
   allowedExtensionFile,
   `import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -107,7 +107,7 @@ export default function (pi: ExtensionAPI) {
 writeFileSync(
   blockedExtensionFile,
   `import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({

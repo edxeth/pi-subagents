@@ -60,6 +60,9 @@ import {
   getShellReadyDelayMs,
   getSubagentCatalogSignatureForTest,
   getSubagentToolAllowlistForTest,
+  getSubagentToolLaunchArgsForTest,
+  getSubagentToolDeniedNamesForTest,
+  getSubagentToolsConfigErrorForTest,
   renderSubagentCatalogReminderForTest,
   getLaunchedSubagentResultForTest,
   getStartedSubagentDetailsForTest,
@@ -589,6 +592,60 @@ describe("subagent-done.ts", () => {
       assert.deepEqual(getSubagentToolAllowlistForTest("bash").includes("edit"), false);
       assert.deepEqual(getSubagentToolAllowlistForTest("bash").includes("write"), false);
       assert.deepEqual(getSubagentToolAllowlistForTest(undefined), []);
+    });
+
+    it("maps omitted and all tools to default launch behavior", () => {
+      assert.deepEqual(getSubagentToolLaunchArgsForTest(undefined), []);
+      assert.deepEqual(getSubagentToolLaunchArgsForTest("all"), []);
+      assert.deepEqual(getSubagentToolLaunchArgsForTest(" all "), []);
+    });
+
+    it("maps tools none to no built-in tools while preserving extension tools", () => {
+      assert.deepEqual(getSubagentToolAllowlistForTest("none"), []);
+      assert.deepEqual(getSubagentToolLaunchArgsForTest("none"), ["--no-builtin-tools"]);
+      assert.deepEqual(getSubagentToolDeniedNamesForTest("none"), [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "grep",
+        "find",
+        "ls",
+      ]);
+    });
+
+    it("maps narrowed built-in tools to a tool allowlist with protocol tools", () => {
+      assert.deepEqual(getSubagentToolLaunchArgsForTest("bash", ["write_artifact"]), [
+        "--tools",
+        "bash,caller_ping,subagent_done,read_artifact,set_tab_title",
+      ]);
+    });
+
+    it("rejects unknown tools values instead of falling back to full access", () => {
+      const error = getSubagentToolsConfigErrorForTest("bash,nope", "worker");
+      assert.equal(error?.details.error, "invalid_tools");
+      assert.deepEqual(error?.details.invalid, ["nope"]);
+      assert.match(error?.content[0]?.text ?? "", /invalid tools value for agent "worker": nope/);
+    });
+
+    it("preserves CLI-disabled built-ins while applying denied tool filters", () => {
+      const allTools = [{ name: "read" }, { name: "bash" }, { name: "caller_ping" }];
+      let activeTools = ["caller_ping"];
+      const pi = {
+        getAllTools: () => allTools,
+        getActiveTools: () => activeTools,
+        setActiveTools: (toolNames: string[]) => {
+          activeTools = [...toolNames];
+        },
+        registerTool(definition: { name: string }) {
+          allTools.push({ name: definition.name });
+          activeTools.push(definition.name);
+        },
+      } as any;
+
+      const { applyDeniedTools } = installDeniedToolGuards(pi, false);
+      assert.deepEqual(applyDeniedTools(), ["caller_ping"]);
+      assert.deepEqual(activeTools, ["caller_ping"]);
     });
 
     it("keeps denied tools out of the active set after registration and later setActiveTools calls", () => {
