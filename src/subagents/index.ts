@@ -137,7 +137,7 @@ const SubagentKillParams = Type.Object({
 
 const SubagentWaitParams = Type.Object({
 	id: Type.String({
-		description: "Child id to wait for",
+		description: "Child id or unique display name to wait for",
 	}),
 	timeout: Type.Optional(
 		Type.Number({
@@ -148,16 +148,18 @@ const SubagentWaitParams = Type.Object({
 		Type.Union([
 			Type.Literal("error"),
 			Type.Literal("return_pending"),
+			Type.Literal("detach"),
+			Type.Literal("return"),
 		], {
 			description:
-				"How to handle a timeout. Defaults to error.",
+				"How to handle a timeout. Defaults to error. Use return_pending, detach, or return to release ownership and return a pending result.",
 		}),
 	),
 });
 
 const SubagentJoinParams = Type.Object({
-	ids: Type.Array(Type.String({ description: "Child id to join" }), {
-		description: "Child ids to join",
+	ids: Type.Array(Type.String({ description: "Child id or unique display name to join" }), {
+		description: "Child ids or unique display names to join",
 	}),
 	timeout: Type.Optional(
 		Type.Number({
@@ -168,16 +170,18 @@ const SubagentJoinParams = Type.Object({
 		Type.Union([
 			Type.Literal("error"),
 			Type.Literal("return_partial"),
+			Type.Literal("detach"),
+			Type.Literal("return"),
 		], {
 			description:
-				"How to handle a timeout. Defaults to error.",
+				"How to handle a timeout. Defaults to error. Use return_partial, detach, or return to release ownership and return partial results.",
 		}),
 	),
 });
 
 const SubagentDetachParams = Type.Object({
 	id: Type.String({
-		description: "Child id to detach",
+		description: "Child id or unique display name to detach",
 	}),
 });
 
@@ -529,6 +533,7 @@ function buildCompletedSubagentResult(
 		deliveryState: running.deliveryState,
 		parentClosePolicy: running.parentClosePolicy,
 		blocking: running.blocking ?? false,
+		autoExit: running.autoExit,
 		deliveredTo: null,
 	};
 }
@@ -583,91 +588,26 @@ let pendingAmbientCatalogReminder: {
 	supersedes?: true;
 } | null = null;
 
-const POST_DETACHED_COORDINATION_TOOLS = new Set([
-	"subagent",
-	"subagents_list",
-	"subagent_wait",
-	"subagent_join",
-	"subagent_detach",
-	"subagent_kill",
-	"subagent_resume",
-]);
+let detachedLaunchGuardActive = false;
 
-let detachedLaunchBoundary:
-	| {
-		pending: number;
-		launched: Array<{ id: string; name: string }>;
-	}
-	| null = null;
-
-function resetDetachedLaunchBoundary(): void {
-	detachedLaunchBoundary = null;
-}
-
-function ensureDetachedLaunchBoundary() {
-	if (!detachedLaunchBoundary) {
-		detachedLaunchBoundary = { pending: 0, launched: [] };
-	}
-	return detachedLaunchBoundary;
-}
-
-function notePendingDetachedLaunch(): void {
-	ensureDetachedLaunchBoundary().pending += 1;
-}
-
-function resolvePendingDetachedLaunch(): void {
-	if (!detachedLaunchBoundary) return;
-	detachedLaunchBoundary.pending = Math.max(0, detachedLaunchBoundary.pending - 1);
-	if (detachedLaunchBoundary.pending === 0 && detachedLaunchBoundary.launched.length === 0) {
-		resetDetachedLaunchBoundary();
-	}
-}
-
-function recordDetachedLaunch(id: string, name: string): void {
-	const boundary = ensureDetachedLaunchBoundary();
-	if (!boundary.launched.some((entry) => entry.id === id)) {
-		boundary.launched.push({ id, name });
-	}
-}
-
-function markDetachedLaunchBoundary(running: RunningSubagent): void {
-	if (running.blocking) return;
-	if (running.deliveryState !== "detached") return;
-	recordDetachedLaunch(running.id, running.name);
-}
-
-function isPostDetachedCoordinationTool(toolName: string): boolean {
-	if (POST_DETACHED_COORDINATION_TOOLS.has(toolName)) return true;
-	if (toolName === "ask_user_question") return true;
-	if (toolName.startsWith("task_")) return true;
-	return false;
-}
-
-function isCoordinatorOnlyTurnDisabled(): boolean {
+function isDetachedLaunchGuardDisabled(): boolean {
 	return process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN === "1";
 }
 
-export function isCoordinatorOnlyTurnDisabledForTest(): boolean {
-	return isCoordinatorOnlyTurnDisabled();
+function resetDetachedLaunchGuard(): void {
+	detachedLaunchGuardActive = false;
+}
+
+function isPostDetachedCoordinationTool(toolName: string): boolean {
+	return toolName === "subagent" || toolName.startsWith("subagent_") || toolName.startsWith("subagents_");
 }
 
 function getDetachedLaunchBlockReason(toolName: string): string {
-	const launched = detachedLaunchBoundary?.launched ?? [];
-	const pending = detachedLaunchBoundary?.pending ?? 0;
-	const launchedText =
-		launched.length > 0
-			? launched.length === 1
-				? `detached subagent \"${launched[0].name}\"`
-				: `${launched.length} detached subagents`
-			: pending === 1
-				? "a detached subagent launch"
-				: `${pending} detached subagent launches`;
 	return (
-		`${launchedText} already owns the delegated work for this response. ` +
-		`Do not call ${toolName} now or redo that work yourself. ` +
-		`Either end your response, launch another independent subagent, or use subagent_wait/subagent_join if you truly need child results before replying. ` +
-		`Normal parent-side tool work can resume on the user's next message; suggest \"continue\" as a shortcut if needed. ` +
-		`Set PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1 to disable this guard entirely.`
+		`A detached subagent was launched in this response. ` +
+		`Do not call ${toolName} in the same response or redo delegated work. ` +
+		`Launch more subagents, use subagent_wait/subagent_join if you need results, or end this response. ` +
+		`Parent tools can resume after synchronization or on the next response.`
 	);
 }
 
@@ -680,7 +620,6 @@ export function getCompletedSubagentResultForTest(
 export function resetSubagentStateForTest(): void {
 	lastAmbientCatalogSignature = null;
 	pendingAmbientCatalogReminder = null;
-	resetDetachedLaunchBoundary();
 	for (const agent of runningSubagents.values()) {
 		clearSubagentShutdownTimer(agent);
 		agent.abortController?.abort();
@@ -1025,47 +964,13 @@ export function getSubagentToolsConfigErrorForTest(tools?: string, agent?: strin
 }
 
 function getSubagentAgentOverrideError(
-	params: Partial<SubagentParamsInput>,
-	agentDefs: AgentDefaults | null,
+	_params: Partial<SubagentParamsInput>,
+	_agentDefs: AgentDefaults | null,
 ) {
-	if (!params.agent || !agentDefs) return null;
-
-	const disallowed: string[] = [];
-	if (params.systemPrompt != null) disallowed.push("systemPrompt");
-	if (params.model != null) disallowed.push("model");
-	if (params.skills != null) disallowed.push("skills");
-	if (params.tools != null) disallowed.push("tools");
-	if (params.cwd != null) disallowed.push("cwd");
-	if (params.background != null) disallowed.push("background");
-	if (disallowed.length === 0) return null;
-
-	const effectiveMode = agentDefs.mode ?? "interactive";
-	const frontmatterPath =
-		agentDefs.path ?? `.pi/agents/${params.agent}.md or ~/.pi/agent/agents/${params.agent}.md`;
-	const guidance: string[] = [];
-	if (agentDefs.cwd != null) guidance.push(`cwd: ${agentDefs.cwd}`);
-	if (disallowed.includes("background")) guidance.push(`mode: ${effectiveMode}`);
-	guidance.push(`blocking: ${agentDefs.blocking ?? false}`);
-	const guidanceText = guidance.length > 0 ? ` (${guidance.join(", ")})` : "";
-
-	return {
-		content: [
-			{
-				type: "text" as const,
-				text:
-					`Error: named agent "${params.agent}" rejects call-time overrides for ${disallowed.join(", ")}. ` +
-					`Remove those fields from the subagent call and configure them in ${frontmatterPath}${guidanceText}.`,
-			},
-		],
-		details: {
-			error: "agent_param_conflict",
-			agent: params.agent,
-			disallowed,
-			frontmatterPath,
-			effectiveMode,
-			blocking: agentDefs.blocking,
-		},
-	};
+	// Named-agent frontmatter is authoritative. Call-time fields such as model,
+	// tools, cwd, and background are ignored by enforceAgentFrontmatter instead
+	// of rejected; this keeps the runtime consistent with the public tool schema.
+	return null;
 }
 
 export function getSubagentAgentOverrideErrorForTest(
@@ -1174,6 +1079,61 @@ function findRunningSubagent(query: string): {
 	return { error: `No running subagent matches "${query}".` };
 }
 
+function findTrackedSubagent(query: string): {
+	id?: string;
+	running?: RunningSubagent;
+	cached?: CompletedSubagentResult;
+	error?: string;
+} {
+	const cachedById = completedSubagentResults.get(query);
+	if (cachedById) return { id: cachedById.id, cached: cachedById };
+	const runningById = runningSubagents.get(query);
+	if (runningById) return { id: runningById.id, running: runningById };
+
+	const exactCachedMatches = [...completedSubagentResults.values()].filter(
+		(result) => result.name === query,
+	);
+	if (exactCachedMatches.length === 1) {
+		return { id: exactCachedMatches[0].id, cached: exactCachedMatches[0] };
+	}
+	if (exactCachedMatches.length > 1) {
+		return { error: `Multiple completed subagents are named "${query}". Use the id instead.` };
+	}
+
+	const exactRunningMatches = [...runningSubagents.values()].filter(
+		(agent) => agent.name === query,
+	);
+	if (exactRunningMatches.length === 1) {
+		return { id: exactRunningMatches[0].id, running: exactRunningMatches[0] };
+	}
+	if (exactRunningMatches.length > 1) {
+		return { error: `Multiple running subagents are named "${query}". Use the id instead.` };
+	}
+
+	const normalizedQuery = query.toLowerCase();
+	const ciCachedMatches = [...completedSubagentResults.values()].filter(
+		(result) => result.name.toLowerCase() === normalizedQuery,
+	);
+	if (ciCachedMatches.length === 1) {
+		return { id: ciCachedMatches[0].id, cached: ciCachedMatches[0] };
+	}
+	if (ciCachedMatches.length > 1) {
+		return { error: `Multiple completed subagents match "${query}". Use the id instead.` };
+	}
+
+	const ciRunningMatches = [...runningSubagents.values()].filter(
+		(agent) => agent.name.toLowerCase() === normalizedQuery,
+	);
+	if (ciRunningMatches.length === 1) {
+		return { id: ciRunningMatches[0].id, running: ciRunningMatches[0] };
+	}
+	if (ciRunningMatches.length > 1) {
+		return { error: `Multiple running subagents match "${query}". Use the id instead.` };
+	}
+
+	return { error: `No subagent matches "${query}".` };
+}
+
 function stopRunningSubagent(running: RunningSubagent): void {
 	clearSubagentShutdownTimer(running);
 	running.abortController?.abort();
@@ -1208,25 +1168,19 @@ function getStartedSubagentDetails(running: RunningSubagent) {
 		deliveryState: running.deliveryState,
 		parentClosePolicy: running.parentClosePolicy,
 		blocking: running.blocking ?? false,
+		autoExit: running.autoExit,
 	};
 }
 
 function getStartedSubagentResult(running: RunningSubagent) {
-	const coordinatorOnlyText = isCoordinatorOnlyTurnDisabled()
-		? `Coordinator-only response enforcement is disabled in this session via PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1, so same-response parent tools remain available. ` +
-			`Even so, do not redo overlapping work yourself; prefer independent work, subagent_wait/subagent_join for real dependencies, or ending your response.`
-		: `This response is now coordinator-only: do not call read/bash/edit/write/grep/find/ls or redo overlapping work yourself. ` +
-			`Either launch more independent subagents, use subagent_wait/subagent_join if you truly need child results before replying, or end your response now. ` +
-			`On the user's next message, normal parent-side tool work resumes; suggest replying with \"continue\" as a shortcut if they want you to keep going while the sub-agent runs.`;
 	return {
 		content: [
 			{
 				type: "text" as const,
 				text:
 					`Sub-agent "${running.name}" launched. ` +
-					`Do NOT generate or assume any results — you have no idea what the sub-agent will do or produce. ` +
-					`The results will be delivered to you automatically as a steer message when the sub-agent finishes. ` +
-					coordinatorOnlyText,
+					`Results will be delivered automatically as a steer message when it finishes. ` +
+					`Use subagent_wait or subagent_join if you need the result before continuing.`,
 			},
 		],
 		details: getStartedSubagentDetails(running),
@@ -1425,8 +1379,10 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 			id: cached.id,
 			name: cached.name,
 			status: cached.status,
+			mode: cached.mode,
 			deliveryState: "awaited" as const,
 			blocking: cached.blocking,
+			autoExit: cached.autoExit,
 			exitCode: cached.exitCode,
 			elapsed: cached.elapsed,
 			outputTokens: cached.outputTokens,
@@ -1485,28 +1441,30 @@ function detachSubagentResult(
 	params: DetachParams,
 	pi?: Pick<ExtensionAPI, "sendMessage">,
 ) {
-	const cached = completedSubagentResults.get(params.id);
-	if (cached) {
-		if (cached.deliveredTo || cached.deliveryState === "detached") {
-			return getSubagentDetachErrorResult(
-				`Sub-agent "${params.id}" is not currently owned by wait or join.`,
-				"not_owned",
-				{ id: params.id },
-			);
-		}
-		cached.deliveryState = "detached";
-		if (pi) deliverCompletedSubagentResultViaSteer(pi, cached);
-		return getSubagentDetachResult(params.id);
-	}
-
-	const running = runningSubagents.get(params.id);
-	if (!running) {
+	const match = findTrackedSubagent(params.id);
+	if (match.error || (!match.cached && !match.running)) {
 		return getSubagentDetachErrorResult(
-			`No subagent matches "${params.id}".`,
+			match.error ?? `No subagent matches "${params.id}".`,
 			"not_found",
 			{ id: params.id },
 		);
 	}
+
+	const cached = match.cached;
+	if (cached) {
+		if (cached.deliveredTo || cached.deliveryState === "detached") {
+			return getSubagentDetachErrorResult(
+				`Sub-agent "${cached.name}" is not currently owned by wait or join.`,
+				"not_owned",
+				{ id: cached.id },
+			);
+		}
+		cached.deliveryState = "detached";
+		if (pi) deliverCompletedSubagentResultViaSteer(pi, cached);
+		return getSubagentDetachResult(cached.id);
+	}
+
+	const running = match.running!;
 	if (
 		running.deliveryState === "detached" ||
 		(running.resultOwner?.kind !== "wait" && running.resultOwner?.kind !== "join")
@@ -1529,16 +1487,18 @@ async function waitForSubagentResult(
 	params: WaitParams,
 	signal?: AbortSignal,
 ) {
-	const cached = completedSubagentResults.get(params.id);
+	const match = findTrackedSubagent(params.id);
+	if (match.error || (!match.cached && !match.running)) {
+		return getSubagentWaitErrorResult(
+			match.error ?? `No subagent matches "${params.id}".`,
+			"not_found",
+			{ id: params.id },
+		);
+	}
+
+	const cached = match.cached;
 	if (cached) {
-		if (cached.deliveredTo) {
-			return getSubagentWaitErrorResult(
-				`Sub-agent result for "${params.id}" was already delivered via ${cached.deliveredTo}.`,
-				"already_delivered",
-				{ id: params.id },
-			);
-		}
-		if (cached.deliveryState !== "detached") {
+		if (cached.deliveryState !== "detached" && !cached.deliveredTo) {
 			return getSubagentWaitErrorResult(
 				`Sub-agent "${cached.name}" is already owned by another synchronization call.`,
 				"already_owned",
@@ -1550,14 +1510,7 @@ async function waitForSubagentResult(
 		return getSubagentWaitSuccessResult(cached);
 	}
 
-	const running = runningSubagents.get(params.id);
-	if (!running) {
-		return getSubagentWaitErrorResult(
-			`No subagent matches "${params.id}".`,
-			"not_found",
-			{ id: params.id },
-		);
-	}
+	const running = match.running!;
 	if (running.resultOwner) {
 		return getSubagentWaitErrorResult(
 			`Sub-agent "${running.name}" is already owned by another synchronization call.`,
@@ -1629,7 +1582,7 @@ async function waitForSubagentResult(
 			const completed =
 				completedSubagentResults.get(running.id) ??
 				cacheCompletedSubagentResult(running, outcome.result);
-			if (completed.deliveredTo && completed.deliveredTo !== "wait") {
+			if (completed.deliveredTo && completed.deliveredTo !== "wait" && completed.deliveredTo !== "steer") {
 				return getSubagentWaitErrorResult(
 					`Sub-agent result for "${running.id}" was already delivered via ${completed.deliveredTo}.`,
 					"already_delivered",
@@ -1649,7 +1602,11 @@ async function waitForSubagentResult(
 				{ id: running.id },
 			);
 		}
-		if (params.onTimeout === "return_pending") {
+		if (
+			params.onTimeout === "return_pending" ||
+			params.onTimeout === "detach" ||
+			params.onTimeout === "return"
+		) {
 			return {
 				content: [
 					{
@@ -1771,7 +1728,7 @@ async function joinSubagentResults(
 ) {
 	if (params.ids.length === 0 || new Set(params.ids).size !== params.ids.length) {
 		return getSubagentJoinErrorResult(
-			"Join requires a non-empty set of unique child ids.",
+			"Join requires a non-empty set of unique child ids or names.",
 			"invalid_ids",
 			{ ids: params.ids },
 		);
@@ -1780,35 +1737,39 @@ async function joinSubagentResults(
 	const ownerId = `join:${randomUUID()}`;
 	const claimedRunning = new Map<string, RunningSubagent>();
 	const claimedCached = new Map<string, CompletedSubagentResult>();
+	const resolvedIds = new Set<string>();
 	for (const id of params.ids) {
-		const cached = completedSubagentResults.get(id);
+		const match = findTrackedSubagent(id);
+		if (match.error || (!match.cached && !match.running) || !match.id) {
+			return getSubagentJoinErrorResult(
+				match.error ?? `No subagent matches "${id}".`,
+				"not_found",
+				{ id },
+			);
+		}
+		if (resolvedIds.has(match.id)) {
+			return getSubagentJoinErrorResult(
+				"Join requires a non-empty set of unique child ids or names.",
+				"invalid_ids",
+				{ ids: params.ids },
+			);
+		}
+		resolvedIds.add(match.id);
+
+		const cached = match.cached;
 		if (cached) {
-			if (cached.deliveredTo) {
-				return getSubagentJoinErrorResult(
-					`Sub-agent result for "${id}" was already delivered via ${cached.deliveredTo}.`,
-					"already_delivered",
-					{ id },
-				);
-			}
-			if (cached.deliveryState !== "detached") {
+			if (cached.deliveryState !== "detached" && !cached.deliveredTo) {
 				return getSubagentJoinErrorResult(
 					`Sub-agent "${cached.name}" is already owned by another synchronization call.`,
 					"already_owned",
 					{ id: cached.id },
 				);
 			}
-			claimedCached.set(id, cached);
+			claimedCached.set(cached.id, cached);
 			continue;
 		}
 
-		const running = runningSubagents.get(id);
-		if (!running) {
-			return getSubagentJoinErrorResult(
-				`No subagent matches "${id}".`,
-				"not_found",
-				{ id },
-			);
-		}
+		const running = match.running!;
 		if (running.resultOwner) {
 			return getSubagentJoinErrorResult(
 				`Sub-agent "${running.name}" is already owned by another synchronization call.`,
@@ -1823,8 +1784,10 @@ async function joinSubagentResults(
 				{ id: running.id },
 			);
 		}
-		claimedRunning.set(id, running);
+		claimedRunning.set(running.id, running);
 	}
+
+	const joinedIds = [...resolvedIds];
 
 	for (const cached of claimedCached.values()) {
 		cached.deliveryState = "joined";
@@ -1845,7 +1808,7 @@ async function joinSubagentResults(
 	const pending = new Map(claimedRunning);
 	if (pending.size === 0) {
 		markJoinedResultsDelivered([...completedIds]);
-		return getSubagentJoinSuccessResult(params.ids, results);
+		return getSubagentJoinSuccessResult(joinedIds, results);
 	}
 
 	let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -1870,7 +1833,7 @@ async function joinSubagentResults(
 				return getSubagentJoinErrorResult(
 					"Joining sub-agents was interrupted.",
 					"interrupted",
-					{ ids: params.ids },
+					{ ids: joinedIds },
 				);
 			}
 			interruptPromise = new Promise((resolve) => {
@@ -1914,7 +1877,7 @@ async function joinSubagentResults(
 							},
 						],
 						details: {
-							ids: params.ids,
+							ids: joinedIds,
 							id: running.id,
 							status: "pinged" as const,
 							deliveryState: "joined" as const,
@@ -1928,7 +1891,7 @@ async function joinSubagentResults(
 				const completed =
 					completedSubagentResults.get(outcome.id) ??
 					cacheCompletedSubagentResult(running, outcome.result);
-				if (completed.deliveredTo && completed.deliveredTo !== "join") {
+				if (completed.deliveredTo && completed.deliveredTo !== "join" && completed.deliveredTo !== "steer") {
 					for (const pendingRunning of pending.values()) {
 						releaseSubagentJoinOwnership(pendingRunning, ownerId);
 					}
@@ -1953,13 +1916,17 @@ async function joinSubagentResults(
 				return getSubagentJoinErrorResult(
 					"Joining sub-agents was interrupted.",
 					"interrupted",
-					{ ids: params.ids },
+					{ ids: joinedIds },
 				);
 			}
-			if (params.onTimeout === "return_partial") {
+			if (
+				params.onTimeout === "return_partial" ||
+				params.onTimeout === "detach" ||
+				params.onTimeout === "return"
+			) {
 				markJoinedResultsDelivered([...completedIds]);
 				return getSubagentJoinSuccessResult(
-					params.ids,
+					joinedIds,
 					results,
 					[...pending.keys()],
 					params.timeout,
@@ -1969,12 +1936,12 @@ async function joinSubagentResults(
 			return getSubagentJoinErrorResult(
 				"Timed out joining sub-agents.",
 				"timeout",
-				{ ids: params.ids, timeout: params.timeout },
+				{ ids: joinedIds, timeout: params.timeout },
 			);
 		}
 
 		markJoinedResultsDelivered([...completedIds]);
-		return getSubagentJoinSuccessResult(params.ids, results);
+		return getSubagentJoinSuccessResult(joinedIds, results);
 	} finally {
 		if (timeoutHandle) clearTimeout(timeoutHandle);
 		abortCleanup();
@@ -2211,9 +2178,15 @@ function launchBackgroundSubagent(
 	const roleBlock = getPreparedRoleBlock(prepared);
 	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
 	const directTask = sessionMode === "fork";
+	const modeHint = prepared.agentDefs?.autoExit
+		? "Complete your task autonomously."
+		: "Manual lifecycle: do not stop after your final text. After completing the task, you MUST call the subagent_done tool unless you intentionally need the human operator to terminate this session. If operator close is required, say exactly `MANUAL CLOSE REQUIRED:` followed by the reason and wait.";
+	const summaryInstruction = prepared.agentDefs?.autoExit
+		? "Your FINAL assistant message should summarize what you accomplished."
+		: "Your FINAL assistant message before calling subagent_done, or before asking for manual close, should summarize what you accomplished. After that final message, immediately call subagent_done.";
 	const fullTask = directTask
 		? params.task
-		: `${roleBlock}\n\nComplete your task autonomously.\n\n${params.task}\n\nYour FINAL assistant message should summarize what you accomplished.`;
+		: `${roleBlock}\n\n${modeHint}\n\n${params.task}\n\n${summaryInstruction}`;
 
 	const args: string[] = ["-p", "--session", prepared.subagentSessionFile, ...getPreparedExtensionLaunchArgs(prepared, subagentDonePath)];
 	if (sessionMode !== "standalone") {
@@ -2253,7 +2226,7 @@ function launchBackgroundSubagent(
 	}
 
 	const envVars = getBaseSubagentEnvVars(prepared, ctx, params);
-	envVars.PI_SUBAGENT_AUTO_EXIT = "1";
+	if (prepared.agentDefs?.autoExit) envVars.PI_SUBAGENT_AUTO_EXIT = "1";
 	envVars.PI_SUBAGENT_SESSION = prepared.subagentSessionFile;
 
 	const invocation = getPiInvocation(args);
@@ -2275,6 +2248,7 @@ function launchBackgroundSubagent(
 		deliveryState: "detached",
 		parentClosePolicy: params.parentClosePolicy ?? "terminate",
 		blocking: params.blocking ?? false,
+		autoExit: prepared.agentDefs?.autoExit ?? false,
 		childProcess: child,
 		startTime,
 		sessionFile: prepared.subagentSessionFile,
@@ -2440,10 +2414,10 @@ async function launchSubagent(
 	const agentType = params.agent ?? params.name;
 	const modeHint = prepared.agentDefs?.autoExit
 		? "Complete your task autonomously."
-		: "Complete your task. When finished, call the subagent_done tool. The user can interact with you at any time.";
+		: "Manual lifecycle: do not stop after your final text. After completing the task, you MUST call the subagent_done tool unless you intentionally need the human operator to close this foreground pane. If operator close is required, say exactly `MANUAL CLOSE REQUIRED:` followed by the reason and wait for the operator. The user can interact with you at any time.";
 	const summaryInstruction = prepared.agentDefs?.autoExit
 		? "Your FINAL assistant message should summarize what you accomplished."
-		: "Your FINAL assistant message (before calling subagent_done or before the user exits) should summarize what you accomplished.";
+		: "Your FINAL assistant message before calling subagent_done, or before asking for manual close, should summarize what you accomplished. After that final message, immediately call subagent_done.";
 	const tabTitleInstruction = !isSetTabTitleToolEnabled() || prepared.denySet.has("set_tab_title")
 		? ""
 		: `As your FIRST action, set the tab title using set_tab_title. ` +
@@ -2506,8 +2480,12 @@ async function launchSubagent(
 	const taskArg = directTask
 		? fullTask
 		: `@${writeTaskArtifact(params.name, fullTask, ctx)}`;
-	for (const promptArg of buildPiPromptArgs(getPreparedSkillList(prepared), taskArg, directTask)) {
-		parts.push(shellEscape(promptArg));
+	const promptArgs = buildPiPromptArgs(getPreparedSkillList(prepared), taskArg, directTask);
+	const injectTaskAfterStart = prepared.agentDefs?.autoExit !== true;
+	if (!injectTaskAfterStart) {
+		for (const promptArg of promptArgs) {
+			parts.push(shellEscape(promptArg));
+		}
 	}
 
 	const cdPrefix = prepared.runtimePaths.effectiveCwd
@@ -2517,6 +2495,22 @@ async function launchSubagent(
 	const piCommand = cdPrefix + envPrefix + parts.join(" ");
 	const command = `${piCommand}; printf '__SUBAGENT_DONE_'${exitStatusVar()}'__\\n' | tee ${shellEscape(doneSentinelFile)}`;
 	sendShellCommand(surface, command);
+	if (injectTaskAfterStart) {
+		await new Promise<void>((resolve) => setTimeout(resolve, Math.max(3000, getShellReadyDelayMs())));
+		// Dismiss pi's startup/welcome overlay before injecting the task. If the
+		// overlay is active, the first Enter clears it; without this, the task text
+		// can land in the editor but never submit, leaving the foreground child
+		// visibly stuck for the user.
+		sendCommand(surface, "");
+		await new Promise<void>((resolve) => setTimeout(resolve, 500));
+		sendCommand(surface, promptArgs.join(" ").trim());
+		await new Promise<void>((resolve) => setTimeout(resolve, 8000));
+		// Some terminal/tmux combinations leave the injected text in the editor
+		// after send-keys Enter until pi finishes rendering startup/widgets. A
+		// delayed submit after the editor is visible makes the launch deterministic;
+		// if the first submit already worked, this is ignored while the agent is busy.
+		sendCommand(surface, "");
+	}
 
 	const running: RunningSubagent = {
 		id,
@@ -2528,6 +2522,7 @@ async function launchSubagent(
 		deliveryState: "detached",
 		parentClosePolicy: params.parentClosePolicy ?? "terminate",
 		blocking: params.blocking ?? false,
+		autoExit: prepared.agentDefs?.autoExit ?? false,
 		surface,
 		startTime,
 		sessionFile: prepared.subagentSessionFile,
@@ -2787,7 +2782,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// Capture the UI context early so the widget keeps a stable slot above tasks.
 	pi.on("session_start", (event, ctx) => {
-		resetDetachedLaunchBoundary();
+		resetDetachedLaunchGuard();
 		attachWidgetContext(ctx);
 		if (isAmbientAwarenessDisabled()) {
 			pendingAmbientCatalogReminder = null;
@@ -2842,24 +2837,24 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_switch", (_event, ctx) => {
-		resetDetachedLaunchBoundary();
+		resetDetachedLaunchGuard();
 		attachWidgetContext(ctx);
 	});
 
 	pi.on("input", () => {
-		resetDetachedLaunchBoundary();
+		resetDetachedLaunchGuard();
 		return { action: "continue" as const };
 	});
 
 	pi.on("agent_end", () => {
-		resetDetachedLaunchBoundary();
+		resetDetachedLaunchGuard();
 	});
 
 	// Clean up on session shutdown
 	pi.on("session_shutdown", (_event, ctx) => {
 		moduleAbortController.abort();
 		widgetManager.reset();
-		resetDetachedLaunchBoundary();
+		resetDetachedLaunchGuard();
 		shutdownSubagentsForParentExit();
 		if (ctx.hasUI) {
 			ctx.ui.setWidget("subagent-status", undefined);
@@ -2883,27 +2878,25 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("tool_call", (event) => {
 		if (event.toolName === "subagent") {
 			const input = event.input as Partial<SubagentParamsInput>;
-			const agentDefs =
-				typeof input.agent === "string"
-					? loadAgentDefaults(
-						input.agent,
-						typeof input.cwd === "string" ? input.cwd : undefined,
-					)
-					: null;
+			const agentDefs = typeof input.agent === "string"
+				? loadAgentDefaults(
+					input.agent,
+					typeof input.cwd === "string" ? input.cwd : undefined,
+				)
+				: null;
 			const agentError = getSubagentAgentRequirementError(input, agentDefs);
 			const agentOverrideError = getSubagentAgentOverrideError(input, agentDefs);
 			if (
+				!isDetachedLaunchGuardDisabled() &&
 				!agentError &&
 				!agentOverrideError &&
-				!isCoordinatorOnlyTurnDisabled() &&
 				!resolveSubagentBlocking(input, agentDefs)
 			) {
-				notePendingDetachedLaunch();
+				detachedLaunchGuardActive = true;
 			}
 			return {};
 		}
-		if (isCoordinatorOnlyTurnDisabled()) return {};
-		if (!detachedLaunchBoundary) return {};
+		if (isDetachedLaunchGuardDisabled() || !detachedLaunchGuardActive) return {};
 		if (isPostDetachedCoordinationTool(event.toolName)) return {};
 		return {
 			block: true,
@@ -2912,13 +2905,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_result", (event) => {
-		if (event.toolName !== "subagent") return {};
-		if (isCoordinatorOnlyTurnDisabled()) return {};
-		const details = event.details as StartedSubagentToolDetails | undefined;
-		if (details?.blocking === false && details?.status === "started") {
-			recordDetachedLaunch(details.id ?? "pending", details.name ?? "subagent");
+		const details = event.details as { error?: string; status?: string; blocking?: boolean } | undefined;
+		if (event.toolName === "subagent") {
+			if (!(details?.status === "started" && details.blocking === false)) {
+				resetDetachedLaunchGuard();
+			}
+			return {};
 		}
-		resolvePendingDetachedLaunch();
+		if (
+			(event.toolName === "subagent_wait" ||
+				event.toolName === "subagent_join" ||
+				event.toolName === "subagent_detach") &&
+			!details?.error
+		) {
+			resetDetachedLaunchGuard();
+		}
 		return {};
 	});
 
@@ -2929,14 +2930,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			label: "Subagent",
 			description:
 				"Spawn a named sub-agent from an existing agent definition for specialist or parallelizable work. " +
+				"When multiple independent subagents are needed, emit all of their subagent tool calls in the same assistant message before waiting or replying. " +
 				"By default this returns immediately and results arrive later via steer. " +
 				"If blocking is true, or agent frontmatter sets blocking: true, this call waits for the child to finish. Passing blocking false is accepted but never disables a blocking agent.",
 			promptSnippet:
 				"Use subagents for specialist, complex, or parallelizable work when the named-agent catalog suggests a good match. " +
-				"Keep launches explicit, prefer one call per child, and launch independent children in parallel. " +
-				"Interactive agents run in panes; background agents run headlessly; named-agent frontmatter is authoritative for runtime settings, and conflicting call-time execution overrides are rejected. " +
+				"CRITICAL parallel-launch rule: when a task calls for multiple independent subagents, emit every independent subagent tool call in the same assistant message/tool-call batch before waiting, reading results, or replying. Do not serialize independent subagent launches one at a time, even when some named agents have blocking:true frontmatter; the runtime will handle their blocking semantics after the launch batch is emitted. " +
+				"Keep launches explicit and use one subagent tool call per child. " +
+				"Interactive agents run in panes; background agents run headlessly; named-agent frontmatter is authoritative for runtime settings, and call-time duplicates for named agents are ignored instead of overriding it. " +
 				"Handle trivial single-file reads, quick direct answers, and tiny one-shot edits yourself instead of delegating. " +
-				"If the launch is non-blocking, do not fabricate unfinished child results or perform overlapping work in the same response: launch more independent subagents, use subagent_wait or subagent_join only when the outputs are real dependencies, otherwise end your response and wait for the later steer result. On the user's next message, normal parent-side tool work resumes; suggest \"continue\" as a shortcut when that helps. Set PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1 to disable the hard same-response guard when you deliberately want full parent control.",
+				"After a detached launch, same-response parent implementation tools are blocked to avoid duplicate delegated work. Launch more subagents, use subagent_wait/subagent_join when you need child results, or end the response; parent tools can resume after synchronization or on the next response. Set PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1 to disable this scoped guard when you deliberately want full parent control.",
 			parameters: SubagentParams,
 
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -3045,7 +3048,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					wireSteerBack(running, running.completionPromise);
 				}
 
-				if (!running.blocking) markDetachedLaunchBoundary(running);
 				return getLaunchedSubagentResult(running, signal);
 			},
 
@@ -3140,9 +3142,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			name: "subagent_wait",
 			label: "Wait Subagent",
 			description:
-				"Wait for one child result. Returns the child result directly and suppresses duplicate steer delivery.",
+				"Wait for one child result by id or unique display name. Returns the child result directly and suppresses duplicate steer delivery.",
 			promptSnippet:
-				"Wait for one child result. Returns the child result directly and suppresses duplicate steer delivery.",
+				"Wait for one child result by id or unique display name. Returns the child result directly and suppresses duplicate steer delivery.",
 			parameters: SubagentWaitParams,
 
 			async execute(_toolCallId, params, signal) {
@@ -3187,9 +3189,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			name: "subagent_join",
 			label: "Join Subagents",
 			description:
-				"Wait for a fixed set of child results and return one grouped result.",
+				"Wait for a fixed set of child results by id or unique display name and return one grouped result.",
 			promptSnippet:
-				"Wait for a fixed set of child results and return one grouped result.",
+				"Wait for a fixed set of child results by id or unique display name and return one grouped result.",
 			parameters: SubagentJoinParams,
 
 			async execute(_toolCallId, params, signal) {
@@ -3236,9 +3238,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			name: "subagent_detach",
 			label: "Detach Subagent",
 			description:
-				"Release explicit wait/join ownership and return a child to detached async behavior.",
+				"Release explicit wait/join ownership by id or unique display name and return a child to detached async behavior.",
 			promptSnippet:
-				"Release explicit wait/join ownership and return a child to detached async behavior.",
+				"Release explicit wait/join ownership by id or unique display name and return a child to detached async behavior.",
 			parameters: SubagentDetachParams,
 
 			async execute(_toolCallId, params) {

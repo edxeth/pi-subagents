@@ -167,11 +167,11 @@ Use this for scouts, reviewers, analyzers, and other autonomous workers that do 
 
 Detached is the default. The child runs and the result comes back later.
 
-There is one important runtime guard: after a detached launch, the parent's **current response** becomes coordinator-only by default. In that same response, the parent should launch more independent subagents, use `subagent_wait` / `subagent_join` when the child result is a real dependency, or end the response. It should **not** use direct file or shell tools to redo overlapping work itself.
+There is one important runtime guard: after a detached launch, the parent's **current response** becomes coordinator-only by default. In that same response, the parent can launch more subagents or use subagent coordination tools, but direct implementation tools are blocked so the parent does not immediately redo delegated work.
 
-On the next user message, normal parent-side tool work resumes even if detached children are still running. If you want a lightweight shorthand, replying with `continue` is enough to wake the parent back up for ordinary work.
+While the guard is active, only `subagent`, `subagent_*`, and `subagents_*` tools are allowed. The guard clears after successful synchronization/control (`subagent_wait`, `subagent_join`, or `subagent_detach`), after failed launch or validation-like sync failure, at the end of the assistant response, on the next user input, and on session switch/start/shutdown.
 
-If you want to disable the hard same-response guard and take full control yourself, set `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1`. The guidance still tells the parent not to overlap delegated work, but enforcement becomes advisory instead of blocking.
+If you want to disable this scoped same-response guard and take full control yourself, set `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1`. This lets the parent use normal tools immediately after detached launches; rely on your own prompts or process to avoid duplicate delegated work.
 
 Session seeding defaults to `standalone`, but agents can choose `session-mode: lineage-only` or `session-mode: fork`. An explicit tool-call `fork: true` still forces fork mode for that specific launch.
 
@@ -243,7 +243,7 @@ These are the ones worth knowing.
 - `PI_SUBAGENT_MUX` — force the mux backend: `cmux`, `tmux`, `zellij`, or `wezterm`
 - `PI_CODING_AGENT_DIR` — override the global pi agent config root
 - `PI_SUBAGENT_DISABLE_AMBIENT_AWARENESS` — disable the hidden top-level subagent catalog
-- `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN` — disable the same-response coordinator-only guard after detached launches
+- `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN` — disable the scoped same-response guard after detached launches
 - `PI_ARTIFACT_PROJECT_ROOT` — override artifact root resolution
 - `PI_SUBAGENT_SHELL_READY_DELAY_MS` — override the interactive shell startup delay before sending a child command (default `500`)
 - `PI_SUBAGENT_ENABLE_SET_TAB_TITLE` — opt in to registering the `set_tab_title` tool

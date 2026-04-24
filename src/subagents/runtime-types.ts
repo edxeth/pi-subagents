@@ -24,13 +24,13 @@ export interface SubagentParamsInput {
 export interface WaitParams {
 	id: string;
 	timeout?: number;
-	onTimeout?: "error" | "return_pending";
+	onTimeout?: "error" | "return_pending" | "detach" | "return";
 }
 
 export interface JoinParams {
 	ids: string[];
 	timeout?: number;
-	onTimeout?: "error" | "return_partial";
+	onTimeout?: "error" | "return_partial" | "detach" | "return";
 }
 
 export interface DetachParams {
@@ -62,6 +62,7 @@ export interface CompletedSubagentResult extends SubagentResult {
 	deliveryState: DeliveryState;
 	parentClosePolicy: ParentClosePolicy;
 	blocking: boolean;
+	autoExit?: boolean;
 	deliveredTo: CompletedDelivery | null;
 }
 
@@ -75,6 +76,7 @@ export interface RunningSubagent {
 	deliveryState: DeliveryState;
 	parentClosePolicy: ParentClosePolicy;
 	blocking: boolean;
+	autoExit?: boolean;
 	resultOwner?: { kind: CompletedDelivery; ownerId: string };
 	completionPromise?: Promise<SubagentResult>;
 	surface?: string;
@@ -107,6 +109,7 @@ export interface StartedSubagentToolDetails {
 	deliveryState?: string;
 	parentClosePolicy?: string;
 	blocking?: boolean;
+	autoExit?: boolean;
 }
 
 export interface SyncSubagentToolDetails {
@@ -114,7 +117,9 @@ export interface SyncSubagentToolDetails {
 	name?: string;
 	status?: string;
 	error?: string;
+	mode?: string;
 	deliveryState?: string;
+	autoExit?: boolean;
 	outputTokens?: number;
 	ids?: string[];
 }

@@ -84,7 +84,6 @@ import {
   waitForSubagentForTest,
   writeSystemPromptArtifactForTest,
   getTerminalAssistantSummaryForTest,
-  isCoordinatorOnlyTurnDisabledForTest,
 } from "../src/subagents/index.ts";
 import {
   getArtifactProjectName,
@@ -836,10 +835,17 @@ describe("shared/artifacts.ts", () => {
   });
 
   it("falls back to the cwd when no markers exist", () => {
-    const plain = join(dir, "plain", "folder");
-    mkdirSync(plain, { recursive: true });
+    const base = existsSync("/dev/shm")
+      ? mkdtempSync(join("/dev/shm", "subagents-test-"))
+      : join(dir, "plain-root");
+    const plain = join(base, "plain", "folder");
+    try {
+      mkdirSync(plain, { recursive: true });
 
-    assert.equal(resolveArtifactProjectRoot(plain), plain);
+      assert.equal(resolveArtifactProjectRoot(plain), plain);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   it("builds project and session artifact paths from the resolved root", () => {
@@ -1325,16 +1331,17 @@ describe("subagents/index.ts helpers", () => {
     assert.ok(tool);
     assert.match(tool.description, /specialist or parallelizable work/);
     assert.match(tool.promptSnippet, /Use subagents for specialist, complex, or parallelizable work/);
-    assert.match(tool.promptSnippet, /Keep launches explicit, prefer one call per child, and launch independent children in parallel/);
-    assert.match(tool.promptSnippet, /conflicting call-time execution overrides are rejected/);
+    assert.match(tool.promptSnippet, /CRITICAL parallel-launch rule/);
+    assert.match(tool.promptSnippet, /same assistant message\/tool-call batch/);
+    assert.match(tool.promptSnippet, /Keep launches explicit and use one subagent tool call per child/);
+    assert.match(tool.promptSnippet, /call-time duplicates for named agents are ignored/);
     assert.match(tool.promptSnippet, /Handle trivial single-file reads, quick direct answers, and tiny one-shot edits yourself instead of delegating/);
-    assert.match(tool.promptSnippet, /do not fabricate unfinished child results/);
-    assert.match(tool.promptSnippet, /subagent_wait or subagent_join only when the outputs are real dependencies/);
+    assert.match(tool.promptSnippet, /same-response parent implementation tools are blocked/);
+    assert.match(tool.promptSnippet, /subagent_wait\/subagent_join when you need child results/);
     assert.match(tool.promptSnippet, /PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1/);
   });
 
-  it("blocks same-response parent tools by default after a valid detached launch and allows opting out", () => {
-    const prev = process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN;
+  it("blocks immediate parent implementation tools after a detached launch", () => {
     const dir = createTestDir();
     const configDir = join(dir, "agent-root");
     const agentsDir = join(configDir, "agents");
@@ -1343,81 +1350,6 @@ describe("subagents/index.ts helpers", () => {
     writeFileSync(
       join(agentsDir, "scout.md"),
       `---\nname: scout\nmode: background\nblocking: false\n---\n\nScout body.`,
-    );
-
-    const init = () => {
-      const handlers = new Map<string, any>();
-      subagentsExtension({
-        on(event: string, handler: any) {
-          handlers.set(event, handler);
-        },
-        registerCommand() {},
-        registerMessageRenderer() {},
-        sendMessage() {},
-        registerTool() {},
-      } as any);
-      return handlers;
-    };
-
-    try {
-      delete process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN;
-      assert.equal(isCoordinatorOnlyTurnDisabledForTest(), false);
-      let handlers = init();
-      handlers.get("tool_call")({
-        type: "tool_call",
-        toolCallId: "call_subagent",
-        toolName: "subagent",
-        input: { name: "Child", agent: "scout", task: "Do work" },
-      });
-      const blocked = handlers.get("tool_call")({
-        type: "tool_call",
-        toolCallId: "call_read",
-        toolName: "read",
-        input: { path: "README.md" },
-      });
-      assert.equal(blocked.block, true);
-      assert.match(blocked.reason, /already owns the delegated work for this response/);
-      handlers.get("agent_end")?.({ type: "agent_end", messages: [] });
-      const allowedAfterAgentEnd = handlers.get("tool_call")({
-        type: "tool_call",
-        toolCallId: "call_read_after_end",
-        toolName: "read",
-        input: { path: "README.md" },
-      });
-      assert.deepEqual(allowedAfterAgentEnd, {});
-
-      process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN = "1";
-      assert.equal(isCoordinatorOnlyTurnDisabledForTest(), true);
-      handlers = init();
-      handlers.get("tool_call")({
-        type: "tool_call",
-        toolCallId: "call_subagent_2",
-        toolName: "subagent",
-        input: { name: "Child", agent: "scout", task: "Do work" },
-      });
-      const allowed = handlers.get("tool_call")({
-        type: "tool_call",
-        toolCallId: "call_read_2",
-        toolName: "read",
-        input: { path: "README.md" },
-      });
-      assert.deepEqual(allowed, {});
-    } finally {
-      if (prev == null) delete process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN;
-      else process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN = prev;
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("does not arm coordinator-only mode for invalid subagent launches", () => {
-    const dir = createTestDir();
-    const configDir = join(dir, "agent-root");
-    const agentsDir = join(configDir, "agents");
-    mkdirSync(agentsDir, { recursive: true });
-    process.env.PI_CODING_AGENT_DIR = configDir;
-    writeFileSync(
-      join(agentsDir, "scout.md"),
-      `---\nname: scout\nmode: background\n---\n\nScout body.`,
     );
 
     const handlers = new Map<string, any>();
@@ -1434,20 +1366,286 @@ describe("subagents/index.ts helpers", () => {
 
       handlers.get("tool_call")({
         type: "tool_call",
-        toolCallId: "call_subagent_invalid",
+        toolCallId: "call_subagent",
         toolName: "subagent",
-        input: { name: "Child", agent: "scout", task: "Do work", model: "override" },
+        input: { name: "Child", agent: "scout", task: "Do work" },
+      });
+      const blocked = handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_read",
+        toolName: "read",
+        input: { path: "README.md" },
+      });
+      assert.equal(blocked.block, true);
+      assert.match(blocked.reason, /detached subagent was launched in this response/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("allows parent implementation tools after detached launch when scoped guard is disabled", () => {
+    const prev = process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN;
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+    process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN = "1";
+    writeFileSync(
+      join(agentsDir, "scout.md"),
+      `---\nname: scout\nmode: background\nblocking: false\n---\n\nScout body.`,
+    );
+
+    const handlers = new Map<string, any>();
+    try {
+      subagentsExtension({
+        on(event: string, handler: any) {
+          handlers.set(event, handler);
+        },
+        registerCommand() {},
+        registerMessageRenderer() {},
+        sendMessage() {},
+        registerTool() {},
+      } as any);
+
+      handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_subagent",
+        toolName: "subagent",
+        input: { name: "Child", agent: "scout", task: "Do work" },
       });
       const allowed = handlers.get("tool_call")({
         type: "tool_call",
-        toolCallId: "call_find_after_invalid",
-        toolName: "find",
-        input: { pattern: "package.json" },
+        toolCallId: "call_read",
+        toolName: "read",
+        input: { path: "README.md" },
+      });
+      assert.deepEqual(allowed, {});
+    } finally {
+      if (prev == null) delete process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN;
+      else process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("allows coordination tools while the detached-launch guard is active", () => {
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+    writeFileSync(
+      join(agentsDir, "scout.md"),
+      `---\nname: scout\nmode: background\nblocking: false\n---\n\nScout body.`,
+    );
+
+    const handlers = new Map<string, any>();
+    try {
+      subagentsExtension({
+        on(event: string, handler: any) {
+          handlers.set(event, handler);
+        },
+        registerCommand() {},
+        registerMessageRenderer() {},
+        sendMessage() {},
+        registerTool() {},
+      } as any);
+
+      handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_subagent",
+        toolName: "subagent",
+        input: { name: "Child", agent: "scout", task: "Do work" },
+      });
+      for (const toolName of ["subagent", "subagent_wait", "subagent_join", "subagent_detach", "subagent_kill", "subagents_list"]) {
+        const allowed = handlers.get("tool_call")({
+          type: "tool_call",
+          toolCallId: `call_${toolName}`,
+          toolName,
+          input: {},
+        });
+        assert.deepEqual(allowed, {});
+      }
+      for (const toolName of ["ask_user_question", "task_update"]) {
+        const blocked = handlers.get("tool_call")({
+          type: "tool_call",
+          toolCallId: `call_${toolName}`,
+          toolName,
+          input: {},
+        });
+        assert.equal(blocked.block, true);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("clears the detached-launch guard after a failed subagent launch", () => {
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+    writeFileSync(
+      join(agentsDir, "scout.md"),
+      `---\nname: scout\nmode: background\nblocking: false\n---\n\nScout body.`,
+    );
+
+    const handlers = new Map<string, any>();
+    try {
+      subagentsExtension({
+        on(event: string, handler: any) {
+          handlers.set(event, handler);
+        },
+        registerCommand() {},
+        registerMessageRenderer() {},
+        sendMessage() {},
+        registerTool() {},
+      } as any);
+
+      handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_subagent",
+        toolName: "subagent",
+        input: { name: "Child", agent: "scout", task: "Do work" },
+      });
+      handlers.get("tool_result")({
+        type: "tool_result",
+        toolCallId: "call_subagent",
+        toolName: "subagent",
+        details: { error: "no session file" },
+      });
+      const allowed = handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_read",
+        toolName: "read",
+        input: { path: "README.md" },
       });
       assert.deepEqual(allowed, {});
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("clears the detached-launch guard after validation-like sync failure", () => {
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+    writeFileSync(
+      join(agentsDir, "scout.md"),
+      `---\nname: scout\nmode: background\nblocking: false\n---\n\nScout body.`,
+    );
+
+    const handlers = new Map<string, any>();
+    try {
+      subagentsExtension({
+        on(event: string, handler: any) {
+          handlers.set(event, handler);
+        },
+        registerCommand() {},
+        registerMessageRenderer() {},
+        sendMessage() {},
+        registerTool() {},
+      } as any);
+
+      handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_subagent",
+        toolName: "subagent",
+        input: { name: "Child", agent: "scout", task: "Do work" },
+      });
+      handlers.get("tool_result")({
+        type: "tool_result",
+        toolCallId: "call_wait",
+        toolName: "subagent_wait",
+        details: {},
+      });
+      const allowed = handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_read",
+        toolName: "read",
+        input: { path: "README.md" },
+      });
+      assert.deepEqual(allowed, {});
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("clears the detached-launch guard after synchronization", () => {
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+    writeFileSync(
+      join(agentsDir, "scout.md"),
+      `---\nname: scout\nmode: background\nblocking: false\n---\n\nScout body.`,
+    );
+
+    const handlers = new Map<string, any>();
+    try {
+      subagentsExtension({
+        on(event: string, handler: any) {
+          handlers.set(event, handler);
+        },
+        registerCommand() {},
+        registerMessageRenderer() {},
+        sendMessage() {},
+        registerTool() {},
+      } as any);
+
+      handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_subagent",
+        toolName: "subagent",
+        input: { name: "Child", agent: "scout", task: "Do work" },
+      });
+      handlers.get("tool_result")({
+        type: "tool_result",
+        toolCallId: "call_wait",
+        toolName: "subagent_wait",
+        details: { id: "child-guard", name: "Child", status: "completed" },
+      });
+      const allowed = handlers.get("tool_call")({
+        type: "tool_call",
+        toolCallId: "call_read",
+        toolName: "read",
+        input: { path: "README.md" },
+      });
+      assert.deepEqual(allowed, {});
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps parent tools available after waiting for detached children", async () => {
+    const running = {
+      id: "child-guard",
+      name: "Child",
+      task: "Do work",
+      mode: "background" as const,
+      executionState: "running" as const,
+      deliveryState: "detached" as const,
+      parentClosePolicy: "terminate" as const,
+      startTime: Date.now(),
+      sessionFile: "/tmp/child-guard.jsonl",
+      completionPromise: Promise.resolve({
+        name: "Child",
+        task: "Do work",
+        summary: "Done",
+        sessionFile: "/tmp/child-guard.jsonl",
+        exitCode: 0,
+        elapsed: 1,
+      }),
+    };
+
+    setRunningSubagentForTest(running);
+    const waited = await waitForSubagentForTest({ id: "Child" });
+    assert.equal(waited.details.status, "completed");
+    assert.equal(getCompletedSubagentResultForTest(running.id)?.deliveredTo, "wait");
   });
 
   it("injects one hidden startup catalog for top-level actionable sessions", () => {
@@ -1710,7 +1908,7 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(unknown?.details.agent, "does-not-exist");
   });
 
-  it("rejects frontmatter-governed call-time overrides for named agents except fork", () => {
+  it("ignores frontmatter-governed call-time duplicates for named agents", () => {
     const defs = {
       path: "/tmp/reviewer.md",
       mode: "interactive" as const,
@@ -1732,20 +1930,7 @@ describe("subagents/index.ts helpers", () => {
       defs,
     );
 
-    assert.equal(override?.details.error, "agent_param_conflict");
-    assert.deepEqual(override?.details.disallowed, [
-      "systemPrompt",
-      "model",
-      "skills",
-      "tools",
-      "cwd",
-      "background",
-    ]);
-    assert.match(override?.content[0].text ?? "", /named agent "reviewer" rejects call-time overrides/);
-    assert.match(override?.content[0].text ?? "", /\/tmp\/reviewer\.md/);
-    assert.match(override?.content[0].text ?? "", /cwd: \.\/agents\/reviewer/);
-    assert.match(override?.content[0].text ?? "", /mode: interactive/);
-    assert.match(override?.content[0].text ?? "", /blocking: false/);
+    assert.equal(override, null);
   });
 
   it("allows fork as an explicit launch-time session override", () => {
@@ -1784,7 +1969,7 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(harmlessFalse, null);
   });
 
-  it("fails fast on named-agent overrides before session checks", async () => {
+  it("ignores named-agent duplicate fields before session checks", async () => {
     const dir = createTestDir();
     const configDir = join(dir, "agent-root");
     const agentsDir = join(configDir, "agents");
@@ -1825,8 +2010,7 @@ describe("subagents/index.ts helpers", () => {
         },
       );
 
-      assert.equal(result.details.error, "agent_param_conflict");
-      assert.match(result.content[0].text, /Remove those fields from the subagent call/);
+      assert.equal(result.details.error, "no session file");
     } finally {
       process.chdir(prevCwd);
     }
@@ -2274,7 +2458,7 @@ describe("subagents/index.ts helpers", () => {
       );
     });
 
-    const waitPromise = waitForSubagentForTest({ id: running.id });
+    const waitPromise = waitForSubagentForTest({ id: running.name });
     assert.equal(running.deliveryState, "awaited");
 
     resolveCompletion({
@@ -2328,7 +2512,36 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(getCompletedSubagentResultForTest(running.id), undefined);
   });
 
-  it("returns already_delivered when steer already consumed the result", async () => {
+  it("returns cached result when a wait is repeated", async () => {
+    const running = {
+      id: "child-wait-repeat",
+      name: "Repeated wait child",
+      task: "Wait twice",
+      mode: "background" as const,
+      executionState: "running" as const,
+      deliveryState: "detached" as const,
+      parentClosePolicy: "terminate" as const,
+      startTime: Date.now(),
+      sessionFile: "/tmp/child-wait-repeat.jsonl",
+      completionPromise: Promise.resolve({
+        name: "Repeated wait child",
+        task: "Wait twice",
+        summary: "Done",
+        sessionFile: "/tmp/child-wait-repeat.jsonl",
+        exitCode: 0,
+        elapsed: 1,
+      }),
+    };
+
+    setRunningSubagentForTest(running);
+    const first = await waitForSubagentForTest({ id: running.name });
+    const second = await waitForSubagentForTest({ id: running.name });
+    assert.equal(first.details.status, "completed");
+    assert.equal(second.details.status, "completed");
+    assert.equal(second.details.id, running.id);
+  });
+
+  it("returns cached result when wait follows steer delivery", async () => {
     const sent: Array<{ message: any; options: any }> = [];
     const running = {
       id: "child-wait-2",
@@ -2361,7 +2574,11 @@ describe("subagents/index.ts helpers", () => {
 
     const waited = await waitForSubagentForTest({ id: running.id });
     assert.equal(sent.length, 1);
-    assert.equal(waited.details.error, "already_delivered");
+    assert.equal(waited.details.id, running.id);
+    assert.equal(waited.details.name, running.name);
+    assert.equal(waited.details.status, "completed");
+    assert.equal(waited.details.deliveryState, "awaited");
+    assert.equal(waited.details.exitCode, 0);
   });
 
   it("returns pending on wait timeout and restores detached delivery", async () => {
@@ -2399,7 +2616,7 @@ describe("subagents/index.ts helpers", () => {
     const waited = await waitForSubagentForTest({
       id: running.id,
       timeout: 0.01,
-      onTimeout: "return_pending",
+      onTimeout: "detach",
     });
 
     assert.equal(waited.details.status, "pending");
@@ -2420,6 +2637,37 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(sent[0].message.details.id, running.id);
     assert.equal(sent[0].message.details.deliveryState, "detached");
     assert.equal(getCompletedSubagentResultForTest(running.id)?.deliveredTo, "steer");
+  });
+
+  it("joins cached results that were already delivered by wait", async () => {
+    const running = {
+      id: "child-join-after-wait",
+      name: "Join after wait child",
+      task: "Wait then join",
+      mode: "background" as const,
+      executionState: "running" as const,
+      deliveryState: "detached" as const,
+      parentClosePolicy: "terminate" as const,
+      startTime: Date.now(),
+      sessionFile: "/tmp/child-join-after-wait.jsonl",
+      completionPromise: Promise.resolve({
+        name: "Join after wait child",
+        task: "Wait then join",
+        summary: "Done",
+        sessionFile: "/tmp/child-join-after-wait.jsonl",
+        exitCode: 0,
+        elapsed: 1,
+      }),
+    };
+
+    setRunningSubagentForTest(running);
+    const waited = await waitForSubagentForTest({ id: running.name });
+    assert.equal(waited.details.status, "completed");
+
+    const joined = await joinSubagentsForTest({ ids: [running.name] });
+    assert.equal(joined.details.ids[0], running.id);
+    assert.equal(joined.details.results[running.id].exitCode, 0);
+    assert.equal(joined.details.results[running.id].sessionFile, running.sessionFile);
   });
 
   it("joins multiple running subagents and suppresses steer delivery", async () => {
@@ -2472,7 +2720,7 @@ describe("subagents/index.ts helpers", () => {
       });
     }
 
-    const joinPromise = joinSubagentsForTest({ ids: [first.id, second.id] });
+    const joinPromise = joinSubagentsForTest({ ids: [first.name, second.id] });
     assert.equal(first.deliveryState, "joined");
     assert.equal(second.deliveryState, "joined");
 

@@ -423,7 +423,12 @@ export function sendCommand(surface: string, command: string): void {
   }
 
   if (backend === "tmux") {
-    execFileSync("tmux", ["send-keys", "-t", surface, "-l", command], { encoding: "utf8" });
+    if (command.length > 0) {
+      execFileSync("tmux", ["send-keys", "-t", surface, "-l", command], { encoding: "utf8" });
+      execFileSync("tmux", ["send-keys", "-t", surface, "Enter"], { encoding: "utf8" });
+      return;
+    }
+    execFileSync("tmux", ["send-keys", "-t", surface, "C-m"], { encoding: "utf8" });
     execFileSync("tmux", ["send-keys", "-t", surface, "Enter"], { encoding: "utf8" });
     return;
   }
