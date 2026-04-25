@@ -66,6 +66,8 @@ import {
   resolveDenyToolsForTest,
   renderSubagentCatalogReminderForTest,
   getLaunchedSubagentResultForTest,
+  getPiInvocationForTest,
+  getPiShellPartsForTest,
   getStartedSubagentDetailsForTest,
   getSubagentAgentRequirementErrorForTest,
   getSubagentAgentOverrideErrorForTest,
@@ -210,6 +212,7 @@ const TRACKED_ENV_KEYS = [
   "PI_ARTIFACT_PROJECT_ROOT",
   "PI_CODING_AGENT_DIR",
   "PI_SUBAGENT_MUX",
+  "PI_SUBAGENT_PI_COMMAND",
   "PI_SUBAGENT_RENAME_TMUX_SESSION",
   "PI_SUBAGENT_RENAME_TMUX_WINDOW",
   "SHELL",
@@ -993,6 +996,35 @@ describe("subagents/index.ts helpers", () => {
   it("uses PI_CODING_AGENT_DIR for the global agent config root", () => {
     process.env.PI_CODING_AGENT_DIR = "/tmp/custom-agent-root";
     assert.equal(getAgentConfigDirForTest(), "/tmp/custom-agent-root");
+  });
+
+  it("preserves the default launcher when no subagent command override is set", () => {
+    delete process.env.PI_SUBAGENT_PI_COMMAND;
+    const invocation = getPiInvocationForTest(["--session", "/tmp/session.jsonl"]);
+    assert.equal(invocation.command, process.execPath);
+    assert.deepEqual(invocation.args.slice(-2), ["--session", "/tmp/session.jsonl"]);
+  });
+
+  it("uses PI_SUBAGENT_PI_COMMAND as an opt-in wrapper for child pi launches", () => {
+    process.env.PI_SUBAGENT_PI_COMMAND = "tia pi";
+    assert.deepEqual(getPiInvocationForTest(["--session", "/tmp/session.jsonl"]), {
+      command: "tia",
+      args: ["pi", "--session", "/tmp/session.jsonl"],
+    });
+    assert.deepEqual(getPiShellPartsForTest(["--session", "/tmp/with space.jsonl"]), [
+      "'tia'",
+      "'pi'",
+      "'--session'",
+      "'/tmp/with space.jsonl'",
+    ]);
+  });
+
+  it("parses quoted PI_SUBAGENT_PI_COMMAND values", () => {
+    process.env.PI_SUBAGENT_PI_COMMAND = "'/opt/tia bin/tia' pi";
+    assert.deepEqual(getPiInvocationForTest(["--session", "/tmp/session.jsonl"]), {
+      command: "/opt/tia bin/tia",
+      args: ["pi", "--session", "/tmp/session.jsonl"],
+    });
   });
 
   it("loads global agent defaults from PI_CODING_AGENT_DIR and records cwd base", () => {

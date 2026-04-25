@@ -685,10 +685,64 @@ function startWidgetRefresh() {
 }
 
 /**
+ * Split a command override into argv parts. This intentionally supports only
+ * shell-style quoting/escaping, not expansion or operators, because the result
+ * is also used with spawn() for background subagents.
+ */
+function parseCommandWords(command: string): string[] {
+	const words: string[] = [];
+	let current = "";
+	let quote: "'" | '"' | null = null;
+	let escaping = false;
+
+	for (const char of command.trim()) {
+		if (escaping) {
+			current += char;
+			escaping = false;
+			continue;
+		}
+		if (char === "\\" && quote !== "'") {
+			escaping = true;
+			continue;
+		}
+		if ((char === "'" || char === '"') && quote === null) {
+			quote = char;
+			continue;
+		}
+		if (char === quote) {
+			quote = null;
+			continue;
+		}
+		if (/\s/.test(char) && quote === null) {
+			if (current) {
+				words.push(current);
+				current = "";
+			}
+			continue;
+		}
+		current += char;
+	}
+
+	if (escaping) current += "\\";
+	if (quote !== null) throw new Error("PI_SUBAGENT_PI_COMMAND has an unterminated quote");
+	if (current) words.push(current);
+	return words;
+}
+
+/**
  * Resolve the correct pi binary path for spawn(). Handles node, bun,
- * and bundled executables.
+ * bundled executables, and opt-in wrapper commands such as `tia pi`.
  */
 function getPiInvocation(args: string[]): { command: string; args: string[] } {
+	const override = process.env.PI_SUBAGENT_PI_COMMAND?.trim();
+	if (override) {
+		const parts = parseCommandWords(override);
+		if (parts.length === 0) {
+			throw new Error("PI_SUBAGENT_PI_COMMAND did not contain a command");
+		}
+		return { command: parts[0], args: [...parts.slice(1), ...args] };
+	}
+
 	const currentScript = process.argv[1];
 	if (currentScript && existsSync(currentScript)) {
 		return { command: process.execPath, args: [currentScript, ...args] };
@@ -699,6 +753,19 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 		return { command: process.execPath, args };
 	}
 	return { command: "pi", args };
+}
+
+function getPiShellParts(args: string[]): string[] {
+	const invocation = getPiInvocation(args);
+	return [shellEscape(invocation.command), ...invocation.args.map((arg) => shellEscape(arg))];
+}
+
+export function getPiInvocationForTest(args: string[]) {
+	return getPiInvocation(args);
+}
+
+export function getPiShellPartsForTest(args: string[]) {
+	return getPiShellParts(args);
 }
 
 /**
@@ -2482,7 +2549,7 @@ async function launchSubagent(
 		: `${roleBlock}\n\n${modeHint}\n\n${tabTitleInstruction}\n\n${params.task}\n\n${summaryInstruction}`;
 
 	// Build pi command (shell-escaped for sendCommand)
-	const parts: string[] = ["pi", "--session", shellEscape(prepared.subagentSessionFile)];
+	const parts: string[] = getPiShellParts(["--session", prepared.subagentSessionFile]);
 	if (sessionMode !== "standalone") {
 		seedSubagentSessionFile(
 			sessionMode,
@@ -3585,7 +3652,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const surface = createSurface(name);
 				await new Promise<void>((resolve) => setTimeout(resolve, getShellReadyDelayMs()));
 
-				const parts = ["pi", "--session", shellEscape(sessionFile)];
+				const parts = getPiShellParts(["--session", sessionFile]);
 				const subagentDonePath = join(
 					dirname(new URL(import.meta.url).pathname),
 					"subagent-done.ts",
