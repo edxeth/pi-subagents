@@ -70,18 +70,18 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `enabled` | `true` | Hides the agent from discovery and blocks launch when `false` | Disable agents without deleting them |
 | `model` | pi default | Sets the model for that agent | Pin a model when the role needs a specific speed/quality tradeoff |
 | `thinking` | model default | Sets pi thinking level | Raise it for scouts/reviewers, lower it for cheap utility agents |
-| `tools` | `all` | Built-in pi tools only: `all`, `none`, or a comma-separated subset of `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` | Omit or set `all` for normal built-ins, set `none` to disable built-ins while keeping extension/protocol tools, or list only what the agent needs |
-| `skills` | unset | Auto-loads one or more named skills from a comma-separated list | Use when an agent always needs the same external guidance |
-| `extensions` | unset | Comma-separated extension allowlist for child launch; if unset, child loads all extensions | Use to keep child agents off extensions |
-| `system-prompt` | task-body routing | `append` uses `--append-system-prompt`; `replace` uses `--system-prompt` | Use `replace` for hard role isolation, `append` when you want to preserve more surrounding context |
-| `spawning` | `false` | Allows or denies subagent-spawning tools | Set `true` only for coordinators that should launch other subagents |
-| `deny-tools` | unset | Denies specific child-session tools by name | Use for surgical restrictions without rewriting the whole tool set |
-| `auto-exit` | `false` | Child exits automatically after a normal completion | Best for autonomous agents, especially background scouts and reviewers |
-| `async` | `true` | `true`: parent does not wait. `false`: parent waits. | Use `async: false` only when the parent needs the result before continuing |
-| `no-context-files` | `false` | Disables automatic `AGENTS.md` / `CLAUDE.md` discovery for spawned child sessions | Use only when you want a clean child run without project context injection |
 | `cwd` | parent cwd | Default working directory for the child | Use for role directories, monorepo packages, or project-specific specialists |
-| `mode` | `interactive` | `interactive` pane or `background` headless child | Use `background` for autonomous work; keep `interactive` when visibility matters |
+| `extensions` | unset | Comma-separated extension allowlist for child launch; if unset, child loads all extensions | Use to keep child agents off extensions |
+| `tools` | `all` | Built-in pi tools only: `all`, `none`, or a comma-separated subset of `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` | Omit or set `all` for normal built-ins, set `none` to disable built-ins while keeping extension/protocol tools, or list only what the agent needs |
+| `deny-tools` | unset | Denies specific child-session tools by name | Use for surgical restrictions without rewriting the whole tool set |
+| `skills` | unset | Auto-loads one or more named skills from a comma-separated list | Use when an agent always needs the same external guidance |
+| `no-context-files` | `false` | Disables automatic `AGENTS.md` / `CLAUDE.md` discovery for spawned child sessions | Use only when you want a clean child run without project context injection |
+| `auto-exit` | `false` | Child exits automatically after a normal completion | Best for autonomous agents, especially background scouts and reviewers |
+| `system-prompt` | task-body routing | `append` uses `--append-system-prompt`; `replace` uses `--system-prompt` | Use `replace` for hard role isolation, `append` when you want to preserve more surrounding context |
 | `session-mode` | `standalone` | Session seeding mode: `standalone`, `lineage-only`, or `fork` | Use `standalone` for a clean unrelated child, `lineage-only` for a clean child that is still recorded as descended from the parent, and `fork` when the child needs the full parent context branch |
+| `spawning` | `false` | Allows or denies subagent-spawning tools | Set `true` only for coordinators that should launch other subagents |
+| `async` | `true` | `true`: parent does not wait. `false`: parent waits. | Use `async: false` only when the parent needs the result before continuing |
+| `mode` | `interactive` | `interactive` pane or `background` headless child | Use `background` for autonomous work; keep `interactive` when visibility matters |
 | `timeout` | unset | Background timeout in seconds | Use only for background agents that should never run forever |
 
 #### How `session-mode` works
