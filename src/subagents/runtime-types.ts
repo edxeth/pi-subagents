@@ -17,6 +17,7 @@ export interface SubagentParamsInput {
 	cwd?: string;
 	fork?: boolean;
 	background?: boolean;
+	async?: boolean;
 	blocking?: boolean;
 	parentClosePolicy?: ParentClosePolicy;
 }
@@ -62,6 +63,7 @@ export interface CompletedSubagentResult extends SubagentResult {
 	deliveryState: DeliveryState;
 	parentClosePolicy: ParentClosePolicy;
 	blocking: boolean;
+	async: boolean;
 	autoExit?: boolean;
 	deliveredTo: CompletedDelivery | null;
 }
@@ -76,6 +78,7 @@ export interface RunningSubagent {
 	deliveryState: DeliveryState;
 	parentClosePolicy: ParentClosePolicy;
 	blocking: boolean;
+	async: boolean;
 	autoExit?: boolean;
 	resultOwner?: { kind: CompletedDelivery; ownerId: string };
 	completionPromise?: Promise<SubagentResult>;
@@ -109,6 +112,7 @@ export interface StartedSubagentToolDetails {
 	deliveryState?: string;
 	parentClosePolicy?: string;
 	blocking?: boolean;
+	async?: boolean;
 	autoExit?: boolean;
 }
 
@@ -190,6 +194,7 @@ export interface SubagentPingMessageDetails {
 	deliveryState?: DeliveryState;
 	parentClosePolicy?: ParentClosePolicy;
 	blocking?: boolean;
+	async?: boolean;
 	elapsed?: number;
 	sessionFile?: string;
 	outputTokens?: number;

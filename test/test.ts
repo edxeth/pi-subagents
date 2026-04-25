@@ -1001,7 +1001,7 @@ describe("subagents/index.ts helpers", () => {
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(
       join(agentsDir, "tester.md"),
-      `---\nname: tester\nsystem-prompt: append\ncwd: ./roles/tester\nmode: background\nblocking: true\n---\n\nYou are the tester.`,
+      `---\nname: tester\nsystem-prompt: append\ncwd: ./roles/tester\nmode: background\nasync: false\n---\n\nYou are the tester.`,
     );
     process.env.PI_CODING_AGENT_DIR = configDir;
 
@@ -1010,7 +1010,8 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(defs?.cwd, "./roles/tester");
     assert.equal(defs?.cwdBase, configDir);
     assert.equal(defs?.mode, "background");
-    assert.equal(defs?.blocking, true);
+    assert.equal(defs?.async, false);
+    assert.equal(resolveSubagentBlockingForTest({}, defs), true);
   });
 
   it("defaults context-file injection to on and can disable it in agent frontmatter", () => {
@@ -1331,13 +1332,17 @@ describe("subagents/index.ts helpers", () => {
     assert.ok(tool);
     assert.match(tool.description, /specialist or parallelizable work/);
     assert.match(tool.promptSnippet, /Use subagents for specialist, complex, or parallelizable work/);
+    assert.match(tool.promptSnippet, /Terminology: async means the parent agent does not wait/);
     assert.match(tool.promptSnippet, /CRITICAL parallel-launch rule/);
     assert.match(tool.promptSnippet, /same assistant message\/tool-call batch/);
     assert.match(tool.promptSnippet, /Keep launches explicit and use one subagent tool call per child/);
     assert.match(tool.promptSnippet, /call-time duplicates for named agents are ignored/);
     assert.match(tool.promptSnippet, /Handle trivial single-file reads, quick direct answers, and tiny one-shot edits yourself instead of delegating/);
-    assert.match(tool.promptSnippet, /same-response parent implementation tools are blocked/);
-    assert.match(tool.promptSnippet, /subagent_wait\/subagent_join when you need child results/);
+    assert.match(tool.promptSnippet, /Delegation ownership rule/);
+    assert.match(tool.promptSnippet, /explicitly non-overlapping parent-owned work/);
+    assert.match(tool.promptSnippet, /end the response and let async results arrive by steer/);
+    assert.match(tool.promptSnippet, /subagent_wait\/subagent_join only for explicit sync gates or short non-blocking status probes/);
+    assert.match(tool.promptSnippet, /Pi built-in implementation tools such as bash\/read\/edit\/write/);
     assert.match(tool.promptSnippet, /PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1/);
   });
 
@@ -1377,7 +1382,8 @@ describe("subagents/index.ts helpers", () => {
         input: { path: "README.md" },
       });
       assert.equal(blocked.block, true);
-      assert.match(blocked.reason, /detached subagent was launched in this response/);
+      assert.match(blocked.reason, /async subagent was launched in this response/);
+      assert.match(blocked.reason, /Pi built-in implementation tools such as bash, read, edit, or write/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1428,7 +1434,7 @@ describe("subagents/index.ts helpers", () => {
     }
   });
 
-  it("allows coordination tools while the detached-launch guard is active", () => {
+  it("allows safe coordination tools while the detached-launch guard is active", () => {
     const dir = createTestDir();
     const configDir = join(dir, "agent-root");
     const agentsDir = join(configDir, "agents");
@@ -1457,7 +1463,7 @@ describe("subagents/index.ts helpers", () => {
         toolName: "subagent",
         input: { name: "Child", agent: "scout", task: "Do work" },
       });
-      for (const toolName of ["subagent", "subagent_wait", "subagent_join", "subagent_detach", "subagent_kill", "subagents_list"]) {
+      for (const toolName of ["subagent", "subagent_detach", "subagent_kill", "subagent_resume", "subagents_list", "ask_user_question"]) {
         const allowed = handlers.get("tool_call")({
           type: "tool_call",
           toolCallId: `call_${toolName}`,
@@ -1466,12 +1472,28 @@ describe("subagents/index.ts helpers", () => {
         });
         assert.deepEqual(allowed, {});
       }
-      for (const toolName of ["ask_user_question", "task_update"]) {
+      for (const [toolName, input] of [
+        ["subagent_wait", { id: "Child", timeout: 1, onTimeout: "return_pending" }],
+        ["subagent_join", { ids: ["Child"], timeout: 1, onTimeout: "return_partial" }],
+      ] as const) {
+        const allowed = handlers.get("tool_call")({
+          type: "tool_call",
+          toolCallId: `call_${toolName}`,
+          toolName,
+          input,
+        });
+        assert.deepEqual(allowed, {});
+      }
+      for (const [toolName, input] of [
+        ["subagent_wait", { id: "Child" }],
+        ["subagent_join", { ids: ["Child"] }],
+        ["task_update", {}],
+      ] as const) {
         const blocked = handlers.get("tool_call")({
           type: "tool_call",
           toolCallId: `call_${toolName}`,
           toolName,
-          input: {},
+          input,
         });
         assert.equal(blocked.block, true);
       }
@@ -1949,24 +1971,28 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(resolveEffectiveSessionModeForTest({ agent: "reviewer", fork: true }, defs), "fork");
   });
 
-  it("allows blocking as parent-side synchronization policy without weakening blocking agents", () => {
+  it("allows async:false as parent-side sync policy without weakening sync agents", () => {
+    assert.equal(resolveSubagentBlockingForTest({ async: false }, { async: true }), true);
+    assert.equal(resolveSubagentBlockingForTest({ async: true }, { async: false }), true);
+    assert.equal(resolveSubagentBlockingForTest({ async: false }, null), true);
+    assert.equal(resolveSubagentBlockingForTest({}, { async: false }), true);
+    assert.equal(resolveSubagentBlockingForTest({}, { async: true }), false);
+    assert.equal(resolveSubagentBlockingForTest({}, null), false);
     assert.equal(resolveSubagentBlockingForTest({ blocking: true }, { blocking: false }), true);
     assert.equal(resolveSubagentBlockingForTest({ blocking: false }, { blocking: true }), true);
-    assert.equal(resolveSubagentBlockingForTest({ blocking: true }, null), true);
-    assert.equal(resolveSubagentBlockingForTest({}, { blocking: true }), true);
-    assert.equal(resolveSubagentBlockingForTest({}, null), false);
+    assert.equal(resolveSubagentBlockingForTest({ async: true }, { blocking: true }), true);
 
     const blockingOverride = getSubagentAgentOverrideErrorForTest(
-      { agent: "reviewer", blocking: true },
+      { agent: "reviewer", async: false },
       { path: "/tmp/reviewer.md", mode: "interactive" },
     );
     assert.equal(blockingOverride, null);
 
-    const harmlessFalse = getSubagentAgentOverrideErrorForTest(
-      { agent: "reviewer", blocking: false },
-      { path: "/tmp/reviewer.md", mode: "interactive", blocking: false },
+    const harmlessAsync = getSubagentAgentOverrideErrorForTest(
+      { agent: "reviewer", async: true },
+      { path: "/tmp/reviewer.md", mode: "interactive", async: true },
     );
-    assert.equal(harmlessFalse, null);
+    assert.equal(harmlessAsync, null);
   });
 
   it("ignores named-agent duplicate fields before session checks", async () => {

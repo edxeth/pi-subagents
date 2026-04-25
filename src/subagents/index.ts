@@ -111,10 +111,16 @@ const SubagentParams = Type.Object({
 				"Run headlessly without a terminal pane. Ignored when agent is selected; frontmatter wins.",
 		}),
 	),
+	async: Type.Optional(
+		Type.Boolean({
+			description:
+				"Preferred launch policy. true means the parent continues immediately and receives the result later; false means sync, so the parent waits for this child before continuing. Agent frontmatter can force sync; passing true never disables a sync agent.",
+		}),
+	),
 	blocking: Type.Optional(
 		Type.Boolean({
 			description:
-				"When true, wait for this launch to finish before returning. Agent frontmatter can also force blocking; passing false never disables a blocking agent.",
+				"Legacy alias for async:false. When true, wait for this launch to finish before returning. Prefer async:false for new calls. Agent frontmatter can force sync; passing false never disables a sync agent.",
 		}),
 	),
 	parentClosePolicy: Type.Optional(
@@ -203,6 +209,7 @@ interface AgentDefaults {
 	mode?: "interactive" | "background";
 	sessionMode?: "standalone" | "lineage-only" | "fork";
 	fork?: boolean;
+	async?: boolean;
 	blocking?: boolean;
 	noContextFiles?: boolean;
 	timeout?: number;
@@ -289,6 +296,7 @@ function parseAgentDefinition(
 	const modeRaw = get("mode");
 	const sessionModeRaw = get("session-mode");
 	const forkRaw = get("fork");
+	const asyncRaw = get("async");
 	const blockingRaw = get("blocking");
 	const noContextFilesRaw = get("no-context-files");
 	const timeoutRaw = get("timeout");
@@ -325,6 +333,7 @@ function parseAgentDefinition(
 					? "fork"
 					: undefined,
 		fork: forkRaw != null ? forkRaw === "true" : undefined,
+		async: asyncRaw != null ? asyncRaw === "true" : undefined,
 		blocking: blockingRaw != null ? blockingRaw === "true" : undefined,
 		noContextFiles: noContextFilesRaw != null ? noContextFilesRaw === "true" : undefined,
 		mode:
@@ -533,6 +542,7 @@ function buildCompletedSubagentResult(
 		deliveryState: running.deliveryState,
 		parentClosePolicy: running.parentClosePolicy,
 		blocking: running.blocking ?? false,
+		async: running.async ?? !(running.blocking ?? false),
 		autoExit: running.autoExit,
 		deliveredTo: null,
 	};
@@ -598,16 +608,35 @@ function resetDetachedLaunchGuard(): void {
 	detachedLaunchGuardActive = false;
 }
 
-function isPostDetachedCoordinationTool(toolName: string): boolean {
-	return toolName === "subagent" || toolName.startsWith("subagent_") || toolName.startsWith("subagents_");
+function isNonBlockingSyncProbe(toolName: string, input: unknown): boolean {
+	if (toolName !== "subagent_wait" && toolName !== "subagent_join") return false;
+	if (!input || typeof input !== "object") return false;
+	const params = input as { timeout?: unknown; onTimeout?: unknown };
+	if (typeof params.timeout !== "number" || params.timeout <= 0) return false;
+	if (toolName === "subagent_wait") {
+		return params.onTimeout === "return_pending" || params.onTimeout === "detach" || params.onTimeout === "return";
+	}
+	return params.onTimeout === "return_partial" || params.onTimeout === "detach" || params.onTimeout === "return";
+}
+
+function isPostDetachedCoordinationTool(toolName: string, input: unknown): boolean {
+	if (toolName === "subagent") return true;
+	if (toolName === "subagent_detach" || toolName === "subagent_kill" || toolName === "subagent_resume") return true;
+	if (toolName === "subagents_list") return true;
+	if (toolName === "ask_user_question") return true;
+	return isNonBlockingSyncProbe(toolName, input);
 }
 
 function getDetachedLaunchBlockReason(toolName: string): string {
+	const waitHint = toolName === "subagent_wait" || toolName === "subagent_join"
+		? ` Do not wait for async children by default; only use ${toolName} here with a short timeout and non-blocking onTimeout behavior, or when the user explicitly requested a sync gate.`
+		: "";
 	return (
-		`A detached subagent was launched in this response. ` +
-		`Do not call ${toolName} in the same response or redo delegated work. ` +
-		`Launch more subagents, use subagent_wait/subagent_join if you need results, or end this response. ` +
-		`Parent tools can resume after synchronization or on the next response.`
+		`An async subagent was launched in this response. ` +
+		`Do not call ${toolName} in the same response or redo delegated work with Pi built-in implementation tools such as bash, read, edit, or write. ` +
+		`Launch more independent subagents, ask the user if ownership is ambiguous, or end this response now and let async results arrive by steer. ` +
+		`Pi built-in implementation tools can resume on the next response or after an explicit sync gate.` +
+		waitHint
 	);
 }
 
@@ -984,7 +1013,17 @@ function resolveSubagentBlocking(
 	params: Partial<SubagentParamsInput>,
 	agentDefs: AgentDefaults | null,
 ): boolean {
-	return params.blocking === true || agentDefs?.blocking === true;
+	const agentForcesSync = agentDefs?.async != null
+		? agentDefs.async === false
+		: agentDefs?.blocking === true;
+	return agentForcesSync || params.async === false || params.blocking === true;
+}
+
+function resolveSubagentAsync(
+	params: Partial<SubagentParamsInput>,
+	agentDefs: AgentDefaults | null,
+): boolean {
+	return !resolveSubagentBlocking(params, agentDefs);
 }
 
 export function resolveSubagentBlockingForTest(
@@ -1040,6 +1079,7 @@ function enforceAgentFrontmatter(
 		task: params.task,
 		agent: params.agent,
 		fork: params.fork,
+		async: resolveSubagentAsync(params, agentDefs),
 		blocking: resolveSubagentBlocking(params, agentDefs),
 		parentClosePolicy: params.parentClosePolicy,
 	};
@@ -1168,19 +1208,23 @@ function getStartedSubagentDetails(running: RunningSubagent) {
 		deliveryState: running.deliveryState,
 		parentClosePolicy: running.parentClosePolicy,
 		blocking: running.blocking ?? false,
+		async: running.async ?? !(running.blocking ?? false),
 		autoExit: running.autoExit,
 	};
 }
 
 function getStartedSubagentResult(running: RunningSubagent) {
+	const isAsync = running.async ?? !(running.blocking ?? false);
 	return {
 		content: [
 			{
 				type: "text" as const,
 				text:
-					`Sub-agent "${running.name}" launched. ` +
-					`Results will be delivered automatically as a steer message when it finishes. ` +
-					`Use subagent_wait or subagent_join if you need the result before continuing.`,
+					`Sub-agent "${running.name}" launched ${isAsync ? "async" : "sync"}. ` +
+					(isAsync
+						? `Results will be delivered automatically as a steer message when it finishes. `
+						: `The parent is waiting for this result before continuing. `) +
+					`Use subagent_wait or subagent_join only when you need an explicit sync gate.`,
 			},
 		],
 		details: getStartedSubagentDetails(running),
@@ -1248,6 +1292,7 @@ function deliverCompletedSubagentResultViaSteer(
 				deliveryState: cached.deliveryState,
 				parentClosePolicy: cached.parentClosePolicy,
 				blocking: cached.blocking,
+				async: cached.async,
 				exitCode: cached.exitCode,
 				elapsed: cached.elapsed,
 				outputTokens: cached.outputTokens,
@@ -1285,6 +1330,7 @@ function deliverSubagentPingViaSteer(
 				deliveryState: running.deliveryState,
 				parentClosePolicy: running.parentClosePolicy,
 				blocking: running.blocking,
+				async: running.async ?? !running.blocking,
 				elapsed: result.elapsed,
 				outputTokens: result.outputTokens,
 				sessionFile: result.sessionFile,
@@ -1349,6 +1395,7 @@ function getSubagentWaitPingResult(
 			status: "pinged" as const,
 			deliveryState,
 			blocking: running.blocking,
+			async: running.async ?? !running.blocking,
 			elapsed: result.elapsed,
 			outputTokens: result.outputTokens,
 			sessionFile: result.sessionFile,
@@ -1382,6 +1429,7 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 			mode: cached.mode,
 			deliveryState: "awaited" as const,
 			blocking: cached.blocking,
+			async: cached.async,
 			autoExit: cached.autoExit,
 			exitCode: cached.exitCode,
 			elapsed: cached.elapsed,
@@ -2248,6 +2296,7 @@ function launchBackgroundSubagent(
 		deliveryState: "detached",
 		parentClosePolicy: params.parentClosePolicy ?? "terminate",
 		blocking: params.blocking ?? false,
+		async: params.async ?? !(params.blocking ?? false),
 		autoExit: prepared.agentDefs?.autoExit ?? false,
 		childProcess: child,
 		startTime,
@@ -2522,6 +2571,7 @@ async function launchSubagent(
 		deliveryState: "detached",
 		parentClosePolicy: params.parentClosePolicy ?? "terminate",
 		blocking: params.blocking ?? false,
+		async: params.async ?? !(params.blocking ?? false),
 		autoExit: prepared.agentDefs?.autoExit ?? false,
 		surface,
 		startTime,
@@ -2897,7 +2947,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return {};
 		}
 		if (isDetachedLaunchGuardDisabled() || !detachedLaunchGuardActive) return {};
-		if (isPostDetachedCoordinationTool(event.toolName)) return {};
+		if (isPostDetachedCoordinationTool(event.toolName, event.input)) return {};
 		return {
 			block: true,
 			reason: getDetachedLaunchBlockReason(event.toolName),
@@ -2931,15 +2981,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			description:
 				"Spawn a named sub-agent from an existing agent definition for specialist or parallelizable work. " +
 				"When multiple independent subagents are needed, emit all of their subagent tool calls in the same assistant message before waiting or replying. " +
-				"By default this returns immediately and results arrive later via steer. " +
-				"If blocking is true, or agent frontmatter sets blocking: true, this call waits for the child to finish. Passing blocking false is accepted but never disables a blocking agent.",
+				"By default launches are async: this returns immediately and results arrive later via steer. " +
+				"Use async:false for sync launches where the parent must wait. Legacy blocking:true still means async:false; passing async:true or blocking:false never disables a sync agent.",
 			promptSnippet:
 				"Use subagents for specialist, complex, or parallelizable work when the named-agent catalog suggests a good match. " +
-				"CRITICAL parallel-launch rule: when a task calls for multiple independent subagents, emit every independent subagent tool call in the same assistant message/tool-call batch before waiting, reading results, or replying. Do not serialize independent subagent launches one at a time, even when some named agents have blocking:true frontmatter; the runtime will handle their blocking semantics after the launch batch is emitted. " +
+				"Terminology: async means the parent agent does not wait for the child; sync means the parent waits for the child before continuing. " +
+				"CRITICAL parallel-launch rule: when a task calls for multiple independent subagents, emit every independent subagent tool call in the same assistant message/tool-call batch before waiting, reading results, or replying. Do not serialize independent subagent launches one at a time, even when some named agents are sync; the runtime will handle their sync/async launch policy after the launch batch is emitted. " +
 				"Keep launches explicit and use one subagent tool call per child. " +
 				"Interactive agents run in panes; background agents run headlessly; named-agent frontmatter is authoritative for runtime settings, and call-time duplicates for named agents are ignored instead of overriding it. " +
 				"Handle trivial single-file reads, quick direct answers, and tiny one-shot edits yourself instead of delegating. " +
-				"After a detached launch, same-response parent implementation tools are blocked to avoid duplicate delegated work. Launch more subagents, use subagent_wait/subagent_join when you need child results, or end the response; parent tools can resume after synchronization or on the next response. Set PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1 to disable this scoped guard when you deliberately want full parent control.",
+				"Delegation ownership rule: after launching subagents, the parent may continue only with explicitly non-overlapping parent-owned work. Do not redo delegated work. If no safe independent work is clear, end the response and let async results arrive by steer. Ask the user only when there is a plausible next step but ownership is ambiguous. Use subagent_wait/subagent_join only for explicit sync gates or short non-blocking status probes. When the coordinator lock is enabled, same-response Pi built-in implementation tools such as bash/read/edit/write are blocked after async launches; set PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1 to disable only that hard guard, not this ownership contract.",
 			parameters: SubagentParams,
 
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -3105,12 +3156,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (details?.status === "started") {
 					const deliveryState = details?.deliveryState ?? "detached";
 					const closePolicy = details?.parentClosePolicy ?? "terminate";
-					const blocking = details?.blocking ? " · blocking" : "";
+					const launchPolicy = details?.async === false || details?.blocking ? "sync" : "async";
 					return new Text(
 						theme.fg("accent", "▸") +
 							" " +
 							theme.fg("toolTitle", theme.bold(name)) +
-							theme.fg("dim", ` — started · ${deliveryState}${blocking} · close:${closePolicy}`),
+							theme.fg("dim", ` — started · ${launchPolicy} · ${deliveryState} · close:${closePolicy}`),
 						0,
 						0,
 					);
@@ -3144,7 +3195,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			description:
 				"Wait for one child result by id or unique display name. Returns the child result directly and suppresses duplicate steer delivery.",
 			promptSnippet:
-				"Wait for one child result by id or unique display name. Returns the child result directly and suppresses duplicate steer delivery.",
+				"Wait for one child result by id or unique display name. This creates a sync gate and blocks unless you provide a short timeout with onTimeout return_pending/detach/return. Do not use it by default after async launches; prefer yielding for steer delivery unless the user requested a sync gate or the next step truly depends on this result.",
 			parameters: SubagentWaitParams,
 
 			async execute(_toolCallId, params, signal) {
@@ -3191,7 +3242,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			description:
 				"Wait for a fixed set of child results by id or unique display name and return one grouped result.",
 			promptSnippet:
-				"Wait for a fixed set of child results by id or unique display name and return one grouped result.",
+				"Wait for a fixed set of child results by id or unique display name and return one grouped result. This creates a sync gate and blocks unless you provide a short timeout with onTimeout return_partial/detach/return. Do not use it by default after async launches; prefer yielding for steer delivery unless the user requested a sync gate or the next step truly depends on these results.",
 			parameters: SubagentJoinParams,
 
 			async execute(_toolCallId, params, signal) {
@@ -3577,6 +3628,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					deliveryState: "detached",
 					parentClosePolicy: "terminate",
 					blocking: false,
+					async: true,
 					surface,
 					startTime,
 					sessionFile,
@@ -3624,6 +3676,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						deliveryState: "detached",
 						parentClosePolicy: "terminate",
 						blocking: false,
+						async: true,
 					},
 				};
 			},

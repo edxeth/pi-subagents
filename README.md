@@ -6,7 +6,7 @@ Pi is a minimal coding harness. It gives you extensions, skills, prompts, and pa
 
 This package is that layer.
 
-It began as a fork of [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents). HazAT built the original async subagent extension and deserves full credit for the foundation. This fork, `edxeth/pi-subagents`, keeps the original idea, then pushes it much closer to Claude Code CLI territory: blocking launches, background workers, wait/join/detach ownership, stricter runtime control, and better separation between interactive and autonomous agents.
+It began as a fork of [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents). HazAT built the original async subagent extension and deserves full credit for the foundation. This fork, `edxeth/pi-subagents`, keeps the original idea, then pushes it much closer to Claude Code CLI territory: explicit sync/async launches, background workers, wait/join/detach ownership, stricter runtime control, and better separation between interactive and autonomous agents.
 
 If you want the short version: this package gives pi a more complete subagent model, with explicit control over how child agents are launched, observed, synchronized, and resumed.
 
@@ -21,8 +21,8 @@ pi install git:github.com/edxeth/pi-subagents
 ## What it gives pi
 
 - named subagents instead of ad-hoc prompt blobs
-- detached async execution by default, with same-response coordinator-only guarding
-- true blocking execution when you actually need sequential behavior
+- async execution by default, with same-response coordinator-only guarding
+- sync execution when the parent truly needs to wait
 - interactive foreground children and headless background children
 - explicit `wait`, `join`, and `detach` semantics
 - resumable child sessions through `caller_ping` and `subagent_resume`
@@ -46,17 +46,9 @@ That is why it has more than one mode. Not because complexity is fashionable. Be
 
 Every subagent is a named agent definition.
 
-By default, a child launches detached and reports back later. If the job is autonomous, it can run in the background. If the job needs visibility or direct steering, it can run interactively in its own pane. If the parent truly depends on the answer right now, the child can be awaited or launched as blocking.
+By default, children launch **async**: the parent does not wait, and results arrive later. Use **sync** when the parent must wait before continuing.
 
-So the runtime splits across a few hard boundaries:
-
-- interactive vs background
-- detached vs awaited/joined
-- async vs blocking
-- autonomous exit vs manual close
-- terminate vs cancel vs abandon on parent shutdown
-
-That is the core of the package.
+Other runtime choices are separate: interactive pane vs background process, auto-exit vs manual close, session seeding, and parent-shutdown behavior.
 
 ## Agent definitions
 
@@ -85,12 +77,11 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `spawning` | `true` | Allows or denies subagent-spawning tools | Set `false` for workers that should do the job themselves |
 | `deny-tools` | unset | Denies specific child-session tools by name | Use for surgical restrictions without rewriting the whole tool set |
 | `auto-exit` | `false` | Child exits automatically after a normal completion | Best for autonomous agents, especially background scouts and reviewers |
-| `blocking` | `false` | Makes the parent wait for that agent by default | Use when the parent genuinely cannot continue without that answer |
+| `async` | `true` | `true`: parent does not wait. `false`: parent waits. | Use `async: false` only when the parent needs the result before continuing |
 | `no-context-files` | `false` | Disables automatic `AGENTS.md` / `CLAUDE.md` discovery for spawned child sessions | Use only when you want a clean child run without project context injection |
 | `cwd` | parent cwd | Default working directory for the child | Use for role directories, monorepo packages, or project-specific specialists |
 | `mode` | `interactive` | `interactive` pane or `background` headless child | Use `background` for autonomous work; keep `interactive` when visibility matters |
 | `session-mode` | `standalone` | Session seeding mode: `standalone`, `lineage-only`, or `fork` | Use `standalone` for a clean unrelated child, `lineage-only` for a clean child that is still recorded as descended from the parent, and `fork` when the child needs the full parent context branch |
-| `fork` | `false` | Back-compat shorthand for `session-mode: fork` | Keep for older agents; prefer `session-mode` for new ones |
 | `timeout` | unset | Background timeout in seconds | Use only for background agents that should never run forever |
 
 #### How `session-mode` works
@@ -143,7 +134,7 @@ Important details:
 
 - **Scout / reviewer / analyzer**: `mode: background`, `auto-exit: true`, usually `spawning: false`
 - **Interactive specialist**: `mode: interactive`, usually no `auto-exit`
-- **Sequential gatekeeper**: `blocking: true`
+- **Sync gatekeeper**: `async: false`
 - **Monorepo role agent**: `cwd: ./packages/...`
 - **Locked-down worker**: narrow `tools`, `spawning: false`, maybe `deny-tools`, maybe `extensions`
 
@@ -176,29 +167,22 @@ The child runs headlessly as its own `pi -p` process.
 
 Use this for scouts, reviewers, analyzers, and other autonomous workers that do not need a pane.
 
-### Detached, awaited, joined, blocking
+### Async, sync, wait, and join
 
-Detached is the default. The child runs and the result comes back later.
+- **Async**: parent does not wait; result arrives later by steer.
+- **Sync**: parent waits before continuing. Set `async: false`, or use `subagent_wait` / `subagent_join` later.
 
-There is one important runtime guard: after a detached launch, the parent's **current response** becomes coordinator-only by default. In that same response, the parent can launch more subagents or use subagent coordination tools, but direct implementation tools are blocked so the parent does not immediately redo delegated work.
+After an async launch, the parent should only continue with clearly non-overlapping work. If the next step would duplicate the child’s task, it should stop and wait for the steer result.
 
-While the guard is active, only `subagent`, `subagent_*`, and `subagents_*` tools are allowed. The guard clears after successful synchronization/control (`subagent_wait`, `subagent_join`, or `subagent_detach`), after failed launch or validation-like sync failure, at the end of the assistant response, on the next user input, and on session switch/start/shutdown.
+With the coordinator guard enabled, same-response Pi implementation tools like `bash`, `read`, `edit`, and `write` are blocked after async launches. More subagent launches, clarification questions, subagent control tools, and short non-blocking wait/join probes are still allowed. Unbounded same-response wait/join is blocked because it turns async work back into sync work.
 
-If you want to disable this scoped same-response guard and take full control yourself, set `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1`. This lets the parent use normal tools immediately after detached launches; rely on your own prompts or process to avoid duplicate delegated work.
-
-Session seeding defaults to `standalone`, but agents can choose `session-mode: lineage-only` or `session-mode: fork`. An explicit tool-call `fork: true` still forces fork mode for that specific launch.
-
-If the parent depends on a child result, you can claim ownership of delivery with `subagent_wait` or `subagent_join`.
-
-If a child should gate the parent immediately, use blocking execution. Agent frontmatter can set `blocking: true` to make that agent block by default, and a specific launch can pass `blocking: true` to opt into waiting. Passing `blocking: false` is accepted as a harmless explicit default, but it never disables an agent whose frontmatter already forces blocking.
-
-That does **not** turn the whole system into sequential mode. It only means that specific child is awaited at launch time. Detached siblings keep running.
+`PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1` disables only that hard guard. The no-duplicate-work rule still applies.
 
 ## Why the runtime has so many settings
 
 Because there is no single sane policy for all agents.
 
-A codebase scout should usually run autonomously and get out of the way. A reviewer may need blocking behavior. A long-running background worker may need a timeout. An interactive child may need to stay open after user takeover instead of auto-exiting. A parent may want to cancel one child and abandon another.
+A codebase scout should usually run autonomously and get out of the way. A reviewer may need sync behavior. A long-running background worker may need a timeout. An interactive child may need to stay open after user takeover instead of auto-exiting. A parent may want to cancel one child and abandon another.
 
 This package exposes those differences instead of pretending they are the same thing.
 
