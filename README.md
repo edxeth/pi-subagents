@@ -74,7 +74,7 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `skills` | unset | Auto-loads one or more named skills from a comma-separated list | Use when an agent always needs the same external guidance |
 | `extensions` | unset | Comma-separated extension allowlist for child launch; if unset, child loads all extensions | Use to keep child agents off extensions |
 | `system-prompt` | task-body routing | `append` uses `--append-system-prompt`; `replace` uses `--system-prompt` | Use `replace` for hard role isolation, `append` when you want to preserve more surrounding context |
-| `spawning` | `true` | Allows or denies subagent-spawning tools | Set `false` for workers that should do the job themselves |
+| `spawning` | `false` | Allows or denies subagent-spawning tools | Set `true` only for coordinators that should launch other subagents |
 | `deny-tools` | unset | Denies specific child-session tools by name | Use for surgical restrictions without rewriting the whole tool set |
 | `auto-exit` | `false` | Child exits automatically after a normal completion | Best for autonomous agents, especially background scouts and reviewers |
 | `async` | `true` | `true`: parent does not wait. `false`: parent waits. | Use `async: false` only when the parent needs the result before continuing |
@@ -132,11 +132,12 @@ Important details:
 
 ### Practical presets
 
-- **Scout / reviewer / analyzer**: `mode: background`, `auto-exit: true`, usually `spawning: false`
+- **Scout / reviewer / analyzer**: `mode: background`, `auto-exit: true`
 - **Interactive specialist**: `mode: interactive`, usually no `auto-exit`
+- **Coordinator agent**: `spawning: true`
 - **Sync gatekeeper**: `async: false`
 - **Monorepo role agent**: `cwd: ./packages/...`
-- **Locked-down worker**: narrow `tools`, `spawning: false`, maybe `deny-tools`, maybe `extensions`
+- **Locked-down worker**: narrow `tools`, maybe `deny-tools`, maybe `extensions`
 
 If you want a concrete example of the style this package is built for, look at this scout agent:
 

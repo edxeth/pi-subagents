@@ -63,6 +63,7 @@ import {
   getSubagentToolLaunchArgsForTest,
   getSubagentToolDeniedNamesForTest,
   getSubagentToolsConfigErrorForTest,
+  resolveDenyToolsForTest,
   renderSubagentCatalogReminderForTest,
   getLaunchedSubagentResultForTest,
   getStartedSubagentDetailsForTest,
@@ -1221,6 +1222,34 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(ambient.find((entry) => entry.name === "project-agent")?.description, "Project description");
     assert.equal(ambient.find((entry) => entry.name === "description-only")?.description, "Fallback description");
     assert.equal(ambient.some((entry) => entry.name === "hidden-agent"), false);
+  });
+
+  it("defaults spawning to false for named agent definitions", () => {
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+
+    writeFileSync(
+      join(agentsDir, "worker.md"),
+      `---\nname: worker\ndescription: Do focused work\n---\n\nWorker body.`,
+    );
+    writeFileSync(
+      join(agentsDir, "coordinator.md"),
+      `---\nname: coordinator\ndescription: Coordinate work\nspawning: true\n---\n\nCoordinator body.`,
+    );
+
+    const defs = getEffectiveAgentDefinitionsForTest(dir);
+    const worker = defs.find((entry) => entry.name === "worker");
+    const coordinator = defs.find((entry) => entry.name === "coordinator");
+    assert.equal(worker?.spawning, false);
+    assert.equal(coordinator?.spawning, true);
+    assert.deepEqual(
+      [...resolveDenyToolsForTest(worker ?? null)].sort(),
+      ["subagent", "subagent_resume", "subagents_list"],
+    );
+    assert.deepEqual([...resolveDenyToolsForTest(coordinator ?? null)], []);
   });
 
   it("keeps catalog signatures stable until the effective ambient catalog changes", () => {

@@ -247,15 +247,15 @@ const SUBAGENT_PROTOCOL_TOOLS = [
 
 /**
  * Resolve the effective set of denied tool names from agent defaults.
- * `spawning: false` expands to all SPAWNING_TOOLS.
+ * `spawning` defaults to false; only `spawning: true` allows spawning tools.
  * `deny-tools` adds individual tool names on top.
  */
 function resolveDenyTools(agentDefs: AgentDefaults | null): Set<string> {
 	const denied = new Set<string>();
 	if (!agentDefs) return denied;
 
-	// spawning: false → deny all spawning tools
-	if (agentDefs.spawning === false) {
+	// spawning defaults to false → deny all spawning tools unless explicitly enabled
+	if (agentDefs.spawning !== true) {
 		for (const t of SPAWNING_TOOLS) denied.add(t);
 	}
 
@@ -270,6 +270,10 @@ function resolveDenyTools(agentDefs: AgentDefaults | null): Set<string> {
 	}
 
 	return denied;
+}
+
+export function resolveDenyToolsForTest(agentDefs: AgentDefaults | null): Set<string> {
+	return resolveDenyTools(agentDefs);
 }
 
 export function getAgentConfigDir(): string {
@@ -315,7 +319,7 @@ function parseAgentDefinition(
 		extensions: extensionsRaw,
 		thinking: get("thinking"),
 		denyTools: get("deny-tools"),
-		spawning: spawningRaw != null ? spawningRaw === "true" : undefined,
+		spawning: spawningRaw != null ? spawningRaw === "true" : false,
 		autoExit: autoExitRaw != null ? autoExitRaw === "true" : undefined,
 		systemPromptMode:
 			systemPromptRaw === "append" || systemPromptRaw === "replace"
