@@ -366,11 +366,6 @@ export class SubagentWidgetManager {
 			const childConnector = isLast ? "   " : "│  ";
 			const stats: string[] = [];
 
-			if (agent.messageCount != null) {
-				stats.push(
-					`${agent.messageCount} message${agent.messageCount === 1 ? "" : "s"}`,
-				);
-			}
 			if ((agent.toolUses ?? 0) > 0) {
 				stats.push(`${agent.toolUses} tool use${agent.toolUses === 1 ? "" : "s"}`);
 			}

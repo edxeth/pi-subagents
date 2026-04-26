@@ -38,6 +38,8 @@ describe("widget manager direct module tests", () => {
 
     assert.match(lines, /Agents 1\/1 running · 1\.5s/);
     assert.match(lines, /Research \[researcher\]/);
+    assert.match(lines, /1 tool use/);
+    assert.doesNotMatch(lines, /3 messages/);
     assert.match(lines, /Inspect the auth module for session handling/);
     assert.match(lines, /reading auth module/);
     assert.doesNotMatch(lines, /\[detached\]/);
