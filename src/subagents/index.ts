@@ -790,7 +790,9 @@ function getSubagentChildProcessEnv(
 	const env: NodeJS.ProcessEnv = { ...process.env, ...envVars };
 	if (shouldUnsetInheritedTiaEnv(invocation)) {
 		delete env.PI_PACKAGE_DIR;
-		delete env.PI_CODING_AGENT_DIR;
+		if (!envVars.PI_CODING_AGENT_DIR || envVars.PI_CODING_AGENT_DIR === process.env.PI_CODING_AGENT_DIR) {
+			delete env.PI_CODING_AGENT_DIR;
+		}
 	}
 	return env;
 }

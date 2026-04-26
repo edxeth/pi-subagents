@@ -1083,6 +1083,18 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(env.PI_SUBAGENT_NAME, "x");
   });
 
+  it("preserves explicit child config while stripping inherited tia env for normal pi child launches", () => {
+    process.env.PI_PACKAGE_DIR = "/tmp/tia/bin";
+    process.env.PI_CODING_AGENT_DIR = "/tmp/tia/pi-agent";
+    const env = getSubagentChildProcessEnvForTest(
+      { command: "pi", args: [] },
+      { PI_CODING_AGENT_DIR: "/tmp/project/.pi/agent", PI_SUBAGENT_NAME: "x" },
+    );
+    assert.equal(env.PI_PACKAGE_DIR, undefined);
+    assert.equal(env.PI_CODING_AGENT_DIR, "/tmp/project/.pi/agent");
+    assert.equal(env.PI_SUBAGENT_NAME, "x");
+  });
+
   it("preserves tia package/config env when child launches through tia pi", () => {
     process.env.PI_PACKAGE_DIR = "/tmp/tia/bin";
     process.env.PI_CODING_AGENT_DIR = "/tmp/tia/pi-agent";
