@@ -743,6 +743,10 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 		return { command: parts[0], args: [...parts.slice(1), ...args] };
 	}
 
+	if (isTiaParentProcess()) {
+		return { command: "tia", args: ["pi", ...args] };
+	}
+
 	const currentScript = process.argv[1];
 	if (currentScript && existsSync(currentScript)) {
 		return { command: process.execPath, args: [currentScript, ...args] };
@@ -760,12 +764,50 @@ function getPiShellParts(args: string[]): string[] {
 	return [shellEscape(invocation.command), ...invocation.args.map((arg) => shellEscape(arg))];
 }
 
+function isTiaParentProcess(): boolean {
+	if (process.env.TIA_ACTIVE === "1") return true;
+	const command = process.env.TIA_COMMAND?.trim();
+	if (command === "tia pi" || command === "tia") return true;
+	const packageDir = process.env.PI_PACKAGE_DIR ?? "";
+	const agentDir = process.env.PI_CODING_AGENT_DIR ?? "";
+	return packageDir.includes("/tia/") || agentDir.includes("/tia/pi-agent");
+}
+
+function shouldUnsetInheritedTiaEnv(invocation: { command: string; args: string[] }): boolean {
+	const commandName = basename(invocation.command).toLowerCase();
+	const launchedViaEnv = commandName === "env" && invocation.args.some((arg) => basename(arg).toLowerCase() === "pi");
+	const launchedViaPi = commandName === "pi" || commandName === "pi.exe" || launchedViaEnv;
+	if (!launchedViaPi) return false;
+	const packageDir = process.env.PI_PACKAGE_DIR ?? "";
+	const agentDir = process.env.PI_CODING_AGENT_DIR ?? "";
+	return packageDir.includes("/tia/") || agentDir.includes("/tia/pi-agent");
+}
+
+function getSubagentChildProcessEnv(
+	invocation: { command: string; args: string[] },
+	envVars: Record<string, string>,
+): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = { ...process.env, ...envVars };
+	if (shouldUnsetInheritedTiaEnv(invocation)) {
+		delete env.PI_PACKAGE_DIR;
+		delete env.PI_CODING_AGENT_DIR;
+	}
+	return env;
+}
+
 export function getPiInvocationForTest(args: string[]) {
 	return getPiInvocation(args);
 }
 
 export function getPiShellPartsForTest(args: string[]) {
 	return getPiShellParts(args);
+}
+
+export function getSubagentChildProcessEnvForTest(
+	invocation: { command: string; args: string[] },
+	envVars: Record<string, string>,
+) {
+	return getSubagentChildProcessEnv(invocation, envVars);
 }
 
 /**
@@ -1291,11 +1333,11 @@ function getStartedSubagentResult(running: RunningSubagent) {
 			{
 				type: "text" as const,
 				text:
-					`Sub-agent "${running.name}" launched ${isAsync ? "async" : "sync"}. ` +
+					`Sub-agent "${running.name}" launched ${isAsync ? "async" : "sync"} with id ${running.id}. ` +
 					(isAsync
 						? `Results will be delivered automatically as a steer message when it finishes. `
 						: `The parent is waiting for this result before continuing. `) +
-					`Use subagent_wait or subagent_join only when you need an explicit sync gate.`,
+					`Use this exact id for subagent_wait/subagent_join when you need an explicit sync gate.`,
 			},
 		],
 		details: getStartedSubagentDetails(running),
@@ -2353,7 +2395,7 @@ function launchBackgroundSubagent(
 		cwd: prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
 		detached: true,
 		stdio: ["ignore", "pipe", "pipe"],
-		env: { ...process.env, ...envVars },
+		env: getSubagentChildProcessEnv(invocation, envVars),
 	});
 	child.unref();
 
@@ -2374,6 +2416,14 @@ function launchBackgroundSubagent(
 		sessionFile: prepared.subagentSessionFile,
 		modelContextWindow: resolveModelContextWindow(prepared.effectiveModelRef),
 	};
+	const rememberTail = (current: string | undefined, chunk: Buffer | string) =>
+		`${current ?? ""}${chunk.toString()}`.slice(-4000);
+	child.stdout?.on("data", (chunk) => {
+		running.stdoutTail = rememberTail(running.stdoutTail, chunk);
+	});
+	child.stderr?.on("data", (chunk) => {
+		running.stderrTail = rememberTail(running.stderrTail, chunk);
+	});
 
 	runningSubagents.set(id, running);
 	return running;
@@ -2478,6 +2528,8 @@ function watchBackgroundSubagent(
 					(exitCode !== 0
 						? `Background agent exited with code ${exitCode}`
 						: "Background agent exited without output");
+			} else if (exitCode !== 0 && running.stderrTail?.trim()) {
+				summary = `Background agent exited with code ${exitCode}\n\n${running.stderrTail.trim()}`;
 			}
 			finish({
 				name: running.name,

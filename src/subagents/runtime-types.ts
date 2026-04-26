@@ -84,6 +84,8 @@ export interface RunningSubagent {
 	completionPromise?: Promise<SubagentResult>;
 	surface?: string;
 	childProcess?: ChildProcess;
+	stderrTail?: string;
+	stdoutTail?: string;
 	startTime: number;
 	sessionFile: string;
 	entries?: number;

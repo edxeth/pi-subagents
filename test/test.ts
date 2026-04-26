@@ -49,6 +49,7 @@ import subagentDoneExtension, {
   getDeniedToolNames,
   installDeniedToolGuards,
   shouldRegisterSubagentDone,
+  isMissingOptionalDependencyForTest,
 } from "../src/subagents/subagent-done.ts";
 import {
   buildPiPromptArgsForTest,
@@ -68,6 +69,7 @@ import {
   getLaunchedSubagentResultForTest,
   getPiInvocationForTest,
   getPiShellPartsForTest,
+  getSubagentChildProcessEnvForTest,
   getStartedSubagentDetailsForTest,
   getSubagentAgentRequirementErrorForTest,
   getSubagentAgentOverrideErrorForTest,
@@ -211,6 +213,7 @@ const TRACKED_ENV_KEYS = [
   "PATH",
   "PI_ARTIFACT_PROJECT_ROOT",
   "PI_CODING_AGENT_DIR",
+  "PI_PACKAGE_DIR",
   "PI_SUBAGENT_MUX",
   "PI_SUBAGENT_PI_COMMAND",
   "PI_SUBAGENT_RENAME_TMUX_SESSION",
@@ -218,6 +221,8 @@ const TRACKED_ENV_KEYS = [
   "SHELL",
   "TMUX",
   "TMUX_PANE",
+  "TIA_ACTIVE",
+  "TIA_COMMAND",
   "WEZTERM_PANE",
   "WEZTERM_UNIX_SOCKET",
   "ZELLIJ",
@@ -1000,6 +1005,10 @@ describe("subagents/index.ts helpers", () => {
 
   it("preserves the default launcher when no subagent command override is set", () => {
     delete process.env.PI_SUBAGENT_PI_COMMAND;
+    delete process.env.TIA_ACTIVE;
+    delete process.env.TIA_COMMAND;
+    delete process.env.PI_PACKAGE_DIR;
+    delete process.env.PI_CODING_AGENT_DIR;
     const invocation = getPiInvocationForTest(["--session", "/tmp/session.jsonl"]);
     assert.equal(invocation.command, process.execPath);
     assert.deepEqual(invocation.args.slice(-2), ["--session", "/tmp/session.jsonl"]);
@@ -1019,12 +1028,68 @@ describe("subagents/index.ts helpers", () => {
     ]);
   });
 
+  it("auto-detects tia parents and launches child pi through tia pi", () => {
+    delete process.env.PI_SUBAGENT_PI_COMMAND;
+    process.env.TIA_ACTIVE = "1";
+    assert.deepEqual(getPiInvocationForTest(["--session", "/tmp/session.jsonl"]), {
+      command: "tia",
+      args: ["pi", "--session", "/tmp/session.jsonl"],
+    });
+  });
+
+  it("auto-detects tia parents from tia package/config env when no marker is available", () => {
+    delete process.env.PI_SUBAGENT_PI_COMMAND;
+    delete process.env.TIA_ACTIVE;
+    delete process.env.TIA_COMMAND;
+    process.env.PI_PACKAGE_DIR = "/Users/example/.local/share/tia/bin";
+    process.env.PI_CODING_AGENT_DIR = "/Users/example/.local/share/tia/pi-agent";
+    assert.deepEqual(getPiInvocationForTest(["--session", "/tmp/session.jsonl"]), {
+      command: "tia",
+      args: ["pi", "--session", "/tmp/session.jsonl"],
+    });
+  });
+
+  it("lets PI_SUBAGENT_PI_COMMAND override automatic tia detection", () => {
+    process.env.PI_SUBAGENT_PI_COMMAND = "custom-pi --flag";
+    process.env.TIA_ACTIVE = "1";
+    assert.deepEqual(getPiInvocationForTest(["--session", "/tmp/session.jsonl"]), {
+      command: "custom-pi",
+      args: ["--flag", "--session", "/tmp/session.jsonl"],
+    });
+  });
+
   it("parses quoted PI_SUBAGENT_PI_COMMAND values", () => {
     process.env.PI_SUBAGENT_PI_COMMAND = "'/opt/tia bin/tia' pi";
     assert.deepEqual(getPiInvocationForTest(["--session", "/tmp/session.jsonl"]), {
       command: "/opt/tia bin/tia",
       args: ["pi", "--session", "/tmp/session.jsonl"],
     });
+  });
+
+  it("does not leak tia package/config env into normal pi child launches", () => {
+    process.env.PI_PACKAGE_DIR = "/tmp/tia/bin";
+    process.env.PI_CODING_AGENT_DIR = "/tmp/tia/pi-agent";
+    const env = getSubagentChildProcessEnvForTest({ command: "pi", args: [] }, { PI_SUBAGENT_NAME: "x" });
+    assert.equal(env.PI_PACKAGE_DIR, undefined);
+    assert.equal(env.PI_CODING_AGENT_DIR, undefined);
+    assert.equal(env.PI_SUBAGENT_NAME, "x");
+  });
+
+  it("preserves non-tia custom PI_CODING_AGENT_DIR for normal pi child launches", () => {
+    delete process.env.PI_PACKAGE_DIR;
+    process.env.PI_CODING_AGENT_DIR = "/tmp/custom-pi-agent";
+    const env = getSubagentChildProcessEnvForTest({ command: "pi", args: [] }, { PI_SUBAGENT_NAME: "x" });
+    assert.equal(env.PI_CODING_AGENT_DIR, "/tmp/custom-pi-agent");
+    assert.equal(env.PI_SUBAGENT_NAME, "x");
+  });
+
+  it("preserves tia package/config env when child launches through tia pi", () => {
+    process.env.PI_PACKAGE_DIR = "/tmp/tia/bin";
+    process.env.PI_CODING_AGENT_DIR = "/tmp/tia/pi-agent";
+    const env = getSubagentChildProcessEnvForTest({ command: "tia", args: ["pi"] }, { PI_SUBAGENT_NAME: "x" });
+    assert.equal(env.PI_PACKAGE_DIR, "/tmp/tia/bin");
+    assert.equal(env.PI_CODING_AGENT_DIR, "/tmp/tia/pi-agent");
+    assert.equal(env.PI_SUBAGENT_NAME, "x");
   });
 
   it("loads global agent defaults from PI_CODING_AGENT_DIR and records cwd base", () => {
@@ -2016,6 +2081,22 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(override, null);
   });
 
+  it("allows redundant launch-time execution values that match named-agent frontmatter", () => {
+    const defs = {
+      path: "/tmp/reviewer.md",
+      mode: "background" as const,
+      blocking: false,
+    };
+
+    assert.equal(
+      getSubagentAgentOverrideErrorForTest(
+        { agent: "reviewer", background: true, blocking: false },
+        defs,
+      ),
+      null,
+    );
+  });
+
   it("allows fork as an explicit launch-time session override", () => {
     const defs = {
       path: "/tmp/reviewer.md",
@@ -2134,7 +2215,7 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(paths.localAgentConfigDir, localAgentDir);
     assert.equal(paths.effectiveAgentConfigDir, localAgentDir);
     assert.equal(paths.targetCwdForSession, target);
-    assert.equal(paths.sessionDir, join(localAgentDir, "sessions", `--tmp-${basename(dir)}-packages-worker--`));
+    assert.equal(paths.sessionDir, join(localAgentDir, "sessions", `--${target.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`));
   });
 
   it("falls back to the global agent dir for child sessions when no local config exists", () => {
@@ -2268,6 +2349,10 @@ describe("subagents/index.ts helpers", () => {
       sessionFile: "/tmp/child-session.jsonl",
     };
 
+    const launched = getLaunchedSubagentResultForTest(running) as any;
+    assert.match(launched.content[0].text, /child-123/);
+    assert.match(launched.content[0].text, /subagent_wait\/subagent_join/);
+
     const started = getStartedSubagentDetailsForTest(running);
     assert.equal(started.status, "started");
     assert.equal(started.mode, "background");
@@ -2305,6 +2390,32 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(cached.parentClosePolicy, "terminate");
     assert.equal(cached.status, "completed");
     assert.equal(getCompletedSubagentResultForTest(running.id)?.deliveredTo, "steer");
+  });
+
+  it("recognizes optional dependency resolution failures from node and bun-style errors", () => {
+    assert.equal(
+      isMissingOptionalDependencyForTest(
+        Object.assign(new Error("Cannot find module '@mariozechner/pi-tui' from '/tmp/ext.ts'"), {
+          code: "MODULE_NOT_FOUND",
+        }),
+        "@mariozechner/pi-tui",
+      ),
+      true,
+    );
+    assert.equal(
+      isMissingOptionalDependencyForTest(
+        { message: "Cannot find module '@mariozechner/pi-tui' from '/tmp/ext.ts'" },
+        "@mariozechner/pi-tui",
+      ),
+      true,
+    );
+    assert.equal(
+      isMissingOptionalDependencyForTest(
+        { message: "Cannot find package 'typebox' imported from /tmp/ext.ts" },
+        "typebox",
+      ),
+      true,
+    );
   });
 
   it("returns an awaited result immediately when launched as blocking", async () => {
@@ -3447,6 +3558,9 @@ describe("mux.ts", () => {
     });
 
     it("selects tmux when it is the available runtime", () => {
+      const dir = createTestDir();
+      writeExecutable(dir, "tmux", "#!/usr/bin/env bash\nexit 0\n");
+      process.env.PATH = `${dir}:${process.env.PATH ?? ""}`;
       process.env.PI_SUBAGENT_MUX = "tmux";
       process.env.TMUX = "test-tmux-socket";
       delete process.env.CMUX_SOCKET_PATH;
