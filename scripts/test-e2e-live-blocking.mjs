@@ -21,6 +21,7 @@ requireLiveWindowOptIn("test-e2e-live-blocking");
 const releaseLiveWindowLock = acquireLiveWindowLock("test-e2e-live-blocking");
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
+const extensionSource = join(repoRoot, "src", "index.ts");
 const tmpRoot = mkdtempSync(join(tmpdir(), "pi-subagents-live-blocking-"));
 const tmuxSocket = join(tmpRoot, "tmux.sock");
 const tmuxConfig = join(tmpRoot, "tmux.conf");
@@ -178,12 +179,12 @@ const piCommand = [
   "PI_SUBAGENT_AGENT=",
   "PI_SUBAGENT_NAME=",
   "PI_SUBAGENT_AUTO_EXIT=",
+  "PI_PACKAGE_DIR=",
   `PI_CODING_AGENT_DIR=${shellQuote(configDir)}`,
   "pi",
   `--model ${LIVE_TEST_MODEL}`,
   "--no-extensions",
-  "-e ./src/subagents/index.ts",
-  "-e ./src/session-artifacts/index.ts",
+  `-e ${shellQuote(extensionSource)}`,
   `--session-dir ${shellQuote(sessionDir)}`,
   shellQuote(prompt),
 ].join(" ");

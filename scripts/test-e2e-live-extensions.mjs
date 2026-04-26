@@ -18,6 +18,7 @@ import { LIVE_TEST_MODEL } from "./live-test-guard.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
+const extensionSource = join(repoRoot, "src", "index.ts");
 const tmpRoot = join(tmpdir(), `pi-subagents-live-extensions-${process.pid}`);
 const sessionDir = join(tmpRoot, "sessions");
 const configDir = join(tmpRoot, "agent");
@@ -205,9 +206,7 @@ try {
       LIVE_TEST_MODEL,
       "--no-extensions",
       "-e",
-      "./src/subagents/index.ts",
-      "-e",
-      "./src/session-artifacts/index.ts",
+      extensionSource,
       "--session-dir",
       sessionDir,
       prompt,
@@ -218,6 +217,7 @@ try {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
+        PI_PACKAGE_DIR: "",
         PI_CODING_AGENT_DIR: configDir,
         PI_E2E_EXT_SNAPSHOT_DIR: snapshotsDir,
         PI_SUBAGENT_AGENT: "",
