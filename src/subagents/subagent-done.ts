@@ -11,9 +11,18 @@ import { shouldAutoExitOnAgentEnd, shouldMarkUserTookOver } from "./auto-exit.ts
 const require = createRequire(import.meta.url);
 
 function isMissingOptionalDependency(error: unknown, id: string): boolean {
-  if (!(error instanceof Error)) return false;
-  const nodeError = error as NodeJS.ErrnoException;
-  return nodeError.code === "MODULE_NOT_FOUND" && error.message.includes(`'${id}'`);
+  const maybeError = error as { code?: unknown; message?: unknown } | null;
+  const message = typeof maybeError?.message === "string" ? maybeError.message : "";
+  const code = maybeError?.code;
+  return (
+    (code === "MODULE_NOT_FOUND" || code == null) &&
+    (message.includes("Cannot find module") || message.includes("Cannot find package")) &&
+    message.includes(id)
+  );
+}
+
+export function isMissingOptionalDependencyForTest(error: unknown, id: string): boolean {
+  return isMissingOptionalDependency(error, id);
 }
 
 function optionalRequire(id: string): unknown | null {

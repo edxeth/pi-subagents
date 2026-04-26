@@ -32,6 +32,20 @@ pi install git:github.com/edxeth/pi-subagents
 
 That is the difference between “subagents exist” and “subagents are usable.”
 
+## Launching children through a wrapper
+
+By default, child sessions are launched with the normal `pi` command or, when possible, the same bundled executable as the parent process. If your pi runtime is wrapped by another launcher, opt in explicitly with:
+
+```bash
+PI_SUBAGENT_PI_COMMAND="tia pi" tia pi
+```
+
+This makes both interactive subagents and resumed sessions launch through `tia pi` without changing behavior for users who run stock `pi`. The value is parsed as command words, so quoted paths are supported:
+
+```bash
+PI_SUBAGENT_PI_COMMAND="'/path with spaces/tia' pi" pi
+```
+
 ## Why it exists
 
 A scout, a reviewer, and an implementation worker are not the same thing.
