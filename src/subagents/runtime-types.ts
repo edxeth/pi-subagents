@@ -80,6 +80,7 @@ export interface RunningSubagent {
 	blocking: boolean;
 	async: boolean;
 	autoExit?: boolean;
+	noSession?: boolean;
 	resultOwner?: { kind: CompletedDelivery; ownerId: string };
 	completionPromise?: Promise<SubagentResult>;
 	surface?: string;

@@ -212,6 +212,7 @@ interface AgentDefaults {
 	async?: boolean;
 	blocking?: boolean;
 	noContextFiles?: boolean;
+	noSession?: boolean;
 	timeout?: number;
 }
 
@@ -303,6 +304,7 @@ function parseAgentDefinition(
 	const asyncRaw = get("async");
 	const blockingRaw = get("blocking");
 	const noContextFilesRaw = get("no-context-files");
+	const noSessionRaw = get("no-session");
 	const timeoutRaw = get("timeout");
 	const systemPromptRaw = get("system-prompt");
 	const extensionsRaw = get("extensions");
@@ -340,6 +342,7 @@ function parseAgentDefinition(
 		async: asyncRaw != null ? asyncRaw === "true" : undefined,
 		blocking: blockingRaw != null ? blockingRaw === "true" : undefined,
 		noContextFiles: noContextFilesRaw != null ? noContextFilesRaw === "true" : undefined,
+		noSession: noSessionRaw != null ? noSessionRaw === "true" : undefined,
 		mode:
 			modeRaw === "background" || modeRaw === "interactive"
 				? modeRaw
@@ -899,11 +902,7 @@ export function buildPiPromptArgsForTest(
 	return buildPiPromptArgs(skills, taskArg, directTask);
 }
 
-export function createForkSessionFile(
-	parentSessionFile: string,
-	childSessionFile: string,
-	cwd = process.cwd(),
-): void {
+function getForkSeedEntries(parentSessionFile: string): SessionEntryLike[] {
 	const entries = getEntries(parentSessionFile);
 	let truncateAt = entries.length;
 	for (let i = entries.length - 1; i >= 0; i--) {
@@ -914,8 +913,17 @@ export function createForkSessionFile(
 		}
 	}
 
-	const cleanEntries = entries.slice(0, truncateAt);
-	const contentEntries = cleanEntries.filter((entry: SessionEntryLike) => entry?.type !== "session");
+	return entries
+		.slice(0, truncateAt)
+		.filter((entry: SessionEntryLike) => entry?.type !== "session") as SessionEntryLike[];
+}
+
+export function createForkSessionFile(
+	parentSessionFile: string,
+	childSessionFile: string,
+	cwd = process.cwd(),
+): void {
+	const contentEntries = getForkSeedEntries(parentSessionFile);
 	const header = createSessionHeader(cwd, parentSessionFile);
 
 	mkdirSync(dirname(childSessionFile), { recursive: true });
@@ -1156,6 +1164,14 @@ export function resolveSubagentNoContextFilesForTest(agentDefs: AgentDefaults | 
 	return resolveSubagentNoContextFiles(agentDefs);
 }
 
+function resolveSubagentNoSession(agentDefs: AgentDefaults | null): boolean {
+	return agentDefs?.noSession ?? false;
+}
+
+export function resolveSubagentNoSessionForTest(agentDefs: AgentDefaults | null) {
+	return resolveSubagentNoSession(agentDefs);
+}
+
 function isSchemeLikePath(value: string): boolean {
 	return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value) && !/^[a-zA-Z]:[\\/]/.test(value);
 }
@@ -1317,7 +1333,8 @@ function getStartedSubagentDetails(running: RunningSubagent) {
 		name: running.name,
 		task: running.task,
 		agent: running.agent,
-		sessionFile: running.sessionFile,
+		sessionFile: running.noSession ? undefined : running.sessionFile,
+		noSession: running.noSession,
 		status: "started" as const,
 		mode: running.mode,
 		deliveryState: running.deliveryState,
@@ -2228,7 +2245,11 @@ function prepareSubagentLaunch(
 		ctx.cwd,
 		dirname(sessionFile),
 	);
-	const subagentSessionFile = generateSubagentSessionFile(runtimePaths.sessionDir);
+	const subagentSessionFile = generateSubagentSessionFile(
+		resolveSubagentNoSession(agentDefs)
+			? join(tmpdir(), "pi-subagents", "sessions")
+			: runtimePaths.sessionDir,
+	);
 	const denySet = addToolModeDeniedNames(resolveDenyTools(agentDefs), effectiveTools);
 	const effectiveExtensions = resolveSubagentExtensions(agentDefs);
 	const identity = buildIdentityBlock(agentDefs, params.systemPrompt);
@@ -2294,6 +2315,32 @@ function getPreparedExtensionLaunchArgs(prepared: PreparedSubagentLaunch, mandat
 	return getExtensionLaunchArgs(prepared.effectiveExtensions, mandatoryExtensionPath);
 }
 
+function getPreparedSessionLaunchArgs(prepared: PreparedSubagentLaunch): string[] {
+	return resolveSubagentNoSession(prepared.agentDefs)
+		? ["--session", prepared.subagentSessionFile, "--no-session"]
+		: ["--session", prepared.subagentSessionFile];
+}
+
+export function getPreparedSessionLaunchArgsForTest(agentDefs: AgentDefaults | null) {
+	return getPreparedSessionLaunchArgs({ agentDefs, subagentSessionFile: "child.jsonl" } as PreparedSubagentLaunch);
+}
+
+function getNoSessionSeedMode(sessionMode: SubagentSessionMode): Exclude<SubagentSessionMode, "standalone"> | null {
+	if (sessionMode === "standalone") return null;
+	return "fork";
+}
+
+export function getNoSessionSeedModeForTest(sessionMode: SubagentSessionMode) {
+	return getNoSessionSeedMode(sessionMode);
+}
+
+function cleanupNoSessionSessionFile(running: Pick<RunningSubagent, "noSession" | "sessionFile">): void {
+	if (!running.noSession || !existsSync(running.sessionFile)) return;
+	try {
+		rmSync(running.sessionFile, { force: true });
+	} catch {}
+}
+
 function getPreparedRoleBlock(prepared: PreparedSubagentLaunch): string {
 	return prepared.identity && !prepared.identityInSystemPrompt
 		? `\n\n${prepared.identity}`
@@ -2340,7 +2387,9 @@ function launchBackgroundSubagent(
 	);
 	const roleBlock = getPreparedRoleBlock(prepared);
 	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
-	const directTask = sessionMode === "fork";
+	const noSession = resolveSubagentNoSession(prepared.agentDefs);
+	const noSessionSeedMode = noSession ? getNoSessionSeedMode(sessionMode) : null;
+	const directTask = sessionMode === "fork" || noSessionSeedMode === "fork";
 	const modeHint = prepared.agentDefs?.autoExit
 		? "Complete your task autonomously."
 		: "Manual lifecycle: do not stop after your final text. After completing the task, you MUST call the subagent_done tool unless you intentionally need the human operator to terminate this session. If operator close is required, say exactly `MANUAL CLOSE REQUIRED:` followed by the reason and wait.";
@@ -2351,10 +2400,11 @@ function launchBackgroundSubagent(
 		? params.task
 		: `${roleBlock}\n\n${modeHint}\n\n${params.task}\n\n${summaryInstruction}`;
 
-	const args: string[] = ["-p", "--session", prepared.subagentSessionFile, ...getPreparedExtensionLaunchArgs(prepared, subagentDonePath)];
-	if (sessionMode !== "standalone") {
+	const args: string[] = ["-p", ...getPreparedSessionLaunchArgs(prepared), ...getPreparedExtensionLaunchArgs(prepared, subagentDonePath)];
+	const seedMode = noSession ? noSessionSeedMode : sessionMode === "standalone" ? null : sessionMode;
+	if (seedMode) {
 		seedSubagentSessionFile(
-			sessionMode,
+			seedMode,
 			prepared.sessionFile,
 			prepared.subagentSessionFile,
 			prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
@@ -2413,6 +2463,7 @@ function launchBackgroundSubagent(
 		blocking: params.blocking ?? false,
 		async: params.async ?? !(params.blocking ?? false),
 		autoExit: prepared.agentDefs?.autoExit ?? false,
+		noSession,
 		childProcess: child,
 		startTime,
 		sessionFile: prepared.subagentSessionFile,
@@ -2473,6 +2524,7 @@ function watchBackgroundSubagent(
 			if (settled) return;
 			settled = true;
 			cleanup();
+			cleanupNoSessionSessionFile(running);
 			resolve(result);
 		};
 
@@ -2482,6 +2534,7 @@ function watchBackgroundSubagent(
 				const stat = statSync(running.sessionFile);
 				running.entries = getEntryCount(running.sessionFile);
 				running.bytes = stat.size;
+				if (running.noSession) return;
 				const summary = getTerminalAssistantSummaryForTest(
 					getEntries(running.sessionFile) as SessionEntryLike[],
 				);
@@ -2523,13 +2576,15 @@ function watchBackgroundSubagent(
 			const exitSignal = consumeSubagentExitSignal(running.sessionFile);
 			const exitCode = exitSignal?.exitCode ?? code ?? 1;
 			let summary = `Background agent exited with code ${exitCode}`;
-			if (existsSync(running.sessionFile)) {
+			if (!running.noSession && existsSync(running.sessionFile)) {
 				const allEntries = getNewEntries(running.sessionFile, 0);
 				summary =
 					findLastAssistantMessage(allEntries) ??
 					(exitCode !== 0
 						? `Background agent exited with code ${exitCode}`
 						: "Background agent exited without output");
+			} else if (running.stdoutTail?.trim()) {
+				summary = running.stdoutTail.trim();
 			} else if (exitCode !== 0 && running.stderrTail?.trim()) {
 				summary = `Background agent exited with code ${exitCode}\n\n${running.stderrTail.trim()}`;
 			}
@@ -2537,7 +2592,7 @@ function watchBackgroundSubagent(
 				name: running.name,
 				task: running.task,
 				summary,
-				sessionFile: running.sessionFile,
+				sessionFile: running.noSession ? undefined : running.sessionFile,
 				exitCode,
 				elapsed,
 				outputTokens: exitSignal?.outputTokens,
@@ -2549,7 +2604,7 @@ function watchBackgroundSubagent(
 				name: running.name,
 				task: running.task,
 				summary: `Background agent failed to start: ${error.message}`,
-				sessionFile: running.sessionFile,
+				sessionFile: running.noSession ? undefined : running.sessionFile,
 				exitCode: 1,
 				elapsed: Math.floor((Date.now() - running.startTime) / 1000),
 				error: error.message,
@@ -2584,7 +2639,9 @@ async function launchSubagent(
 	}
 
 	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
-	const directTask = sessionMode === "fork";
+	const noSession = resolveSubagentNoSession(prepared.agentDefs);
+	const noSessionSeedMode = noSession ? getNoSessionSeedMode(sessionMode) : null;
+	const directTask = sessionMode === "fork" || noSessionSeedMode === "fork";
 	const agentType = params.agent ?? params.name;
 	const modeHint = prepared.agentDefs?.autoExit
 		? "Complete your task autonomously."
@@ -2603,10 +2660,11 @@ async function launchSubagent(
 		: `${roleBlock}\n\n${modeHint}\n\n${tabTitleInstruction}\n\n${params.task}\n\n${summaryInstruction}`;
 
 	// Build pi command (shell-escaped for sendCommand)
-	const parts: string[] = getPiShellParts(["--session", prepared.subagentSessionFile]);
-	if (sessionMode !== "standalone") {
+	const parts: string[] = getPiShellParts(getPreparedSessionLaunchArgs(prepared));
+	const seedMode = noSession ? noSessionSeedMode : sessionMode === "standalone" ? null : sessionMode;
+	if (seedMode) {
 		seedSubagentSessionFile(
-			sessionMode,
+			seedMode,
 			prepared.sessionFile,
 			prepared.subagentSessionFile,
 			prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
@@ -2698,6 +2756,7 @@ async function launchSubagent(
 		blocking: params.blocking ?? false,
 		async: params.async ?? !(params.blocking ?? false),
 		autoExit: prepared.agentDefs?.autoExit ?? false,
+		noSession,
 		surface,
 		startTime,
 		sessionFile: prepared.subagentSessionFile,
@@ -2747,9 +2806,9 @@ async function watchSubagent(
 
 		const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
-		// Extract summary from the known session file
+		// Extract summary from the known session file when it is a persisted child transcript.
 		let summary: string;
-		if (existsSync(sessionFile)) {
+		if (!running.noSession && existsSync(sessionFile)) {
 			const allEntries = getNewEntries(sessionFile, 0);
 			summary =
 				findLastAssistantMessage(allEntries) ??
@@ -2771,12 +2830,13 @@ async function watchSubagent(
 			} catch {}
 		}
 		closeSurface(surface);
+		cleanupNoSessionSessionFile(running);
 
 		return {
 			name,
 			task,
 			summary,
-			sessionFile,
+			sessionFile: running.noSession ? undefined : sessionFile,
 			exitCode: pollResult.exitCode,
 			elapsed,
 			outputTokens: pollResult.outputTokens ?? exitSignal?.outputTokens,
@@ -2792,6 +2852,7 @@ async function watchSubagent(
 		try {
 			closeSurface(surface);
 		} catch {}
+		cleanupNoSessionSessionFile(running);
 
 		if (signal.aborted) {
 			return {

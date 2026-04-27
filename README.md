@@ -90,6 +90,7 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `deny-tools` | unset | Denies specific child-session tools by name | Use for surgical restrictions without rewriting the whole tool set |
 | `skills` | unset | Auto-loads one or more named skills from a comma-separated list | Use when an agent always needs the same external guidance |
 | `no-context-files` | `false` | Disables automatic `AGENTS.md` / `CLAUDE.md` discovery for spawned child sessions | Use only when you want a clean child run without project context injection |
+| `no-session` | `false` | Launches the child with `pi --no-session` so no persistent child JSONL session is stored; inherited context uses a temporary session file that is removed after completion | Use for disposable children that do not need resume, caller ping, or persistent lineage bookkeeping |
 | `auto-exit` | `false` | Child exits automatically after a normal completion | Best for autonomous agents, especially background scouts and reviewers |
 | `system-prompt` | task-body routing | `append` uses `--append-system-prompt`; `replace` uses `--system-prompt` | Use `replace` for hard role isolation, `append` when you want to preserve more surrounding context |
 | `session-mode` | `standalone` | Session seeding mode: `standalone`, `lineage-only`, or `fork` | Use `standalone` for a clean unrelated child, `lineage-only` for a clean child that is still recorded as descended from the parent, and `fork` when the child needs the full parent context branch |
@@ -110,6 +111,8 @@ The difference between `standalone` and `lineage-only` is runtime bookkeeping, n
 - `fork` starts a child with the parent context branch copied in. Use this when the child needs the prior conversation, decisions, or files already discussed by the parent.
 
 In short: `standalone` is a clean unrelated child, `lineage-only` is a clean related child, and `fork` is a related child with inherited context.
+
+`no-session: true` is separate from `session-mode`: it disables persistent child history by launching pi with `--session <ephemeral-file> --no-session`. With `session-mode: fork`, the extension seeds that ephemeral file the same way it seeds a normal fork, so the child sees inherited context as session history rather than as prompt text. With `session-mode: lineage-only`, there is no persistent child session to attach lineage metadata to; when combined with `no-session: true`, it is treated like `fork` so the child still inherits parent context and the ephemeral file is removed after completion.
 
 #### How `extensions` works
 

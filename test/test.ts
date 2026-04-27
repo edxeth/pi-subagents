@@ -78,6 +78,9 @@ import {
   resolveEffectiveSessionModeForTest,
   resolveSubagentExtensionsForTest,
   resolveSubagentNoContextFilesForTest,
+  resolveSubagentNoSessionForTest,
+  getPreparedSessionLaunchArgsForTest,
+  getNoSessionSeedModeForTest,
   renderSubagentWidgetForTest,
   resetSubagentStateForTest,
   resolveSubagentBlockingForTest,
@@ -151,6 +154,7 @@ function loadAgentDefaultsForTest(agentName: string, cwdHint?: string | null) {
     };
     const systemPromptRaw = get("system-prompt");
     const noContextFilesRaw = get("no-context-files");
+    const noSessionRaw = get("no-session");
     const extensionsRaw = get("extensions");
     const modeRaw = get("mode");
     return {
@@ -165,6 +169,12 @@ function loadAgentDefaultsForTest(agentName: string, cwdHint?: string | null) {
         noContextFilesRaw === "true"
           ? true
           : noContextFilesRaw === "false"
+            ? false
+            : undefined,
+      noSession:
+        noSessionRaw === "true"
+          ? true
+          : noSessionRaw === "false"
             ? false
             : undefined,
       mode: modeRaw === "background" || modeRaw === "interactive" ? modeRaw : undefined,
@@ -1149,6 +1159,51 @@ describe("subagents/index.ts helpers", () => {
     const defaults = loadAgentDefaults("tester");
     assert.equal(defaults?.noContextFiles, undefined);
     assert.equal(resolveSubagentNoContextFilesForTest(defaults), false);
+  });
+
+  it("defaults session storage on and can disable it in agent frontmatter", () => {
+    const dir = createTestDir();
+    const configDir = join(dir, "agent-root");
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = configDir;
+
+    writeFileSync(
+      join(agentsDir, "tester.md"),
+      `---\nname: tester\nno-session: true\n---\n\nYou are the tester.`,
+    );
+
+    const defs = loadAgentDefaults("tester");
+    assert.equal(defs?.noSession, true);
+    assert.equal(resolveSubagentNoSessionForTest(defs), true);
+    assert.equal(resolveSubagentNoSessionForTest(null), false);
+    assert.deepEqual(getPreparedSessionLaunchArgsForTest(defs), ["--session", "child.jsonl", "--no-session"]);
+
+    writeFileSync(
+      join(agentsDir, "tester.md"),
+      `---\nname: tester\n---\n\nYou are the tester.`,
+    );
+
+    const defaults = loadAgentDefaults("tester");
+    assert.equal(defaults?.noSession, undefined);
+    assert.equal(resolveSubagentNoSessionForTest(defaults), false);
+    assert.deepEqual(getPreparedSessionLaunchArgsForTest(defaults), ["--session", "child.jsonl"]);
+  });
+
+  it("launches no-session children through an ephemeral session path", () => {
+    assert.deepEqual(getPreparedSessionLaunchArgsForTest({ noSession: true, sessionMode: "fork" }), [
+      "--session",
+      "child.jsonl",
+      "--no-session",
+    ]);
+    assert.deepEqual(getPreparedSessionLaunchArgsForTest({ noSession: true, sessionMode: "lineage-only" }), [
+      "--session",
+      "child.jsonl",
+      "--no-session",
+    ]);
+    assert.equal(getNoSessionSeedModeForTest("standalone"), null);
+    assert.equal(getNoSessionSeedModeForTest("fork"), "fork");
+    assert.equal(getNoSessionSeedModeForTest("lineage-only"), "fork");
   });
 
   it("reads extensions from extensions frontmatter", () => {
