@@ -76,6 +76,7 @@ import {
   joinSubagentsForTest,
   loadAgentDefaults,
   resolveEffectiveSessionModeForTest,
+  resolveTaskSessionModeForTest,
   resolveSubagentExtensionsForTest,
   resolveSubagentNoContextFilesForTest,
   resolveSubagentNoSessionForTest,
@@ -1271,6 +1272,7 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(defs?.sessionMode, "lineage-only");
     assert.equal(resolveEffectiveSessionModeForTest({ agent: "tester" }, defs), "lineage-only");
     assert.equal(resolveEffectiveSessionModeForTest({ agent: "tester", fork: true }, defs), "fork");
+    assert.equal(resolveTaskSessionModeForTest(defs), "lineage-only");
 
     writeFileSync(
       join(agentsDir, "compat.md"),
@@ -1278,6 +1280,7 @@ describe("subagents/index.ts helpers", () => {
     );
     const compat = loadAgentDefaults("compat");
     assert.equal(compat?.sessionMode, "fork");
+    assert.equal(resolveTaskSessionModeForTest({ sessionMode: "lineage-only", noSession: true }), "fork");
   });
 
   it("skips disabled agents and falls back to the next available definition", () => {
@@ -1349,11 +1352,11 @@ describe("subagents/index.ts helpers", () => {
 
     writeFileSync(
       join(agentsDir, "global-agent.md"),
-      `---\nname: global-agent\ndescription: Use the global route\nmode: background\n---\n\nGlobal body.`,
+      `---\nname: global-agent\ndescription: Use the global route\nmode: background\nsession-mode: fork\n---\n\nGlobal body.`,
     );
     writeFileSync(
       join(agentsDir, "description-only.md"),
-      `---\nname: description-only\ndescription: Fallback description\nmode: interactive\n---\n\nDescription body.`,
+      `---\nname: description-only\ndescription: Fallback description\nmode: interactive\nsession-mode: lineage-only\n---\n\nDescription body.`,
     );
     writeFileSync(
       join(agentsDir, "disabled.md"),
@@ -1385,6 +1388,9 @@ describe("subagents/index.ts helpers", () => {
     );
     assert.equal(ambient.find((entry) => entry.name === "project-agent")?.description, "Project description");
     assert.equal(ambient.find((entry) => entry.name === "description-only")?.description, "Fallback description");
+    assert.equal(ambient.find((entry) => entry.name === "description-only")?.sessionMode, "lineage-only");
+    assert.equal(ambient.find((entry) => entry.name === "global-agent")?.sessionMode, "fork");
+    assert.equal(ambient.find((entry) => entry.name === "project-agent")?.sessionMode, "standalone");
     assert.equal(ambient.some((entry) => entry.name === "hidden-agent"), false);
   });
 
@@ -1497,7 +1503,7 @@ describe("subagents/index.ts helpers", () => {
       assert.equal(listed.some((entry: any) => entry.name === "disabled-agent"), false);
       assert.equal(listed.some((entry: any) => entry.name === "sparse-agent"), true);
       assert.equal(listed.find((entry: any) => entry.name === "global-reviewer")?.description, "Review changes");
-      assert.match(result.content[0].text, /global-reviewer — Review changes/);
+      assert.match(result.content[0].text, /global-reviewer \[isolated context\] — Review changes/);
       assert.doesNotMatch(result.content[0].text, /\(background\)|\[.*claude.*\]|\[.*glm.*\]|\| use:/i);
       assert.match(result.content[0].text, /sparse-agent/);
     } finally {
@@ -1529,7 +1535,16 @@ describe("subagents/index.ts helpers", () => {
     assert.match(tool.promptSnippet, /CRITICAL parallel-launch rule/);
     assert.match(tool.promptSnippet, /same assistant message\/tool-call batch/);
     assert.match(tool.promptSnippet, /Keep launches explicit and use one subagent tool call per child/);
+    assert.match(tool.promptSnippet, /Use exact catalog names in the agent field/);
+    assert.match(tool.promptSnippet, /launch each named agent exactly once/);
+    assert.match(tool.promptSnippet, /do not reuse one agent as a substitute for another/);
     assert.match(tool.promptSnippet, /call-time duplicates for named agents are ignored/);
+    assert.match(tool.promptSnippet, /translate the user's request into the child task/);
+    assert.match(tool.promptSnippet, /do not change the work based on the agent name/);
+    assert.match(tool.promptSnippet, /Use the catalog\/list memory label only to decide context/);
+    assert.match(tool.promptSnippet, /isolated context starts a fresh chat/);
+    assert.match(tool.promptSnippet, /write a self-contained task with objective, relevant facts\/files, constraints, and expected output/);
+    assert.match(tool.promptSnippet, /forked context continues this conversation on a new branch/);
     assert.match(tool.promptSnippet, /Handle trivial single-file reads, quick direct answers, and tiny one-shot edits yourself instead of delegating/);
     assert.match(tool.promptSnippet, /Delegation ownership rule/);
     assert.match(tool.promptSnippet, /explicitly non-overlapping parent-owned work/);
@@ -1904,7 +1919,9 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(message.details.signature, getSubagentCatalogSignatureForTest(message.details.entries));
     assert.match(message.content, /^<system-reminder>\n/);
     assert.match(message.content, /Available named subagents:/);
-    assert.match(message.content, /reviewer \(background\) — Review changes for regressions/);
+    assert.match(message.content, /reviewer \(background\) \[isolated context\] — Review changes for regressions/);
+    assert.match(message.content, /Memory label rule: isolated context means the subagent starts a fresh chat and cannot see this conversation/);
+    assert.match(message.content, /forked context means the subagent continues from this conversation on a new branch/);
     assert.match(message.content, /\n<\/system-reminder>$/);
     assert.equal(renderSubagentCatalogReminderForTest(message.details.entries), message.content);
     assert.doesNotMatch(message.content, /subagents_list/);
@@ -1985,7 +2002,7 @@ describe("subagents/index.ts helpers", () => {
     const reloaded = handlers.get("before_agent_start")({ type: "before_agent_start", prompt: "continue", systemPrompt: "sys" });
     assert.ok(reloaded?.message);
     assert.equal(reloaded.message.details.supersedes, true);
-    assert.match(reloaded.message.content, /researcher \(background\) — Investigate open-ended questions/);
+    assert.match(reloaded.message.content, /researcher \(background\) \[isolated context\] — Investigate open-ended questions/);
 
     handlers.get("session_start")({ type: "session_start", reason: "reload" }, ctx);
     assert.equal(handlers.get("before_agent_start")({ type: "before_agent_start", prompt: "continue again", systemPrompt: "sys" }), undefined);
@@ -2102,8 +2119,8 @@ describe("subagents/index.ts helpers", () => {
       const result = await listTool.execute();
       assert.equal(result.details.agents[0].name, "reviewer");
       assert.equal(result.details.agents[0].description, "Review changes");
-      assert.match(result.content[0].text, /reviewer/);
-      assert.doesNotMatch(result.content[0].text, /\(background\)|\[|\| use:/);
+      assert.match(result.content[0].text, /reviewer \[isolated context\] — Review changes/);
+      assert.doesNotMatch(result.content[0].text, /\(background\)|\| use:/);
     } finally {
       process.chdir(prevCwd);
       if (prevKillSwitch == null) delete process.env.PI_SUBAGENT_DISABLE_AMBIENT_AWARENESS;

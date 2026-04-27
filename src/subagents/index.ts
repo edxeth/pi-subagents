@@ -227,6 +227,7 @@ interface SubagentCatalogEntry {
 	name: string;
 	source: "project" | "global";
 	mode?: "interactive" | "background";
+	sessionMode: "standalone" | "lineage-only" | "fork";
 	description?: string;
 }
 
@@ -382,6 +383,7 @@ function getAmbientCatalogEntries(baseCwd = process.cwd()): SubagentCatalogEntry
 			name: agent.name,
 			source: agent.source,
 			mode: agent.mode,
+			sessionMode: resolveTaskSessionMode(agent),
 			description: agent.description,
 		}));
 }
@@ -394,14 +396,19 @@ export function getAmbientCatalogEntriesForTest(baseCwd = process.cwd()) {
 	return getAmbientCatalogEntries(baseCwd);
 }
 
+function getSessionModeMemoryLabel(sessionMode: SubagentSessionMode): string {
+	return sessionMode === "fork" ? "forked context" : "isolated context";
+}
+
 function renderSubagentCatalogReminder(entries: SubagentCatalogEntry[]): string {
 	const lines = entries.map((entry) => {
 		const modeTag = entry.mode === "background" ? " (background)" : "";
-		return `- ${entry.name}${modeTag} — ${entry.description}`;
+		return `- ${entry.name}${modeTag} [${getSessionModeMemoryLabel(entry.sessionMode)}] — ${entry.description}`;
 	});
 	const body = [
 		"Available named subagents:",
 		...lines,
+		"Memory label rule: isolated context means the subagent starts a fresh chat and cannot see this conversation, so write a self-contained task with objective, relevant facts/files, constraints, and expected output. forked context means the subagent continues from this conversation on a new branch, so give goal, boundary, and expected output without re-explaining everything.",
 		"Any newer catalog snapshot supersedes older catalog snapshots. Use subagent explicitly.",
 		"Launch independent children in parallel whenever possible; to do that, use a single message with multiple subagent tool calls.",
 	].join("\n");
@@ -418,6 +425,7 @@ function getSubagentCatalogSignature(entries: SubagentCatalogEntry[]): string {
 			name: entry.name,
 			source: entry.source,
 			mode: entry.mode,
+			sessionMode: entry.sessionMode,
 			description: entry.description,
 		})),
 	);
@@ -875,6 +883,16 @@ function resolveEffectiveSessionMode(
 	if (agentDefs?.sessionMode) return agentDefs.sessionMode;
 	if (agentDefs?.fork) return "fork";
 	return "standalone";
+}
+
+function resolveTaskSessionMode(agentDefs: AgentDefaults | null): SubagentSessionMode {
+	const sessionMode = resolveEffectiveSessionMode({}, agentDefs);
+	if (!resolveSubagentNoSession(agentDefs)) return sessionMode;
+	return getNoSessionSeedMode(sessionMode) ?? sessionMode;
+}
+
+export function resolveTaskSessionModeForTest(agentDefs: AgentDefaults | null) {
+	return resolveTaskSessionMode(agentDefs);
 }
 
 export function resolveEffectiveSessionModeForTest(
@@ -3173,8 +3191,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				"Use subagents for specialist, complex, or parallelizable work when the named-agent catalog suggests a good match. " +
 				"Terminology: async means the parent agent does not wait for the child; sync means the parent waits for the child before continuing. " +
 				"CRITICAL parallel-launch rule: when a task calls for multiple independent subagents, emit every independent subagent tool call in the same assistant message/tool-call batch before waiting, reading results, or replying. Do not serialize independent subagent launches one at a time, even when some named agents are sync; the runtime will handle their sync/async launch policy after the launch batch is emitted. " +
-				"Keep launches explicit and use one subagent tool call per child. " +
+				"Keep launches explicit and use one subagent tool call per child. Use exact catalog names in the agent field. If the user names several agents, launch each named agent exactly once; do not reuse one agent as a substitute for another. " +
 				"Interactive agents run in panes; background agents run headlessly; named-agent frontmatter is authoritative for runtime settings, and call-time duplicates for named agents are ignored instead of overriding it. " +
+				"Before calling subagent, translate the user's request into the child task; do not change the work based on the agent name. Use the catalog/list memory label only to decide context: isolated context starts a fresh chat, so write a self-contained task with objective, relevant facts/files, constraints, and expected output; forked context continues this conversation on a new branch, so give goal, boundary, and expected output without re-explaining everything. " +
 				"Handle trivial single-file reads, quick direct answers, and tiny one-shot edits yourself instead of delegating. " +
 				"Delegation ownership rule: after launching subagents, the parent may continue only with explicitly non-overlapping parent-owned work. Do not redo delegated work. If no safe independent work is clear, end the response and let async results arrive by steer. Ask the user only when there is a plausible next step but ownership is ambiguous. Use subagent_wait/subagent_join only for explicit sync gates or short non-blocking status probes. When the coordinator lock is enabled, same-response Pi built-in implementation tools such as bash/read/edit/write are blocked after async launches; set PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1 to disable only that hard guard, not this ownership contract.",
 			parameters: SubagentParams,
@@ -3546,8 +3565,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 				const lines = agents.map((a) => {
 					const badge = a.source === "project" ? " (project)" : "";
+					const sessionTag = ` [${getSessionModeMemoryLabel(resolveTaskSessionMode(a))}]`;
 					const desc = a.description ? ` — ${a.description}` : "";
-					return `• ${a.name}${badge}${desc}`;
+					return `• ${a.name}${badge}${sessionTag}${desc}`;
 				});
 
 				return {
@@ -3571,10 +3591,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						a.source === "project"
 							? theme.fg("accent", " (project)")
 							: "";
+					const sessionTag = theme.fg("dim", ` [${getSessionModeMemoryLabel(resolveTaskSessionMode(a))}]`);
 					const desc = a.description
 						? theme.fg("dim", ` — ${a.description}`)
 						: "";
-					return `  ${theme.fg("toolTitle", theme.bold(a.name))}${badge}${desc}`;
+					return `  ${theme.fg("toolTitle", theme.bold(a.name))}${badge}${sessionTag}${desc}`;
 				});
 				return new Text(lines.join("\n"), 0, 0);
 			},

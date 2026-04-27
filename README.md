@@ -112,6 +112,8 @@ The difference between `standalone` and `lineage-only` is runtime bookkeeping, n
 
 In short: `standalone` is a clean unrelated child, `lineage-only` is a clean related child, and `fork` is a related child with inherited context.
 
+Parent catalogs show the memory boundary next to each agent: `isolated context` or `forked context`. The work stays the same; only the handoff changes. `isolated context` starts a fresh child chat, so write a self-contained task with the objective, relevant facts/files, constraints, and expected output. `forked context` continues this conversation on a new branch, so give the goal, boundary, and expected output without re-explaining everything.
+
 `no-session: true` is separate from `session-mode`: it disables persistent child history by launching pi with `--session <ephemeral-file> --no-session`. With `session-mode: fork`, the extension seeds that ephemeral file the same way it seeds a normal fork, so the child sees inherited context as session history rather than as prompt text. With `session-mode: lineage-only`, there is no persistent child session to attach lineage metadata to; when combined with `no-session: true`, it is treated like `fork` so the child still inherits parent context and the ephemeral file is removed after completion.
 
 #### How `extensions` works
@@ -245,7 +247,7 @@ The point is simple: if a child produces something structured, it should have a 
 
 Top-level sessions can receive a hidden catalog of available named subagents built from agent descriptions.
 
-That lets the parent model know which specialists exist without spamming visible history. Child sessions do not get this catalog. Agents without descriptions remain launchable, but they are omitted from the ambient routing hint.
+That lets the parent model know which specialists exist and how much context each one gets, without spamming visible history. Child sessions do not get this catalog. Agents without descriptions remain launchable, but they are omitted from the ambient routing hint.
 
 If you do not want that behavior, disable it.
 
