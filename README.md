@@ -272,6 +272,7 @@ These are the ones worth knowing.
 - `PI_CODING_AGENT_DIR` — override the global pi agent config root
 - `PI_SUBAGENT_DISABLE_AMBIENT_AWARENESS` — disable the hidden top-level subagent catalog
 - `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN` — disable the scoped same-response guard after detached launches
+- `PI_SUBAGENT_DISABLE_SESSION_TITLES` — disable automatic child session titles such as `[scout agent] Explore auth flow`
 - `PI_ARTIFACT_PROJECT_ROOT` — override artifact root resolution
 - `PI_SUBAGENT_SHELL_READY_DELAY_MS` — override the interactive shell startup delay before sending a child command (default `500`)
 - `PI_SUBAGENT_ENABLE_SET_TAB_TITLE` — opt in to registering the `set_tab_title` tool
@@ -286,8 +287,10 @@ These are normally set by the extension itself, but they matter if you are readi
 - `PI_SUBAGENT_EXTENSIONS`
 - `PI_SUBAGENT_NAME`
 - `PI_SUBAGENT_AGENT`
+- `PI_SUBAGENT_PARENT_SESSION`
 - `PI_SUBAGENT_SESSION`
 - `PI_SUBAGENT_SURFACE`
+- `PI_SUBAGENT_SESSION_TITLE`
 - `PI_SUBAGENT_AUTO_EXIT`
 
 ### Live test knobs

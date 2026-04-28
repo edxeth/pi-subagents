@@ -464,6 +464,37 @@ function isSetTabTitleToolEnabled(): boolean {
 	return process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE === "1";
 }
 
+function areSubagentSessionTitlesDisabled(): boolean {
+	return process.env.PI_SUBAGENT_DISABLE_SESSION_TITLES === "1";
+}
+
+const MAX_SUBAGENT_SESSION_TITLE_DESCRIPTION = 72;
+
+function summarizeSubagentTaskForSessionTitle(task: string): string {
+	const firstMeaningfulLine = task
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.find(Boolean) ?? "";
+	const withoutPrefix = firstMeaningfulLine.replace(/^(task|objective|goal|request)\s*:\s*/i, "");
+	const compact = withoutPrefix.replace(/\s+/g, " ").trim();
+	if (compact.length <= MAX_SUBAGENT_SESSION_TITLE_DESCRIPTION) return compact;
+	return `${compact.slice(0, MAX_SUBAGENT_SESSION_TITLE_DESCRIPTION - 1).trimEnd()}…`;
+}
+
+function buildSubagentSessionTitle(params: Pick<SubagentParamsInput, "agent" | "name" | "task">): string | undefined {
+	if (areSubagentSessionTitlesDisabled()) return undefined;
+	const agentType = (params.agent ?? params.name).trim();
+	if (!agentType) return undefined;
+	const description = summarizeSubagentTaskForSessionTitle(params.task);
+	return description
+		? `[${agentType} agent] ${description}`
+		: `[${agentType} agent]`;
+}
+
+export function buildSubagentSessionTitleForTest(params: Pick<SubagentParamsInput, "agent" | "name" | "task">) {
+	return buildSubagentSessionTitle(params);
+}
+
 export function getTerminalAssistantSummaryForTest(
 	entries: SessionEntryLike[],
 ): string | null {
@@ -865,14 +896,21 @@ function seedSubagentSessionFile(
 	childSessionFile: string,
 	cwd = process.cwd(),
 ): void {
-	if (mode === "fork") {
-		createForkSessionFile(parentSessionFile, childSessionFile, cwd);
-		return;
-	}
-
-	const header = createSessionHeader(cwd, parentSessionFile);
 	mkdirSync(dirname(childSessionFile), { recursive: true });
-	writeFileSync(childSessionFile, JSON.stringify(header) + "\n", "utf8");
+	if (mode === "lineage-only") return;
+
+	const contentEntries = getForkSeedEntries(parentSessionFile);
+	if (!hasAssistantMessage(contentEntries)) return;
+	writeForkSessionFile(contentEntries, parentSessionFile, childSessionFile, cwd);
+}
+
+export function seedSubagentSessionFileForTest(
+	mode: Exclude<SubagentSessionMode, "standalone">,
+	parentSessionFile: string,
+	childSessionFile: string,
+	cwd = process.cwd(),
+) {
+	seedSubagentSessionFile(mode, parentSessionFile, childSessionFile, cwd);
 }
 
 function resolveEffectiveSessionMode(
@@ -936,20 +974,31 @@ function getForkSeedEntries(parentSessionFile: string): SessionEntryLike[] {
 		.filter((entry: SessionEntryLike) => entry?.type !== "session") as SessionEntryLike[];
 }
 
-export function createForkSessionFile(
+function hasAssistantMessage(entries: SessionEntryLike[]): boolean {
+	return entries.some((entry) => entry.type === "message" && entry.message?.role === "assistant");
+}
+
+function writeForkSessionFile(
+	contentEntries: SessionEntryLike[],
 	parentSessionFile: string,
 	childSessionFile: string,
 	cwd = process.cwd(),
 ): void {
-	const contentEntries = getForkSeedEntries(parentSessionFile);
 	const header = createSessionHeader(cwd, parentSessionFile);
-
 	mkdirSync(dirname(childSessionFile), { recursive: true });
 	writeFileSync(
 		childSessionFile,
 		[header, ...contentEntries].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
 		"utf8",
 	);
+}
+
+export function createForkSessionFile(
+	parentSessionFile: string,
+	childSessionFile: string,
+	cwd = process.cwd(),
+): void {
+	writeForkSessionFile(getForkSeedEntries(parentSessionFile), parentSessionFile, childSessionFile, cwd);
 }
 
 function getSubagentArtifactPath(
@@ -2382,6 +2431,10 @@ function getBaseSubagentEnvVars(
 	}
 	envVars.PI_SUBAGENT_NAME = params.name;
 	if (params.agent) envVars.PI_SUBAGENT_AGENT = params.agent;
+	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
+	if (sessionMode !== "standalone") envVars.PI_SUBAGENT_PARENT_SESSION = prepared.sessionFile;
+	const sessionTitle = buildSubagentSessionTitle(params);
+	if (sessionTitle) envVars.PI_SUBAGENT_SESSION_TITLE = sessionTitle;
 	envVars.PI_ARTIFACT_PROJECT_ROOT = resolveArtifactProjectRoot(ctx.cwd);
 	return envVars;
 }
@@ -3034,9 +3087,26 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		widgetManager.attachContext(ctx);
 	}
 
+	function applySubagentLineage(ctx: ExtensionContext) {
+		const parentSession = process.env.PI_SUBAGENT_PARENT_SESSION?.trim();
+		if (!parentSession) return;
+		const header = ctx.sessionManager.getHeader?.();
+		if (!header || header.parentSession) return;
+		header.parentSession = parentSession;
+	}
+
+	function applySubagentSessionTitle(ctx: ExtensionContext) {
+		if (areSubagentSessionTitlesDisabled()) return;
+		const title = process.env.PI_SUBAGENT_SESSION_TITLE?.trim();
+		if (!title || ctx.sessionManager.getSessionName() === title) return;
+		pi.setSessionName(title);
+	}
+
 	// Capture the UI context early so the widget keeps a stable slot above tasks.
 	pi.on("session_start", (event, ctx) => {
 		resetDetachedLaunchGuard();
+		applySubagentLineage(ctx);
+		applySubagentSessionTitle(ctx);
 		attachWidgetContext(ctx);
 		if (isAmbientAwarenessDisabled()) {
 			pendingAmbientCatalogReminder = null;

@@ -53,6 +53,7 @@ import subagentDoneExtension, {
 } from "../src/subagents/subagent-done.ts";
 import {
   buildPiPromptArgsForTest,
+  buildSubagentSessionTitleForTest,
   detachSubagentForTest,
   getAmbientCatalogEntriesForTest,
   getCompletedSubagentResultForTest,
@@ -64,6 +65,7 @@ import {
   getSubagentToolLaunchArgsForTest,
   getSubagentToolDeniedNamesForTest,
   getSubagentToolsConfigErrorForTest,
+  seedSubagentSessionFileForTest,
   resolveDenyToolsForTest,
   renderSubagentCatalogReminderForTest,
   getLaunchedSubagentResultForTest,
@@ -2389,6 +2391,47 @@ describe("subagents/index.ts helpers", () => {
       ] as any[]),
       null,
     );
+  });
+
+  it("builds deterministic child session titles", () => {
+    assert.equal(
+      buildSubagentSessionTitleForTest({
+        name: "Auth Scout",
+        agent: "scout",
+        task: "Explore web app's auth\nReturn a concise report.",
+      }),
+      "[scout agent] Explore web app's auth",
+    );
+
+    assert.equal(
+      buildSubagentSessionTitleForTest({
+        name: "Reviewer",
+        task: "Objective: Review the local diff for high-confidence bugs and summarize findings in detail",
+      }),
+      "[Reviewer agent] Review the local diff for high-confidence bugs and summarize findings i…",
+    );
+  });
+
+  it("does not pre-create lineage-only child session files", () => {
+    const dir = createTestDir();
+    const parent = join(dir, "parent.jsonl");
+    const child = join(dir, "child.jsonl");
+    writeFileSync(parent, JSON.stringify(SESSION_HEADER) + "\n");
+
+    seedSubagentSessionFileForTest("lineage-only", parent, child, dir);
+
+    assert.equal(existsSync(child), false);
+  });
+
+  it("does not pre-create forked child session files without assistant context", () => {
+    const dir = createTestDir();
+    const parent = join(dir, "parent.jsonl");
+    const child = join(dir, "child.jsonl");
+    writeFileSync(parent, [SESSION_HEADER, MODEL_CHANGE].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+
+    seedSubagentSessionFileForTest("fork", parent, child, dir);
+
+    assert.equal(existsSync(child), false);
   });
 
   it("creates forked child session files directly", () => {
