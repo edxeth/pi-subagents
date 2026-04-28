@@ -113,6 +113,16 @@ The difference between `standalone` and `lineage-only` is runtime bookkeeping, n
 
 In short: `standalone` is a clean unrelated child, `lineage-only` is a clean related child, and `fork` is a related child with inherited context.
 
+For nested subagent launches, `parent` always means the immediate spawning session. If a child agent has `spawning: true` and launches another agent, the grandchild is recorded below that child in lineage:
+
+```text
+top-level session
+└── child session
+    └── grandchild session
+```
+
+This is true for `lineage-only` even though the grandchild receives a clean model context. `isolated context` describes memory inheritance, not lineage rendering. Use `standalone` only when you do not want the lineage link.
+
 Parent catalogs show the memory boundary next to each agent: `isolated context` or `forked context`. The work stays the same; only the handoff changes. `isolated context` starts a fresh child chat, so write a self-contained task with the objective, relevant facts/files, constraints, and expected output. `forked context` continues this conversation on a new branch, so give the goal, boundary, and expected output without re-explaining everything.
 
 `no-session: true` is separate from `session-mode`: it disables persistent child history by launching pi with `--session <ephemeral-file> --no-session`. With `session-mode: fork`, the extension seeds that ephemeral file the same way it seeds a normal fork, so the child sees inherited context as session history rather than as prompt text. With `session-mode: lineage-only`, there is no persistent child session to attach lineage metadata to; when combined with `no-session: true`, it is treated like `fork` so the child still inherits parent context and the ephemeral file is removed after completion.
