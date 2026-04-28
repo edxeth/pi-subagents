@@ -93,7 +93,7 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 | `no-session` | `false` | Launches the child with `pi --no-session` so no persistent child JSONL session is stored; inherited context uses a temporary session file that is removed after completion | Use for disposable children that do not need resume, caller ping, or persistent lineage bookkeeping |
 | `auto-exit` | `false` | Child exits automatically after a normal completion | Best for autonomous agents, especially background scouts and reviewers |
 | `system-prompt` | task-body routing | `append` uses `--append-system-prompt`; `replace` uses `--system-prompt` | Use `replace` for hard role isolation, `append` when you want to preserve more surrounding context |
-| `session-mode` | `standalone` | Session seeding mode: `standalone`, `lineage-only`, or `fork` | Use `standalone` for a clean unrelated child, `lineage-only` for a clean child that is still recorded as descended from the parent, and `fork` when the child needs the full parent context branch |
+| `session-mode` | `lineage-only` | Session seeding mode: `standalone`, `lineage-only`, or `fork` | Use the default `lineage-only` for a clean child that is still recorded as descended from the parent, `standalone` only for a clean unrelated child, and `fork` when the child needs the full parent context branch |
 | `spawning` | `false` | Allows or denies subagent-spawning tools | Set `true` only for coordinators that should launch other subagents |
 | `async` | `true` | `true`: parent does not wait. `false`: parent waits. | Use `async: false` only when the parent needs the result before continuing |
 | `mode` | `interactive` | `interactive` pane or `background` headless child | Use `background` for autonomous work; keep `interactive` when visibility matters |
@@ -102,12 +102,13 @@ This package leans heavily on frontmatter. Agent files are not just prompt wrapp
 #### How `session-mode` works
 
 `session-mode` controls how much of the parent session is seeded into the child.
+When omitted, it defaults to `lineage-only` because subagents are usually causally related to the parent even when they should not inherit the full transcript.
 From the model's point of view, the main difference is simple: `standalone` and `lineage-only` both start the child without the parent transcript, while `fork` copies the parent context branch into the child.
 
 The difference between `standalone` and `lineage-only` is runtime bookkeeping, not model memory:
 
-- `standalone` starts a clean child session that is not tied to the parent by lineage metadata.
-- `lineage-only` starts the same kind of clean child, but records that it descended from the parent session. Use this when session trees, resume/debugging, artifact attribution, or orchestration history should show where the child came from without paying to copy the conversation.
+- `lineage-only` starts a clean child session that records it descended from the parent session. Use this default when session trees, resume/debugging, artifact attribution, or orchestration history should show where the child came from without paying to copy the conversation.
+- `standalone` starts the same kind of clean child, but does not tie it to the parent by lineage metadata. Use this only when the child is genuinely unrelated to the parent session.
 - `fork` starts a child with the parent context branch copied in. Use this when the child needs the prior conversation, decisions, or files already discussed by the parent.
 
 In short: `standalone` is a clean unrelated child, `lineage-only` is a clean related child, and `fork` is a related child with inherited context.

@@ -1280,6 +1280,8 @@ describe("subagents/index.ts helpers", () => {
     );
     const compat = loadAgentDefaults("compat");
     assert.equal(compat?.sessionMode, "fork");
+    assert.equal(resolveEffectiveSessionModeForTest({ agent: "default" }, null), "lineage-only");
+    assert.equal(resolveTaskSessionModeForTest(null), "lineage-only");
     assert.equal(resolveTaskSessionModeForTest({ sessionMode: "lineage-only", noSession: true }), "fork");
   });
 
@@ -1390,7 +1392,7 @@ describe("subagents/index.ts helpers", () => {
     assert.equal(ambient.find((entry) => entry.name === "description-only")?.description, "Fallback description");
     assert.equal(ambient.find((entry) => entry.name === "description-only")?.sessionMode, "lineage-only");
     assert.equal(ambient.find((entry) => entry.name === "global-agent")?.sessionMode, "fork");
-    assert.equal(ambient.find((entry) => entry.name === "project-agent")?.sessionMode, "standalone");
+    assert.equal(ambient.find((entry) => entry.name === "project-agent")?.sessionMode, "lineage-only");
     assert.equal(ambient.some((entry) => entry.name === "hidden-agent"), false);
   });
 

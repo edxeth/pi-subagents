@@ -882,7 +882,7 @@ function resolveEffectiveSessionMode(
 	if (params.fork) return "fork";
 	if (agentDefs?.sessionMode) return agentDefs.sessionMode;
 	if (agentDefs?.fork) return "fork";
-	return "standalone";
+	return "lineage-only";
 }
 
 function resolveTaskSessionMode(agentDefs: AgentDefaults | null): SubagentSessionMode {
