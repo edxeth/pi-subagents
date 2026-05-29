@@ -28,8 +28,13 @@ export function findLatestAssistantError(
 	return null;
 }
 
-export function shouldMarkUserTookOver(agentStarted: boolean): boolean {
-	return agentStarted;
+export type InputStreamingBehavior = "steer" | "followUp" | undefined;
+
+export function shouldMarkUserTookOver(
+	agentStarted: boolean,
+	streamingBehavior?: InputStreamingBehavior,
+): boolean {
+	return agentStarted || streamingBehavior === "steer" || streamingBehavior === "followUp";
 }
 
 type AgentMessageLike = {

@@ -8,6 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentDefaults } from "../agents/definitions.ts";
 import type { ParentClosePolicy, SubagentParamsInput } from "../types.ts";
 import { getEntries } from "./session.ts";
@@ -116,8 +117,8 @@ export function seedSubagentSessionFile(
 	childSessionFile: string,
 	cwd = process.cwd(),
 	seedOptions?: {
-
 		sessionName?: string;
+		activeLeafId?: string | null;
 	},
 ): void {
 	void cwd;
@@ -132,12 +133,18 @@ export function seedSubagentSessionFile(
 	}
 
 	if (mode === "fork") {
-		// Raw copy: write a new header with parentSession link, then copy all
-		// non-header entries from the parent. No trimming — Pi's native
-		// compaction handles overflow at LLM call time.
-		const parentContent = readFileSync(parentSessionFile, "utf8");
-		const parentLines = parentContent.split("\n").filter((l) => l.trim());
-		const header = JSON.stringify({
+		const parentManager = SessionManager.open(parentSessionFile, undefined, cwd);
+		const leafId = seedOptions?.activeLeafId ?? parentManager.getLeafId();
+		if (!leafId) {
+			writeHeaderOnlySubagentSessionFile(childSessionFile, cwd, parentSessionFile, seedOptions?.sessionName);
+			return;
+		}
+		const branch = parentManager.getBranch(leafId);
+		if (branch.length === 0) {
+			writeHeaderOnlySubagentSessionFile(childSessionFile, cwd, parentSessionFile, seedOptions?.sessionName);
+			return;
+		}
+		const header = {
 			type: "session",
 			version: 3,
 			id: randomUUID(),
@@ -145,14 +152,12 @@ export function seedSubagentSessionFile(
 			cwd,
 			...(seedOptions?.sessionName ? { name: seedOptions.sessionName } : {}),
 			parentSession: parentSessionFile,
-		});
-		let out = header + "\n";
-		for (const line of parentLines) {
-			const entry = JSON.parse(line);
-			if (entry.type === "session") continue;
-			out += line + "\n";
-		}
-		writeFileSync(childSessionFile, out, "utf8");
+		};
+		writeFileSync(
+			childSessionFile,
+			`${[header, ...branch].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+			"utf8",
+		);
 		return;
 	}
 }

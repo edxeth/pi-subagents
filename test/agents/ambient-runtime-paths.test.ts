@@ -590,7 +590,6 @@ describe("ambient agents and runtime paths", () => {
 		);
 
 		seedSubagentSessionFileForTest("fork", parent, child, dir, {
-			childContextWindow: 100_000,
 			sessionName: "[reviewer agent] Gilfoyle-level review of all changes",
 		});
 

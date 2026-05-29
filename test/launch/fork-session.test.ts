@@ -1,7 +1,6 @@
 import {
 	assert,
 	existsSync,
-	readFileSync,
 	writeFileSync,
 	join,
 	afterEach,
@@ -36,24 +35,48 @@ describe("fork session launch behavior", () => {
 		resetSubagentStateForTest();
 	});
 
-	it("copies parent entries even without assistant context (raw fork)", () => {
+	it("forks only the active parent branch", () => {
 		const dir = createTestDir();
 		const parent = join(dir, "parent.jsonl");
 		const child = join(dir, "child.jsonl");
+		const header = { ...SESSION_HEADER, cwd: dir, timestamp: "2026-05-08T00:00:00.000Z" };
+		const root = {
+			type: "message",
+			id: "root-user",
+			parentId: null,
+			timestamp: "2026-05-08T00:00:01.000Z",
+			message: { role: "user", content: [{ type: "text", text: "root" }] },
+		};
+		const main = {
+			type: "message",
+			id: "main-assistant",
+			parentId: "root-user",
+			timestamp: "2026-05-08T00:00:02.000Z",
+			message: { role: "assistant", content: [{ type: "text", text: "main" }] },
+		};
+		const abandoned = {
+			type: "message",
+			id: "abandoned-assistant",
+			parentId: "root-user",
+			timestamp: "2026-05-08T00:00:03.000Z",
+			message: { role: "assistant", content: [{ type: "text", text: "abandoned" }] },
+		};
 		writeFileSync(
 			parent,
-			`${[SESSION_HEADER, MODEL_CHANGE].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+			`${[header, root, main, abandoned].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
 		);
 
-		// Raw fork copies all non-header entries from parent.
+		seedSubagentSessionFileForTest("fork", parent, child, dir, {
+			activeLeafId: "main-assistant",
+		});
 
-		seedSubagentSessionFileForTest("fork", parent, child, dir);
-
-		// Child has new header + copied model_change entry
 		assert.equal(existsSync(child), true);
-		const content = readFileSync(child, "utf-8");
-		const lines = content.split("\n").filter((l) => l.trim());
-		assert.equal(lines.length, 2, "Should have header + model_change");
+		const entries = getEntries(child) as any[];
+		assert.deepEqual(
+			entries.filter((entry) => entry.type === "message").map((entry) => entry.id),
+			["root-user", "main-assistant"],
+		);
+		assert.equal(JSON.stringify(entries).includes("abandoned"), false);
 	});
 
 	it("does not treat fork seed assistant messages as child completion output", () => {

@@ -30,6 +30,11 @@ describe("subagent-done.ts", () => {
 		it("treats later input as manual takeover", () => {
 			assert.equal(shouldMarkUserTookOver(true), true);
 		});
+
+		it("treats streaming steers and queued follow-ups as takeover", () => {
+			assert.equal(shouldMarkUserTookOver(false, "steer"), true);
+			assert.equal(shouldMarkUserTookOver(false, "followUp"), true);
+		});
 	});
 
 	describe("shouldAutoExitOnAgentEnd", () => {
@@ -363,6 +368,50 @@ describe("subagent-done.ts", () => {
 				else process.env.PI_SUBAGENT_SESSION = originalSession;
 				if (originalName == null) delete process.env.PI_SUBAGENT_NAME;
 				else process.env.PI_SUBAGENT_NAME = originalName;
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		it("keeps auto-exit agents open for streaming follow-ups", async () => {
+			const handlers = new Map<string, any>();
+			const dir = createTestDir();
+			const sessionFile = join(dir, "child.jsonl");
+			writeFileSync(sessionFile, "");
+
+			const originalSession = process.env.PI_SUBAGENT_SESSION;
+			const originalAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+			try {
+				process.env.PI_SUBAGENT_SESSION = sessionFile;
+				process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+				subagentDoneExtension({
+					getAllTools: () => [],
+					getActiveTools: () => [],
+					setActiveTools() {},
+					registerTool(definition: { name: string }) {
+						return definition;
+					},
+					on(event: string, handler: any) {
+						handlers.set(event, handler);
+					},
+					registerShortcut() {},
+				} as any);
+
+				let shutdowns = 0;
+				handlers.get("agent_start")?.({});
+				handlers.get("input")?.({ streamingBehavior: "followUp" });
+				handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "stop" }] },
+					{ shutdown() { shutdowns += 1; } },
+				);
+				await sleep(0);
+
+				assert.equal(shutdowns, 0);
+				assert.throws(() => readFileSync(`${sessionFile}.exit`, "utf8"));
+			} finally {
+				if (originalSession == null) delete process.env.PI_SUBAGENT_SESSION;
+				else process.env.PI_SUBAGENT_SESSION = originalSession;
+				if (originalAutoExit == null) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+				else process.env.PI_SUBAGENT_AUTO_EXIT = originalAutoExit;
 				rmSync(dir, { recursive: true, force: true });
 			}
 		});

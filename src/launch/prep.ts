@@ -38,6 +38,7 @@ export interface SubagentLaunchContext {
 	sessionManager: {
 		getSessionFile(): string | null | undefined;
 		getSessionId(): string;
+		getLeafId?(): string | null;
 	};
 	cwd: string;
 	modelRegistry?: ModelRegistryLike;

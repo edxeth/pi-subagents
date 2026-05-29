@@ -32,7 +32,7 @@ function shouldWriteChildContextBoundary(
 export function seedPreparedSubagentSession(
 	prepared: PreparedSubagentLaunch,
 	params: Pick<SubagentParamsInput, "name">,
-	ctx: Pick<SubagentLaunchContext, "cwd">,
+	ctx: Pick<SubagentLaunchContext, "cwd" | "sessionManager">,
 	sessionMode: SubagentSessionMode,
 	noSession: boolean,
 ): {
@@ -54,7 +54,10 @@ export function seedPreparedSubagentSession(
 			prepared.sessionFile,
 			prepared.subagentSessionFile,
 			prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
-			prepared.sessionTitle ? { sessionName: prepared.sessionTitle } : undefined,
+			{
+				...(prepared.sessionTitle ? { sessionName: prepared.sessionTitle } : {}),
+				activeLeafId: ctx.sessionManager.getLeafId?.(),
+			},
 		);
 		if (boundarySystemPrompt) {
 			const boundaryOptions = {

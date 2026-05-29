@@ -291,12 +291,14 @@ export default function (pi: ExtensionAPI) {
 
 		pi.on("agent_start", () => {
 			agentStarted = true;
+			userTookOver = false;
 		});
 
-		pi.on("input", () => {
+		pi.on("input", (event) => {
 			// Ignore the initial task message that starts an autonomous subagent.
-			// Only inputs after the first agent run has started count as user takeover.
-			if (!shouldMarkUserTookOver(agentStarted)) return;
+			// Inputs while streaming, queued follow-ups, or later manual prompts mean
+			// the operator is steering and the child should stay open for that turn.
+			if (!shouldMarkUserTookOver(agentStarted, event.streamingBehavior)) return;
 			userTookOver = true;
 		});
 
@@ -305,7 +307,7 @@ export default function (pi: ExtensionAPI) {
 				typeof shouldAutoExitOnAgentEnd
 			>[0];
 			const shouldExit = shouldAutoExitOnAgentEnd(messages);
-			if (!shouldExit) {
+			if (!shouldExit || userTookOver) {
 				// Agent turn was aborted (Escape). Leave the session open for
 				// inspection or another prompt.
 				return;

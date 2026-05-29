@@ -206,10 +206,8 @@ export function seedSubagentSessionFileForTest(
 	childSessionFile: string,
 	cwd = process.cwd(),
 	seedOptions?: {
-		childContextWindow?: number;
-		reserveTokens?: number;
-		launchToolCallId?: string;
 		sessionName?: string;
+		activeLeafId?: string | null;
 	},
 ) {
 	seedSubagentSessionFile(mode, parentSessionFile, childSessionFile, cwd, seedOptions);
