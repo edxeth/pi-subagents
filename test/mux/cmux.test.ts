@@ -16,6 +16,7 @@ const ORIGINAL_ENV = {
 	PATH: process.env.PATH,
 	PI_SUBAGENT_MUX: process.env.PI_SUBAGENT_MUX,
 	CMUX_SOCKET_PATH: process.env.CMUX_SOCKET_PATH,
+	FAKE_CMUX_GEOMETRY: process.env.FAKE_CMUX_GEOMETRY,
 };
 
 afterEach(() => {
@@ -48,7 +49,12 @@ if (cmd === "new-split") {
   if (sub === "--surface") {
     console.log(JSON.stringify({ caller: { surface_ref: args[2], pane_ref: "pane:9" } }));
   } else {
-    console.log(JSON.stringify({ focused: { surface_ref: "surface:99", pane_ref: "pane:9" }, caller: { surface_ref: "surface:99", pane_ref: "pane:9" } }));
+    const geometry = process.env.FAKE_CMUX_GEOMETRY === "wide"
+      ? { columns: 160, rows: 40 }
+      : process.env.FAKE_CMUX_GEOMETRY === "narrow"
+        ? { columns: 40, rows: 8 }
+        : {};
+    console.log(JSON.stringify({ focused: { surface_ref: "surface:99", pane_ref: "pane:9", ...geometry }, caller: { surface_ref: "surface:99", pane_ref: "pane:9", ...geometry } }));
   }
 } else if (cmd === "tree") {
   console.log("workspace:1\\n  pane:9");
@@ -103,24 +109,57 @@ describe("cmux surface creation", () => {
 		}
 	});
 
-	it("creates separate cmux splits for separate interactive subagents", () => {
+	it("falls back to cmux surfaces when geometry is unavailable", () => {
 		const { dir, log } = installFakeCmux();
 		try {
-			assert.equal(createSurface("First"), "surface:101");
-			assert.equal(createSurface("Second"), "surface:101");
+			assert.equal(createSurface("First"), "surface:102");
+			assert.equal(createSurface("Second"), "surface:102");
+			const calls = readLog(log);
+			const surfaceCalls = calls.filter((args) => args[0] === "new-surface");
+			assert.equal(surfaceCalls.length, 2);
+			assert.equal(
+				calls.some((args) => args[0] === "new-split"),
+				false,
+			);
+			assert.ok(
+				surfaceCalls.every((args) => !args.includes("--focus")),
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("splits cmux surfaces when measured geometry leaves a usable child pane", () => {
+		const { dir, log } = installFakeCmux();
+		try {
+			process.env.FAKE_CMUX_GEOMETRY = "wide";
+			assert.equal(createSurface("Wide"), "surface:101");
 			const calls = readLog(log);
 			const splitCalls = calls.filter((args) => args[0] === "new-split");
-			assert.equal(splitCalls.length, 2);
-			assert.ok(
-				splitCalls.every(
-					(args) =>
-						args.includes("right") &&
-						!args.includes("--focus"),
-				),
-			);
+			assert.equal(splitCalls.length, 1);
+			assert.deepEqual(splitCalls[0], ["new-split", "right", "--surface", "surface:99"]);
 			assert.equal(
 				calls.some((args) => args[0] === "new-surface"),
 				false,
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("uses cmux surfaces when a split would leave a too-small child pane", () => {
+		const { dir, log } = installFakeCmux();
+		try {
+			process.env.FAKE_CMUX_GEOMETRY = "narrow";
+			assert.equal(createSurface("Narrow"), "surface:102");
+			const calls = readLog(log);
+			assert.equal(
+				calls.some((args) => args[0] === "new-split"),
+				false,
+			);
+			assert.equal(
+				calls.some((args) => args[0] === "new-surface"),
+				true,
 			);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });

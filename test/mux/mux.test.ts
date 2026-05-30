@@ -381,6 +381,58 @@ fi
 			assert.match(log, /rename-window/);
 		});
 
+		it("splits tmux surfaces only when measured geometry is safe", () => {
+			const dir = createTestDir();
+			const logFile = join(dir, "tmux-surface.log");
+			writeFileSync(logFile, "");
+			writeExecutable(
+				dir,
+				"tmux",
+				`#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_TMUX_LOG"
+if [ "$1" = "display-message" ]; then
+  if [ "$FAKE_TMUX_GEOMETRY" = "wide" ]; then printf '160 40 160 40 1\n';
+  elif [ "$FAKE_TMUX_GEOMETRY" = "three-fit" ]; then printf '76 52 153 52 2\n';
+  elif [ "$FAKE_TMUX_GEOMETRY" = "narrow" ]; then printf '40 8 80 8 8\n';
+  else exit 1;
+  fi
+elif [ "$1" = "split-window" ]; then
+  printf '%%split\n'
+elif [ "$1" = "new-window" ]; then
+  printf '%%window\n'
+fi
+`,
+			);
+
+			process.env.PATH = `${dir}:${ORIGINAL_ENV.PATH}`;
+			process.env.PI_SUBAGENT_MUX = "tmux";
+			process.env.TMUX = "fake-tmux-socket";
+			process.env.TMUX_PANE = "%1";
+			process.env.FAKE_TMUX_LOG = logFile;
+
+			process.env.FAKE_TMUX_GEOMETRY = "wide";
+			assert.equal(createSurface("Wide Tmux"), "%split");
+			let log = readFileSync(logFile, "utf8");
+			assert.match(log, /split-window -d -h -t %1 -P -F #\{pane_id\}/);
+			assert.match(log, /select-layout -t %1 even-horizontal/);
+			assert.doesNotMatch(log, /new-window/);
+
+			writeFileSync(logFile, "");
+			process.env.FAKE_TMUX_GEOMETRY = "three-fit";
+			assert.equal(createSurface("Third Tmux"), "%split");
+			log = readFileSync(logFile, "utf8");
+			assert.match(log, /split-window -d -h -t %1 -P -F #\{pane_id\}/);
+			assert.match(log, /select-layout -t %1 tiled/);
+			assert.doesNotMatch(log, /new-window/);
+
+			writeFileSync(logFile, "");
+			process.env.FAKE_TMUX_GEOMETRY = "narrow";
+			assert.equal(createSurface("Narrow Tmux"), "%window");
+			log = readFileSync(logFile, "utf8");
+			assert.doesNotMatch(log, /split-window/);
+			assert.match(log, /new-window -d -P -F #\{pane_id\}/);
+		});
+
 		it("exercises the cmux backend with a fake cmux binary", async () => {
 			const dir = createTestDir();
 			const logFile = join(dir, "cmux.log");
@@ -438,9 +490,9 @@ esac
 			closeSurface(secondSurface);
 
 			const log = readFileSync(logFile, "utf8");
-			assert.match(log, /new-split right/);
+			assert.match(log, /new-surface/);
 			assert.doesNotMatch(log, /--focus/);
-			assert.doesNotMatch(log, /new-surface/);
+			assert.doesNotMatch(log, /new-split/);
 			assert.match(log, /rename-tab/);
 			assert.match(log, /workspace-action/);
 			assert.match(log, /send/);

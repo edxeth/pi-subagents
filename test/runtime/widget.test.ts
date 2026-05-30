@@ -116,4 +116,72 @@ describe("widget manager direct module tests", () => {
 
 		assert.equal(running.contextLabel, "100.0%/100 ctx");
 	});
+
+	it("ignores inherited fork history before subagent launch metadata", () => {
+		const dir = mkdtempSync(join(tmpdir(), "widget-fork-test-"));
+		const sessionFile = join(dir, "forked-child.jsonl");
+		const entries = [
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					provider: "openai",
+					model: "openai/parent",
+					usage: { totalTokens: 1_000_000 },
+					content: [
+						{ type: "toolCall", id: "parent-call", name: "bash" },
+					],
+				},
+			},
+			{
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolCallId: "parent-call",
+					content: [{ type: "text", text: "parent result" }],
+				},
+			},
+			{
+				type: "custom",
+				customType: "pi-subagents_launch_metadata",
+				data: { name: "forked-child" },
+			},
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					provider: "anthropic",
+					model: "anthropic/child",
+					usage: { totalTokens: 25 },
+					content: [{ type: "text", text: "child work" }],
+				},
+			},
+		];
+		writeFileSync(
+			sessionFile,
+			entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+		);
+
+		const running: RunningSubagent = {
+			id: "forked-child",
+			name: "Forked",
+			agent: "reviewer",
+			task: "Review fork stats",
+			mode: "background",
+			executionState: "running",
+			deliveryState: "detached",
+			parentClosePolicy: "terminate",
+			blocking: false,
+			async: true,
+			startTime: Date.now(),
+			sessionFile,
+		};
+
+		const widget = new SubagentWidgetManager(() => [running]);
+		(widget as any).refreshRunningSubagentState(running);
+
+		assert.equal(running.toolUses, 0);
+		assert.equal(running.totalTokens, 25);
+		assert.equal(running.lastAssistantText, "child work");
+	});
 });

@@ -135,6 +135,17 @@ describe("zellij placement", () => {
 		});
 	});
 
+	it("does not split narrow Zellij panes when actual split direction may differ from prediction", () => {
+		const plan = selectZellijPlacement(
+			[pane({ id: 10, tab_id: 1, pane_rows: 22, pane_columns: 80 })],
+			10,
+			50,
+			10,
+		);
+
+		assert.equal(plan, null);
+	});
+
 	it("never chooses the parent pane as the stack target", () => {
 		const plan = selectZellijStackPlacement(
 			[

@@ -34,7 +34,7 @@ Two axes matter:
 - `interactive` or `background`: where the child runs
 - async or sync: whether the parent waits
 
-`interactive` means foreground. Pi opens a pane through cmux, tmux, zellij, or WezTerm.
+`interactive` means foreground. Pi opens a visible surface through cmux, tmux, zellij, or WezTerm. To keep children usable, normal interactive launches use a non-shrinking surface such as a tab, window, or stacked pane when repeated splits would make panes too small.
 
 `background` means headless. Pi starts a `pi -p` child process without opening a pane.
 

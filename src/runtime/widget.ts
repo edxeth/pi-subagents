@@ -50,6 +50,19 @@ function firstNonEmptyLine(text: string, maxLen = 60): string {
 	return line.length > maxLen ? `${line.slice(0, maxLen)}…` : line;
 }
 
+function getSubagentActivityStartIndex(entries: SessionEntryLike[]): number {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i] as SessionEntryLike & { customType?: string };
+		if (
+			entry?.type === "custom" &&
+			entry.customType === "pi-subagents_launch_metadata"
+		) {
+			return i + 1;
+		}
+	}
+	return 0;
+}
+
 function describeActivity(toolNames: string[], responseText?: string): string {
 	if (toolNames.length > 0) {
 		const groups = new Map<string, number>();
@@ -248,7 +261,8 @@ export class SubagentWidgetManager {
 			let lastAssistantWithUsage: SessionMessageLike | null = null;
 			let lastAssistantIndex = -1;
 
-			for (let i = 0; i < entries.length; i++) {
+			const activityStartIndex = getSubagentActivityStartIndex(entries);
+			for (let i = activityStartIndex; i < entries.length; i++) {
 				const entry = entries[i];
 				if (entry?.type !== "message") continue;
 
@@ -286,7 +300,7 @@ export class SubagentWidgetManager {
 					);
 				}
 
-				for (let i = lastAssistantIndex + 1; i < entries.length; i++) {
+				for (let i = Math.max(lastAssistantIndex + 1, activityStartIndex); i < entries.length; i++) {
 					const entry = entries[i];
 					const message = entry?.message;
 					if (

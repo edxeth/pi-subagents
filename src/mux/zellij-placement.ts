@@ -161,13 +161,21 @@ export function selectZellijPlacement(
 		canSplitZellijPane(candidate.pane, minColumns, minRows),
 	);
 
-	// Split creation is tab-scoped, so Zellij chooses the concrete split pane.
-	// Only split when every pane Zellij might split would remain usable.
+	// Split creation is tab-scoped and Zellij chooses the concrete split pane
+	// and direction. Zellij 0.44 can choose a different direction than this
+	// predictor for narrow-but-tall panes, so only split when both possible
+	// directions would leave the child pane usable.
+	const directionAgnosticSafeSplitCandidates = safeSplitCandidates.filter(
+		(candidate) =>
+			Math.floor((candidate.pane.pane_columns ?? 0) / 2) >= minColumns &&
+			Math.floor((candidate.pane.pane_rows ?? 0) / 2) >= minRows,
+	);
+
 	if (
 		zellijSplitCandidates.length > 0 &&
-		safeSplitCandidates.length === zellijSplitCandidates.length
+		directionAgnosticSafeSplitCandidates.length === zellijSplitCandidates.length
 	) {
-		const splitTarget = safeSplitCandidates.sort(
+		const splitTarget = directionAgnosticSafeSplitCandidates.sort(
 			(a, b) => paneArea(b.pane) - paneArea(a.pane),
 		)[0];
 		return {

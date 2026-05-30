@@ -12,7 +12,12 @@ import { createZellijSurface } from "./zellij-placement.ts";
 type CmuxFocusSnapshot = {
 	surfaceRef?: string;
 	paneRef?: string;
+	columns?: number;
+	rows?: number;
 };
+
+const DEFAULT_INTERACTIVE_MIN_COLUMNS = 50;
+const DEFAULT_INTERACTIVE_MIN_ROWS = 10;
 
 type CmuxCreatedSurface = {
 	surface: string;
@@ -28,6 +33,28 @@ function nonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0;
 }
 
+function positiveNumber(value: unknown): number | undefined {
+	const number = typeof value === "number" ? value : Number(value);
+	return Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+function parseCmuxColumns(record: Record<string, unknown>): number | undefined {
+	return (
+		positiveNumber(record.columns) ??
+		positiveNumber(record.cols) ??
+		positiveNumber(record.width) ??
+		positiveNumber(record.pane_columns)
+	);
+}
+
+function parseCmuxRows(record: Record<string, unknown>): number | undefined {
+	return (
+		positiveNumber(record.rows) ??
+		positiveNumber(record.height) ??
+		positiveNumber(record.pane_rows)
+	);
+}
+
 function parseCmuxFocusedSnapshot(value: unknown): CmuxFocusSnapshot | null {
 	if (!value || typeof value !== "object") return null;
 
@@ -37,6 +64,13 @@ function parseCmuxFocusedSnapshot(value: unknown): CmuxFocusSnapshot | null {
 	const record = focused as {
 		surface_ref?: unknown;
 		pane_ref?: unknown;
+		columns?: unknown;
+		cols?: unknown;
+		width?: unknown;
+		pane_columns?: unknown;
+		rows?: unknown;
+		height?: unknown;
+		pane_rows?: unknown;
 	};
 	const surfaceRef = nonEmptyString(record.surface_ref)
 		? record.surface_ref
@@ -44,9 +78,11 @@ function parseCmuxFocusedSnapshot(value: unknown): CmuxFocusSnapshot | null {
 	const paneRef = nonEmptyString(record.pane_ref)
 		? record.pane_ref
 		: undefined;
+	const columns = parseCmuxColumns(record);
+	const rows = parseCmuxRows(record);
 
 	if (!surfaceRef && !paneRef) return null;
-	return { surfaceRef, paneRef };
+	return { surfaceRef, paneRef, columns, rows };
 }
 
 function parseCmuxJson(value: string): unknown | null {
@@ -66,6 +102,13 @@ function parseCmuxCallerSnapshot(value: unknown): CmuxFocusSnapshot | null {
 	const record = caller as {
 		surface_ref?: unknown;
 		pane_ref?: unknown;
+		columns?: unknown;
+		cols?: unknown;
+		width?: unknown;
+		pane_columns?: unknown;
+		rows?: unknown;
+		height?: unknown;
+		pane_rows?: unknown;
 	};
 	const surfaceRef = nonEmptyString(record.surface_ref)
 		? record.surface_ref
@@ -73,9 +116,11 @@ function parseCmuxCallerSnapshot(value: unknown): CmuxFocusSnapshot | null {
 	const paneRef = nonEmptyString(record.pane_ref)
 		? record.pane_ref
 		: undefined;
+	const columns = parseCmuxColumns(record);
+	const rows = parseCmuxRows(record);
 
 	if (!surfaceRef && !paneRef) return null;
-	return { surfaceRef, paneRef };
+	return { surfaceRef, paneRef, columns, rows };
 }
 
 function parseCmuxCreatedSurface(
@@ -214,10 +259,11 @@ function restoreCmuxFocusIfLaunchSurfaceFocused(
 	}
 }
 
-function createCmuxSplitSurface(
+function createCmuxChildSurface(
 	name: string,
-	direction: "left" | "right" | "up" | "down",
-	fromSurface?: string,
+	args: string[],
+	command: string,
+	options?: { sourceSurfaceRef?: string },
 ): CmuxCreatedSurface {
 	const identifySnapshot = captureCmuxIdentifySnapshot();
 	const focusSnapshot = identifySnapshot.focused;
@@ -225,14 +271,10 @@ function createCmuxSplitSurface(
 	let child: CmuxCreatedSurface | null = null;
 
 	try {
-		const args = ["new-split", direction];
-		if (fromSurface) args.push("--surface", fromSurface);
-
 		const output = execFileSync("cmux", args, { encoding: "utf8" }).trim();
-		child = parseCmuxCreatedSurface(output, "new-split");
+		child = parseCmuxCreatedSurface(output, command);
 		child.paneRef ??= readCmuxPaneRefForSurface(child.surface) ?? undefined;
 
-		// Rename the surface tab
 		execFileSync("cmux", ["rename-tab", "--surface", child.surface, name], {
 			encoding: "utf8",
 		});
@@ -241,7 +283,7 @@ function createCmuxSplitSurface(
 	} finally {
 		if (child) {
 			restoreCmuxFocusIfLaunchSurfaceFocused(focusSnapshot, child, {
-				sourceSurfaceRef: fromSurface,
+				sourceSurfaceRef: options?.sourceSurfaceRef,
 				callerSnapshot,
 			});
 		} else {
@@ -250,30 +292,57 @@ function createCmuxSplitSurface(
 	}
 }
 
+function canSplitCmuxPaneRight(snapshot: CmuxFocusSnapshot | null): boolean {
+	if (!snapshot?.columns || !snapshot.rows) return false;
+	return (
+		Math.floor(snapshot.columns / 2) >= DEFAULT_INTERACTIVE_MIN_COLUMNS &&
+		snapshot.rows >= DEFAULT_INTERACTIVE_MIN_ROWS
+	);
+}
+
+function createCmuxSurface(name: string): CmuxCreatedSurface {
+	const snapshot = captureCmuxIdentifySnapshot().focused;
+	const sourceSurface = snapshot?.surfaceRef ?? process.env.CMUX_SURFACE_ID;
+	if (canSplitCmuxPaneRight(snapshot)) {
+		return createCmuxSplitSurface(name, "right", sourceSurface);
+	}
+	return createCmuxChildSurface(name, ["new-surface"], "new-surface");
+}
+
+function createCmuxSplitSurface(
+	name: string,
+	direction: "left" | "right" | "up" | "down",
+	fromSurface?: string,
+): CmuxCreatedSurface {
+	const args = ["new-split", direction];
+	if (fromSurface) args.push("--surface", fromSurface);
+	return createCmuxChildSurface(name, args, "new-split", {
+		sourceSurfaceRef: fromSurface,
+	});
+}
+
 // ── Surface creation ───────────────────────────────────────────────────────
 
 export function createSurface(name: string): string {
 	const backend = getMuxBackend();
 
 	if (backend === "cmux") {
-		const created = createCmuxSplitSurface(
-			name,
-			"right",
-			process.env.CMUX_SURFACE_ID,
-		);
-		return created.surface;
+		return createCmuxSurface(name).surface;
+	}
+
+	if (backend === "tmux") {
+		return createTmuxSurface(name);
+	}
+
+	if (backend === "wezterm") {
+		return createWezTermSurface(name);
 	}
 
 	if (backend === "zellij") {
 		return createZellijSurface(name);
 	}
 
-	const surface = createSurfaceSplit(
-		name,
-		"right",
-		backend === "tmux" ? process.env.TMUX_PANE : undefined,
-	);
-	return surface;
+	return createSurfaceSplit(name, "right");
 }
 
 function createCmuxSplit(
@@ -282,6 +351,135 @@ function createCmuxSplit(
 	fromSurface?: string,
 ): string {
 	return createCmuxSplitSurface(name, direction, fromSurface).surface;
+}
+
+type TmuxPlacementGeometry = {
+	paneColumns: number;
+	paneRows: number;
+	windowColumns: number;
+	windowRows: number;
+	windowPanes: number;
+};
+
+type TmuxSplitPlan = {
+	layout: "even-horizontal" | "even-vertical" | "tiled";
+};
+
+function readTmuxPlacementGeometry(
+	pane: string | undefined,
+): TmuxPlacementGeometry | null {
+	if (!pane) return null;
+	try {
+		const output = execFileSync(
+			"tmux",
+			[
+				"display-message",
+				"-p",
+				"-t",
+				pane,
+				"#{pane_width} #{pane_height} #{window_width} #{window_height} #{window_panes}",
+			],
+			{ encoding: "utf8" },
+		).trim();
+		const [paneColumnsRaw, paneRowsRaw, windowColumnsRaw, windowRowsRaw, windowPanesRaw] = output.split(/\s+/, 5);
+		const paneColumns = positiveNumber(paneColumnsRaw);
+		const paneRows = positiveNumber(paneRowsRaw);
+		const windowColumns = positiveNumber(windowColumnsRaw);
+		const windowRows = positiveNumber(windowRowsRaw);
+		const windowPanes = positiveNumber(windowPanesRaw);
+		return paneColumns && paneRows && windowColumns && windowRows && windowPanes
+			? { paneColumns, paneRows, windowColumns, windowRows, windowPanes }
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+function canFitTmuxTiledLayout(geometry: TmuxPlacementGeometry): boolean {
+	const nextPaneCount = geometry.windowPanes + 1;
+	for (let rows = 1; rows <= nextPaneCount; rows++) {
+		const columns = Math.ceil(nextPaneCount / rows);
+		if (
+			Math.floor(geometry.windowColumns / columns) >= DEFAULT_INTERACTIVE_MIN_COLUMNS &&
+			Math.floor(geometry.windowRows / rows) >= DEFAULT_INTERACTIVE_MIN_ROWS
+		) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function isTmuxPaneUsable(geometry: TmuxPlacementGeometry | null): boolean {
+	return !!geometry && geometry.paneColumns >= DEFAULT_INTERACTIVE_MIN_COLUMNS && geometry.paneRows >= DEFAULT_INTERACTIVE_MIN_ROWS;
+}
+
+function getTmuxSplitPlan(
+	geometry: TmuxPlacementGeometry | null,
+): TmuxSplitPlan | null {
+	if (!geometry) return null;
+	const nextPaneCount = geometry.windowPanes + 1;
+	if (nextPaneCount === 2) {
+		if (
+			Math.floor(geometry.windowColumns / 2) >= DEFAULT_INTERACTIVE_MIN_COLUMNS &&
+			geometry.windowRows >= DEFAULT_INTERACTIVE_MIN_ROWS
+		) {
+			return { layout: "even-horizontal" };
+		}
+		if (
+			geometry.windowColumns >= DEFAULT_INTERACTIVE_MIN_COLUMNS &&
+			Math.floor(geometry.windowRows / 2) >= DEFAULT_INTERACTIVE_MIN_ROWS
+		) {
+			return { layout: "even-vertical" };
+		}
+		return null;
+	}
+	return canFitTmuxTiledLayout(geometry) ? { layout: "tiled" } : null;
+}
+
+function createTmuxWindow(name: string): string {
+	const args = ["new-window", "-d", "-P", "-F", "#{pane_id}", "-n", name];
+	args.push("-c", process.cwd());
+
+	const pane = execFileSync("tmux", args, { encoding: "utf8" }).trim();
+	if (!pane.startsWith("%")) {
+		throw new Error(`Unexpected tmux new-window output: ${pane}`);
+	}
+
+	return pane;
+}
+
+function createTmuxSurface(name: string): string {
+	const parentPane = process.env.TMUX_PANE;
+	const splitPlan = getTmuxSplitPlan(readTmuxPlacementGeometry(parentPane));
+	if (splitPlan) {
+		const pane = createTmuxSplit(name, "right", parentPane);
+		rebalanceTmuxWindow(parentPane, splitPlan.layout);
+		if (!isTmuxPaneUsable(readTmuxPlacementGeometry(pane))) {
+			moveTmuxPaneToWindow(pane, name);
+		}
+		return pane;
+	}
+	return createTmuxWindow(name);
+}
+
+function rebalanceTmuxWindow(
+	pane: string | undefined,
+	layout: "even-horizontal" | "even-vertical" | "tiled",
+): void {
+	if (!pane) return;
+	try {
+		execFileSync("tmux", ["select-layout", "-t", pane, layout], {
+			encoding: "utf8",
+		});
+	} catch {}
+}
+
+function moveTmuxPaneToWindow(pane: string, name: string): void {
+	try {
+		execFileSync("tmux", ["break-pane", "-d", "-t", pane, "-n", name], {
+			encoding: "utf8",
+		});
+	} catch {}
 }
 
 function createTmuxSplit(
@@ -301,6 +499,27 @@ function createTmuxSplit(
 	}
 
 	return pane;
+}
+
+function createWezTermSurface(name: string): string {
+	const paneId = execFileSync(
+		"wezterm",
+		["cli", "spawn", "--cwd", process.cwd()],
+		{ encoding: "utf8" },
+	).trim();
+	if (!paneId || !/^\d+$/.test(paneId)) {
+		throw new Error(
+			`Unexpected wezterm spawn output: ${paneId || "(empty)"}`,
+		);
+	}
+	try {
+		execFileSync(
+			"wezterm",
+			["cli", "set-tab-title", "--pane-id", paneId, name],
+			{ encoding: "utf8" },
+		);
+	} catch {}
+	return paneId;
 }
 
 function createWezTermSplit(

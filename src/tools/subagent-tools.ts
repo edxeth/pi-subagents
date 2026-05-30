@@ -32,10 +32,14 @@ const SUBAGENT_TITLE_DESCRIPTION =
 	"Required human title for this child session/widget. Use sentence case, 3-8 words, outcome/objective focused, and not a prompt or instruction; examples: Auth implementation map, Local diff bug review.";
 
 const SUBAGENT_MODEL_DESCRIPTION =
-	"Only set when the user explicitly requested a model for this agent launch. Format: provider/model. If the user gave provider/model:thinking, put thinking in `thinking`. Otherwise omit.";
+	"Model routing/cost control only. Omit unless the user named a concrete model for this launch. " +
+	"Do not infer a model from quality, depth, urgency, safety, or cost language. " +
+	"Never invent or upgrade models. Format: provider/model; put provider/model:thinking suffix in `thinking`.";
 
 const SUBAGENT_THINKING_DESCRIPTION =
-	"Only set when the user explicitly requested a thinking level for this agent launch. Format: off|minimal|low|medium|high|xhigh. Otherwise omit.";
+	"Child runtime thinking level only. Omit unless the user named a concrete thinking level for this launch. " +
+	"Do not infer thinking from quality, depth, urgency, safety, or cost language. " +
+	"Allowed: off|minimal|low|medium|high|xhigh.";
 
 const SubagentChildParams = Type.Object({
 	name: Type.String({ description: SUBAGENT_NAME_DESCRIPTION }),
@@ -248,8 +252,9 @@ export function registerSubagentCoreTools(
 		label: "Subagent",
 		description:
 			"Launch one or more named helper agents from the subagent roster. " +
-			"Agent definitions control model, tools, context, UI mode, wait behavior, and completion lifecycle; " +
-			"this call chooses the agent name(s), task(s), and optional model overrides only when definitions opt in.",
+			"Agent definitions own model, tools, context, UI mode, wait behavior, and completion lifecycle; " +
+			"this call chooses the agent name(s), task(s), and titles. " +
+			"Model/thinking are routing controls, not quality knobs; set them only when the user named concrete values.",
 		promptSnippet:
 			"Subagents are separate helper processes you can launch to do work outside this chat turn.\n" +
 			"\n" +
@@ -263,6 +268,7 @@ export function registerSubagentCoreTools(
 			"- If launching one helper, pass agent/name/title/task normally.\n" +
 			"- If launching multiple helpers for one user request, make one subagent call with children:[...] so all helpers start before any waiting happens.\n" +
 			"- If the user names multiple agents, include each named agent exactly once. Do not substitute one agent for another.\n" +
+			"- Leave model/thinking unset unless the user named concrete values. Do not infer them from quality, depth, urgency, safety, or cost language.\n" +
 			"\n" +
 			"Writing tasks:\n" +
 			"- Translate the user's request into each helper's task; do not change the work just because of the agent name.\n" +
