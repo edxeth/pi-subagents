@@ -4,9 +4,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getArtifactStorageRoot } from "../artifact-storage.ts";
 import { getPiInvocation, getPiShellParts, getSubagentChildProcessEnv } from "../launch/child-command.ts";
+import { parseEnvString } from "../launch/env.ts";
 import {
 	getExtensionLaunchArgs,
-	parseEnvString,
 	getPersistedPromptLaunchArgs,
 	getPersistedSessionParityArgs,
 	normalizeModelRef,

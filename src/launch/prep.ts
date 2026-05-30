@@ -7,6 +7,7 @@ import { loadAgentDefaults as loadAgentDefaultsFromDefinitions } from "../agents
 
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
 import { parseCommandWords } from "./child-command.ts";
+import { parseEnvString } from "./env.ts";
 import {
 	resolveSubagentNoContextFiles,
 	resolveSubagentNoSession,
@@ -312,21 +313,6 @@ export function getFlagsLaunchArgs(flags: string | undefined): string[] {
 	return parseCommandWords(flags);
 }
 
-export function parseEnvString(env: string | undefined): Record<string, string> {
-	if (!env?.trim()) return {};
-	const result: Record<string, string> = {};
-	for (const pair of env.split(",")) {
-		const trimmed = pair.trim();
-		if (!trimmed) continue;
-		const eq = trimmed.indexOf("=");
-		if (eq === -1) throw new Error(`Missing '=' in env variable: "${trimmed}"`);
-		const key = trimmed.slice(0, eq).trim();
-		if (!key) throw new Error(`Empty env key in: "${trimmed}"`);
-		const value = trimmed.slice(eq + 1).trim();
-		result[key] = value;
-	}
-	return result;
-}
 
 export function getPreparedExtensionLaunchArgs(
 	prepared: PreparedSubagentLaunch,

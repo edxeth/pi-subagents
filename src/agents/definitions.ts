@@ -57,6 +57,20 @@ function parseAgentDefinition(
 		const m = frontmatter.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
 		return m ? m[1].trim() : undefined;
 	};
+	const getBlock = (key: string) => {
+		const inline = get(key);
+		if (inline !== "|") return inline;
+		const lines = frontmatter.split(/\r?\n/);
+		const start = lines.findIndex((line) => line.match(new RegExp(`^${key}:\\s*\\|\\s*$`)));
+		if (start === -1) return inline;
+		const block: string[] = [];
+		for (let i = start + 1; i < lines.length; i++) {
+			const line = lines[i];
+			if (line.trim() && !line.match(/^[ \t]/)) break;
+			block.push(line.replace(/^[ \t]{1,2}/, ""));
+		}
+		return block.join("\n").trim();
+	};
 	const enabledRaw = get("enabled");
 	if (enabledRaw === "false") return null;
 	const spawningRaw = get("spawning");
@@ -125,7 +139,7 @@ function parseAgentDefinition(
 		timeout: timeoutRaw != null ? parseInt(timeoutRaw, 10) : undefined,
 
 		flags: flagsRaw,
-		env: get("env"),
+		env: getBlock("env"),
 		parentClosePolicy:
 			parentClosePolicyRaw === "terminate" ||
 			parentClosePolicyRaw === "continue"

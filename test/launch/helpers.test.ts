@@ -33,6 +33,7 @@ describe("launch helpers", () => {
 			"/skill:research",
 			"@/tmp/fork-task.md",
 		]);
+		assert.deepEqual(buildPiPromptArgsForTest([], "@/tmp/task.md", true), ["", "@/tmp/task.md"]);
 	});
 
 	it("registers set_tab_title only when explicitly enabled", () => {

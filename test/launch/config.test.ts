@@ -29,6 +29,7 @@ import {
 	resolveSubagentBlockingForTest,
 	resolveSubagentNoContextFilesForTest,
 	resolveSubagentNoSessionForTest,
+	resolveSubagentRuntimePathsForTest,
 	writeSubagentLaunchMetadataEntryForTest,
 	writeSubagentModelStateEntriesForTest,
 	getEntries,
@@ -891,9 +892,12 @@ describe("env frontmatter field", () => {
 		resetSubagentStateForTest();
 	});
 
-	it("parses KEY=VALUE pairs from an env string", () => {
-		assert.deepEqual(parseEnvStringForTest("FOO=bar,BAZ=qux"), { FOO: "bar", BAZ: "qux" });
-		assert.deepEqual(parseEnvStringForTest("FOO=bar, BAZ=qux"), { FOO: "bar", BAZ: "qux" });
+	it("parses block KEY=VALUE pairs without splitting commas or equals in values", () => {
+		assert.deepEqual(parseEnvStringForTest("FOO=bar\nBAZ=qux"), { FOO: "bar", BAZ: "qux" });
+		assert.deepEqual(parseEnvStringForTest("FOO=value,with,commas\nTOKEN=a=b=c"), {
+			FOO: "value,with,commas",
+			TOKEN: "a=b=c",
+		});
 		assert.deepEqual(parseEnvStringForTest(undefined), {});
 		assert.deepEqual(parseEnvStringForTest(""), {});
 		assert.deepEqual(parseEnvStringForTest("  "), {});
@@ -904,31 +908,49 @@ describe("env frontmatter field", () => {
 		assert.throws(() => parseEnvStringForTest("FOO"), /Missing '='/);
 	});
 
-	it("parses env from agent frontmatter", () => {
+	it("parses block env from agent frontmatter", () => {
 		const dir = createTestDir();
 		const configDir = join(dir, "config");
 		mkdirSync(join(configDir, "agents"), { recursive: true });
 		writeFileSync(
 			join(configDir, "agents", "explorer.md"),
-			`---\nname: explorer\nenv: FOO=bar,BAZ=qux\n---\n\nExplorer body.`,
+			`---\nname: explorer\nenv: |\n  FOO=bar\n  BAZ=value,with,commas\n---\n\nExplorer body.`,
 		);
 		process.env.PI_CODING_AGENT_DIR = configDir;
 
 		const defs = loadAgentDefaults("explorer");
-		assert.equal(defs?.env, "FOO=bar,BAZ=qux");
+		assert.equal(defs?.env, "FOO=bar\nBAZ=value,with,commas");
 
 		process.env.PI_CODING_AGENT_DIR = "/tmp";
 	});
 
 	it("merges env vars into base subagent env vars", () => {
 		const env = getBaseSubagentEnvVarsForTest({
-			env: "FOO=bar,BAZ=qux",
+			env: "FOO=bar\nBAZ=value,with,commas",
 		});
 		assert.equal(env["FOO"], "bar");
-		assert.equal(env["BAZ"], "qux");
+		assert.equal(env["BAZ"], "value,with,commas");
 		// Internal vars still present
 		assert.equal(typeof env.PI_SUBAGENT_NAME, "string");
 		assert.equal(env.PI_PACKAGE_DIR, "");
+	});
+
+	it("uses env PI_CODING_AGENT_DIR as the child config and session root", () => {
+		const dir = createTestDir();
+		const parentSessionDir = join(dir, "parent-sessions");
+		const childConfigDir = join(dir, "child-agent");
+		mkdirSync(childConfigDir, { recursive: true });
+
+		const paths = resolveSubagentRuntimePathsForTest(
+			{},
+			{ env: `PI_CODING_AGENT_DIR=${childConfigDir}` },
+			dir,
+			parentSessionDir,
+		);
+
+		assert.equal(paths.localAgentConfigDir, childConfigDir);
+		assert.equal(paths.effectiveAgentConfigDir, childConfigDir);
+		assert.equal(paths.sessionDir, join(childConfigDir, "sessions", `--${dir.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`));
 	});
 
 	it("returns empty env record when no env field is set", () => {

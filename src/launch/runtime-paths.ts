@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { AgentDefaults } from "../agents/definitions.ts";
 import { getAgentConfigDir } from "../agents/definitions.ts";
 import type { SubagentParamsInput } from "../types.ts";
+import { getEnvAgentConfigDir } from "./env.ts";
 
 export function resolveSubagentCwd(
 	rawCwd: string | null,
@@ -50,7 +51,7 @@ export function resolveSubagentRuntimePaths(
 	const rawCwd = params.cwd ?? agentDefs?.cwd ?? null;
 	const cwdBase = params.cwd ? parentCwd : (agentDefs?.cwdBase ?? parentCwd);
 	const effectiveCwd = rawCwd ? resolveSubagentCwd(rawCwd, cwdBase) : null;
-	const localAgentConfigDir = resolveSubagentConfigDir(rawCwd, cwdBase);
+	const localAgentConfigDir = getEnvAgentConfigDir(agentDefs?.env) ?? resolveSubagentConfigDir(rawCwd, cwdBase);
 	const effectiveAgentConfigDir = localAgentConfigDir ?? getAgentConfigDir();
 	const targetCwdForSession = effectiveCwd ?? parentCwd;
 	return {

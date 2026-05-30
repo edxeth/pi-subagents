@@ -364,11 +364,11 @@ export function resolveTaskSessionMode(
 export function buildPiPromptArgs(
 	skills: string[],
 	taskArg: string,
-	_directTask: boolean,
+	directTask: boolean,
 ): string[] {
 	const skillPrompts = skills.map((skill) => `/skill:${skill}`);
 	const isArtifactTask = taskArg.startsWith("@");
-	const needsSeparator = isArtifactTask && skillPrompts.length > 0;
+	const needsSeparator = isArtifactTask && (skillPrompts.length > 0 || directTask);
 	return [...(needsSeparator ? [""] : []), ...skillPrompts, taskArg];
 }
 

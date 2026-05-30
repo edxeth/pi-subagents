@@ -12,13 +12,13 @@ import {
 	getSubagentChildProcessEnv,
 	parseCommandWords,
 } from "../launch/child-command.ts";
+import { parseEnvString } from "../launch/env.ts";
 import {
 	buildPersistedSubagentLaunchMetadata,
 	getBaseSubagentEnvVars,
 	getExtensionLaunchArgs,
 	getPersistedSessionParityArgs,
 	getPreparedSessionLaunchArgs,
-	parseEnvString,
 	resolveAvailableModelRef,
 	splitModelRefThinking,
 	type PreparedSubagentLaunch,
