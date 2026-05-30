@@ -33,7 +33,7 @@ const keepTmp = process.env.PI_SUBAGENT_KEEP_E2E_TMP === "1";
 const prompt = [
   "The subagent tool is available in this session.",
   "Use exactly this sequence.",
-  'Call subagent with name "Live Deny Child", agent "live-e2e-deny", title "Live deny tools check", task "Follow your exact built-in instructions."., and async false.',
+  'Call subagent with name "live-deny-child", agent "live-e2e-deny", title "Live deny tools check", task "Follow your exact built-in instructions."., and async false.',
   'After the tool returns, reply with exactly "LIVE_E2E_DENY_OK" and nothing else.',
   "Do not call any other tools.",
 ].join(" ");
@@ -80,6 +80,7 @@ export default function (pi: ExtensionAPI) {
       writeFileSync(
         out,
         JSON.stringify({
+          extensionLoaded: true,
           active: pi.getActiveTools(),
           all: pi.getAllTools().map((tool) => tool.name),
         }, null, 2),
@@ -201,23 +202,27 @@ try {
   if (!details.sessionFile || !existsSync(details.sessionFile)) throw new Error("Missing child sessionFile.");
 
   const childEvents = parseJsonl(details.sessionFile);
+  const childHeader = childEvents.find((event) => event.type === "session");
+  if (childHeader?.name !== "[live-e2e-deny agent] Live deny tools check") {
+    throw new Error(`Expected native child session name, got ${childHeader?.name ?? "missing"}.`);
+  }
   if (!getAssistantTexts(childEvents).some((text) => text.includes("LIVE_DENY_CHILD_OK"))) {
     throw new Error("Child did not produce LIVE_DENY_CHILD_OK.");
   }
 
   if (!existsSync(outputFile)) throw new Error("Child did not write active tool snapshot.");
   const snapshot = JSON.parse(readFileSync(outputFile, "utf8"));
+  if (snapshot.extensionLoaded !== true) {
+    throw new Error(`Extension did not write its loaded marker. Snapshot: ${JSON.stringify(snapshot)}`);
+  }
   const active = snapshot.active ?? [];
   const all = snapshot.all ?? [];
 
-  if (!all.includes("e2e_probe_tool")) {
-    throw new Error(`Probe tool was not loaded. Snapshot: ${JSON.stringify(snapshot)}`);
-  }
-  if (active.includes("e2e_probe_tool")) {
-    throw new Error(`Probe tool was still active after deny-tools filtering. Snapshot: ${JSON.stringify(snapshot)}`);
+  if (active.includes("e2e_probe_tool") || all.includes("e2e_probe_tool")) {
+    throw new Error(`Probe tool was still available after native deny-tools filtering. Snapshot: ${JSON.stringify(snapshot)}`);
   }
 
-  console.log(`live deny-tools ok: denied e2e_probe_tool while loaded in child session (${details.id})`);
+  console.log(`live deny-tools ok: denied e2e_probe_tool and named child session (${details.id})`);
 } finally {
   try {
     unlinkSync(extensionFile);

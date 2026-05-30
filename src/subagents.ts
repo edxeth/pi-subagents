@@ -10,8 +10,9 @@ import {
   renderAgentListReminder,
   renderAgentRosterForSystemPrompt,
 } from "./agents/agent-list.ts";
-import { loadAgentDefaults as loadAgentDefaultsFromDefinitions } from "./agents/definitions.ts";
-import { areSubagentSessionTitlesDisabled } from "./agents/titles.ts";
+import {
+	loadAgentDefaults as loadAgentDefaultsFromDefinitions,
+} from "./agents/definitions.ts";
 import { getNoSessionSeedMode } from "./launch/seed-child-session.ts";
 import {
   getSubagentAgentOverrideError,
@@ -131,27 +132,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
     header.parentSession = parentSession;
   }
 
-  function applySubagentSessionTitle(ctx: ExtensionContext) {
-    if (areSubagentSessionTitlesDisabled()) return;
-    const title = process.env.PI_SUBAGENT_SESSION_TITLE?.trim();
-    if (!title) return;
-    const header = ctx.sessionManager.getHeader?.() as
-      | { name?: string }
-      | undefined;
-    if (header && header.name !== title) header.name = title;
-    if (ctx.sessionManager.getSessionName?.() === title) return;
-    pi.setSessionName(title);
-  }
+	// Orchestrator mode constants (defined before use in session_start/before_agent_start)
+	const ORCHESTRATOR_MODE = process.env.PI_ORCHESTRATOR_MODE === "1";
+	const ORCHESTRATOR_ALLOWED_TOOLS = ORCHESTRATOR_ALLOWED_TOOL_NAMES;
+	let latestContext: ExtensionContext | undefined;
 
-  let latestContext: ExtensionContext | undefined;
-
-  // Capture the UI context early so the widget keeps a stable slot above tasks.
-  pi.on("session_start", (event, ctx) => {
-    latestContext = ctx;
-    resetSubagentBatchStopRequest();
-    applySubagentLineage(ctx);
-    applySubagentSessionTitle(ctx);
-    attachWidgetContext(ctx);
+	// Capture the UI context early so the widget keeps a stable slot above tasks.
+	pi.on("session_start", (event, ctx) => {
+		latestContext = ctx;
+		resetSubagentBatchStopRequest();
+		applySubagentLineage(ctx);
+		attachWidgetContext(ctx);
 
     if (!shouldRegister(SUBAGENT_TOOL_NAME)) return;
 

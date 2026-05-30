@@ -112,7 +112,13 @@ export function getSubagentToolLaunchArgs(
 	tools?: string,
 	deniedTools = new Set<string>(),
 ): string[] {
-	if (normalizeToolMode(tools) === "none") return ["--no-builtin-tools"];
-	const allowlist = getSubagentToolAllowlist(tools, deniedTools);
-	return allowlist.length > 0 ? ["--tools", allowlist.join(",")] : [];
+	const args: string[] = [];
+	if (normalizeToolMode(tools) === "none") {
+		args.push("--no-builtin-tools");
+	} else {
+		const allowlist = getSubagentToolAllowlist(tools, deniedTools);
+		if (allowlist.length > 0) args.push("--tools", allowlist.join(","));
+	}
+	if (deniedTools.size > 0) args.push("--exclude-tools", [...deniedTools].join(","));
+	return args;
 }

@@ -38,7 +38,6 @@ export const ISOLATED_SUBAGENT_ENV_KEYS = [
 	"PI_SUBAGENT_AUTO_EXIT",
 	"PI_SUBAGENT_PARENT_SESSION",
 	"PI_SUBAGENT_SESSION",
-	"PI_SUBAGENT_SESSION_TITLE",
 ] as const;
 
 export function clearIsolatedSubagentEnv(): void {

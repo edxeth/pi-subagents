@@ -140,12 +140,21 @@ describe("subagent-done.ts", () => {
 			assert.deepEqual(getSubagentToolLaunchArgsForTest(undefined), []);
 			assert.deepEqual(getSubagentToolLaunchArgsForTest("all"), []);
 			assert.deepEqual(getSubagentToolLaunchArgsForTest(" all "), []);
+			assert.deepEqual(getSubagentToolLaunchArgsForTest("all", ["bash"]), [
+				"--exclude-tools",
+				"bash",
+			]);
 		});
 
 		it("maps tools none to no built-in tools while preserving extension tools", () => {
 			assert.deepEqual(getSubagentToolAllowlistForTest("none"), []);
 			assert.deepEqual(getSubagentToolLaunchArgsForTest("none"), [
 				"--no-builtin-tools",
+			]);
+			assert.deepEqual(getSubagentToolLaunchArgsForTest("none", ["read", "subagent"]), [
+				"--no-builtin-tools",
+				"--exclude-tools",
+				"read,subagent",
 			]);
 			assert.deepEqual(getSubagentToolDeniedNamesForTest("none"), [
 				"read",

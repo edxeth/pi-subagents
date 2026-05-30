@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export function expandHomeDir(path: string): string {
+function expandHomeDir(path: string): string {
 	if (path === "~") return homedir();
 	if (path.startsWith("~/") || path.startsWith("~\\")) return join(homedir(), path.slice(2));
 	return path;

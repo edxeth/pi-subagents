@@ -325,11 +325,13 @@ export function getPreparedExtensionLaunchArgs(
 }
 
 export function getPreparedSessionLaunchArgs(
-	prepared: Pick<PreparedSubagentLaunch, "agentDefs" | "subagentSessionFile">,
+	prepared: Pick<PreparedSubagentLaunch, "agentDefs" | "subagentSessionFile" | "sessionTitle">,
 ): string[] {
-	return resolveSubagentNoSession(prepared.agentDefs)
+	const args = resolveSubagentNoSession(prepared.agentDefs)
 		? ["--session", prepared.subagentSessionFile, "--no-session"]
 		: ["--session", prepared.subagentSessionFile];
+	if (prepared.sessionTitle) args.push("--name", prepared.sessionTitle);
+	return args;
 }
 
 export function getPersistedPromptLaunchArgs(
@@ -485,8 +487,6 @@ export function getBaseSubagentEnvVars(
 	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
 	if (sessionMode !== "standalone")
 		if (prepared.sessionFile) envVars.PI_SUBAGENT_PARENT_SESSION = prepared.sessionFile;
-	if (prepared.sessionTitle) envVars.PI_SUBAGENT_SESSION_TITLE = prepared.sessionTitle;
-
 	envVars.PI_ARTIFACT_PROJECT_ROOT = getArtifactStorageRoot();
 	return envVars;
 }

@@ -11,39 +11,12 @@ import {
 	shouldAutoExitOnAgentEnd,
 	shouldMarkUserTookOver,
 } from "../auto-exit.ts";
-import { areSubagentSessionTitlesDisabled } from "../agents/titles.ts";
 import {
 	CALLER_PING_TOOL_NAME,
 	SUBAGENT_DONE_TOOL_NAME,
 } from "./tool-names.ts";
 
 const require = createRequire(import.meta.url);
-
-function applySubagentSessionTitle(
-	ctx:
-		| {
-				sessionManager?: {
-					getHeader?: () => unknown;
-					getSessionName?: () => string | undefined;
-				};
-			}
-		| undefined,
-	pi: ExtensionAPI,
-) {
-	if (areSubagentSessionTitlesDisabled()) return;
-
-	const title = process.env.PI_SUBAGENT_SESSION_TITLE?.trim();
-	if (!title) return;
-
-	const header = ctx?.sessionManager?.getHeader?.() as
-		| { name?: string }
-		| null
-		| undefined;
-	if (header && header.name !== title) header.name = title;
-
-	if (ctx?.sessionManager?.getSessionName?.() === title) return;
-	pi.setSessionName(title);
-}
 
 function isMissingOptionalDependency(error: unknown, id: string): boolean {
 	const maybeError = error as { code?: unknown; message?: unknown } | null;
@@ -218,8 +191,6 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", (_event, ctx) => {
-		applySubagentSessionTitle(ctx, pi);
-
 		enforceDeniedTools();
 		setTimeout(() => enforceDeniedTools(), 0);
 		setTimeout(() => enforceDeniedTools(), 250);

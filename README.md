@@ -78,9 +78,9 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `thinking` | model default | Child thinking level. When unset, the child inherits the parent's thinking level. |
 | `allow-model-override` | `true` | Whether the parent Pi session may launch or resume this agent with a different model or thinking level. Leave it alone if you want to choose models per task from the parent chat. Set `false` when this agent should always use the model written in its file. |
 | `cwd` | parent cwd | Working directory for the child |
-| `extensions` | `all` | Extension availability: `all`, `none`, or a comma-separated allowlist for the child |
-| `tools` | `all` | Built-in Pi tools: `all`, `none`, or a comma-separated subset of `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` |
-| `deny-tools` | unset | Extra tool names to remove from the child |
+| `extensions` | `all` | Which extension code loads in the child: `all`, `none`, or a comma-separated allowlist |
+| `tools` | `all` | Built-in Pi tool availability: `all`, `none`, or a comma-separated subset of `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls` |
+| `deny-tools` | unset | Final comma-separated tool names to remove from the child after built-in tools, extensions, and protocol tools are selected |
 | `skills` | `all` | Child skill availability: `all`, `none`, or a comma-separated allowlist resolved by skill name |
 | `inject-skills` | unset | Comma-separated skills to load into the child prompt before the task |
 | `no-context-files` | `false` | Skip `AGENTS.md` and `CLAUDE.md` discovery in the child |
@@ -88,7 +88,7 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `auto-exit` | `false` | Close the child after a normal completion |
 | `system-prompt` | task body | `append` uses `--append-system-prompt`; `replace` uses `--system-prompt` |
 | `session-mode` | `lineage-only` | `standalone`, `lineage-only`, or `fork` |
-| `flags` | unset | Extra CLI flags passed to the child pi process (e.g. `--verbose` or `--some-custom-flag`). Appended after all generated args — last-wins semantics against conflicting generated args. Useful for extension-registered flags or pi built-in flags not covered by other frontmatter fields. |
+| `flags` | unset | Extra CLI flags passed to the child pi process (e.g. `--verbose` or `--some-custom-flag`). Appended after all generated args — last-wins semantics against conflicting generated args. Use only as an advanced escape hatch for extension-registered flags or pi built-in flags not covered by other frontmatter fields. |
 | `env` | unset | Line-based `KEY=VALUE` pairs passed as environment variables to the child process. Use YAML block syntax for values with commas or `=`. `PI_CODING_AGENT_DIR` is special: when set here, it is resolved before launch and becomes the child's Pi config/session root. `~/` is expanded. Internal PI vars such as PI\_SUBAGENT\_\* still take precedence if names conflict. |
 | `spawning` | `false` | Allow the child to launch subagents |
 | `async` | `true` | `false` makes the launch sync |
@@ -244,6 +244,8 @@ For large output, let the child use Pi's `write` tool and mention the path in it
 
 ## Child tools and extensions
 
+`extensions`, `tools`, and `deny-tools` shape the Pi capabilities available to the child model. They are not a sandbox for untrusted code. Loaded extensions still execute with the child process permissions, and freeform `flags` can override generated CLI arguments. Use OS or container isolation for hard security boundaries.
+
 Children load all extensions by default. Omit `extensions` or set `extensions: all` for the default Pi extension set.
 
 Set `extensions: none` to launch with no normal extensions. `pi-subagents` still injects its mandatory internal helper so child lifecycle and result delivery continue to work.
@@ -396,7 +398,18 @@ inject-skills: deep-research
 
 The `tools` field narrows built-in Pi tools. Protocol tools such as `caller_ping` and `subagent_done` stay available unless you deny them.
 
-`spawning` defaults to `false`. That removes `subagent`, `subagents_list`, and `subagent_resume` from children. Set `spawning: true` only for coordinator agents.
+`deny-tools` is a final named tool denylist. It can remove built-in Pi tools, extension/custom tools, or pi-subagents protocol tools after they have otherwise been selected.
+
+```md
+---
+name: reviewer
+tools: read,grep
+extensions: all
+deny-tools: bash,edit,write,ask_user
+---
+```
+
+`spawning` defaults to `false`. That removes `subagent` and `subagent_resume` from children. Set `spawning: true` only for coordinator agents.
 
 ## Parent shutdown policy
 
@@ -474,7 +487,6 @@ Runtime internals you may see while debugging:
 - `PI_SUBAGENT_PARENT_SESSION`
 - `PI_SUBAGENT_SESSION`
 - `PI_SUBAGENT_SURFACE`
-- `PI_SUBAGENT_SESSION_TITLE`
 - `PI_SUBAGENT_AUTO_EXIT`
 
 Live test knobs:

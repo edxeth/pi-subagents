@@ -11,6 +11,7 @@ import {
 	buildShellChangeDirectoryPrefixForTest,
 	buildSkillLaunchPlanForTest,
 	getFlagsLaunchArgs,
+	getSubagentToolLaunchArgsForTest,
 	getBaseSubagentEnvVarsForTest,
 	getNoSessionSeedModeForTest,
 	getPiInvocationForTest,
@@ -656,6 +657,54 @@ describe("agent launch configuration", () => {
 		assert.deepEqual(getPreparedSessionLaunchArgsForTest(defaults), [
 			"--session",
 			"child.jsonl",
+		]);
+	});
+
+	it("adds native session names for prepared child launches", () => {
+		assert.deepEqual(getPreparedSessionLaunchArgsForTest({
+			subagentSessionFile: "child.jsonl",
+			sessionTitle: "[reviewer agent] Code review",
+			agentDefs: {},
+		}), [
+			"--session",
+			"child.jsonl",
+			"--name",
+			"[reviewer agent] Code review",
+		]);
+		assert.deepEqual(getPreparedSessionLaunchArgsForTest({
+			subagentSessionFile: "child.jsonl",
+			sessionTitle: "[reviewer agent] Disposable review",
+			agentDefs: { noSession: true },
+		}), [
+			"--session",
+			"child.jsonl",
+			"--no-session",
+			"--name",
+			"[reviewer agent] Disposable review",
+		]);
+	});
+
+	it("adds native exclude-tools for the resolved deny set", async () => {
+		assert.deepEqual(getSubagentToolLaunchArgsForTest("all", ["subagent", "bash"]), [
+			"--exclude-tools",
+			"subagent,bash",
+		]);
+		assert.deepEqual(getSubagentToolLaunchArgsForTest("none", ["read", "bash", "subagent"]), [
+			"--no-builtin-tools",
+			"--exclude-tools",
+			"read,bash,subagent",
+		]);
+		assert.deepEqual(getSubagentToolLaunchArgsForTest("read,grep", ["grep", "subagent"]), [
+			"--tools",
+			"read,grep,caller_ping,subagent_done,set_tab_title",
+			"--exclude-tools",
+			"grep,subagent",
+		]);
+		assert.deepEqual(getSubagentToolLaunchArgsForTest("bash", ["bash"]), [
+			"--tools",
+			"bash,caller_ping,subagent_done,set_tab_title",
+			"--exclude-tools",
+			"bash",
 		]);
 	});
 

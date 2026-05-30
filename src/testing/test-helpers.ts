@@ -416,12 +416,16 @@ export function parseEnvStringForTest(env: string | undefined) {
 }
 
 export function getPreparedSessionLaunchArgsForTest(
-	agentDefs: AgentDefaults | null,
+	agentDefs: AgentDefaults | null | Pick<PreparedSubagentLaunch, "agentDefs" | "subagentSessionFile" | "sessionTitle">,
 ) {
-	return getPreparedSessionLaunchArgs({
-		agentDefs,
-		subagentSessionFile: "child.jsonl",
-	} as PreparedSubagentLaunch);
+	return getPreparedSessionLaunchArgs(
+		agentDefs && "subagentSessionFile" in agentDefs
+			? agentDefs
+			: {
+				agentDefs,
+				subagentSessionFile: "child.jsonl",
+			} as PreparedSubagentLaunch,
+	);
 }
 
 export function getBaseSubagentEnvVarsForTest(

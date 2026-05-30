@@ -4,7 +4,7 @@ export function isSetTabTitleToolEnabled(): boolean {
 	return process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE === "1";
 }
 
-export function areSubagentSessionTitlesDisabled(): boolean {
+function areSubagentSessionTitlesDisabled(): boolean {
 	return process.env.PI_SUBAGENT_DISABLE_SESSION_TITLES === "1";
 }
 
