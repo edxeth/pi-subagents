@@ -82,6 +82,31 @@ function getTextContent(msg: MessageEntry): string | null {
 	return texts.length > 0 && texts.join("").trim() ? texts.join("\n") : null;
 }
 
+function getTerminalStopMessage(msg: MessageEntry): string | null {
+	const stopReason = (msg.message as Record<string, unknown>).stopReason;
+	if (typeof stopReason !== "string" || stopReason.trim() === "") {
+		return null;
+	}
+
+	const errorMessage = (msg.message as Record<string, unknown>).errorMessage;
+	if (stopReason === "error") {
+		return typeof errorMessage === "string" && errorMessage.trim() !== ""
+			? `Subagent error: ${errorMessage.trim()}`
+			: "Subagent error";
+	}
+
+	return getSubagentTerminalStopMessage(stopReason);
+}
+
+export function getSubagentTerminalStopMessage(stopReason: string): string {
+	return `Subagent stopped before producing a result (stopReason: ${stopReason})`;
+}
+
+export function getSubagentTerminalStopReason(summary: string): string | null {
+	const match = /^Subagent stopped before producing a result \(stopReason: (.+)\)$/.exec(summary);
+	return match?.[1]?.trim() || null;
+}
+
 export function findLastAssistantMessage(
 	entries: SessionEntry[],
 ): string | null {
@@ -93,19 +118,10 @@ export function findLastAssistantMessage(
 		const text = getTextContent(msg);
 		if (text) return text;
 
-		// When auto-retry is exhausted, the assistant message carries
-		// stopReason="error" with errorMessage but no text content.
-		// Surface the underlying error instead of scanning past it
-		// to a stale earlier message.
-		const stopReason = (msg.message as Record<string, unknown>).stopReason;
-		const errorMessage = (msg.message as Record<string, unknown>).errorMessage;
-		if (
-			stopReason === "error" &&
-			typeof errorMessage === "string" &&
-			errorMessage.trim() !== ""
-		) {
-			return `Subagent error: ${errorMessage.trim()}`;
-		}
+		// A terminal assistant turn with no text is still the child outcome.
+		// Surface it instead of scanning past it to stale earlier status text.
+		const stopMessage = getTerminalStopMessage(msg);
+		if (stopMessage) return stopMessage;
 	}
 	return null;
 }

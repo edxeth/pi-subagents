@@ -224,7 +224,14 @@ describe("session.ts", () => {
 			assert.equal(findLastAssistantMessage([msg] as any[]), "Here is partial output.");
 		});
 
-		it("does not invent a summary for stop=error with no errorMessage", () => {
+		it("surfaces a generic error when stop=error has no errorMessage", () => {
+			const earlierStatus = {
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "Investigating the bug..." }],
+				},
+			};
 			const msg = {
 				type: "message",
 				message: {
@@ -233,7 +240,33 @@ describe("session.ts", () => {
 					stopReason: "error",
 				},
 			};
-			assert.equal(findLastAssistantMessage([msg] as any[]), null);
+			assert.equal(
+				findLastAssistantMessage([earlierStatus, msg] as any[]),
+				"Subagent error",
+			);
+		});
+
+		it("does not scan past a final assistant length stop with no text", () => {
+			const earlierStatus = {
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "I'll review the diff now." }],
+				},
+			};
+			const finalLengthStop = {
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [{ type: "thinking", thinking: "still reviewing" }],
+					stopReason: "length",
+				},
+			};
+
+			assert.equal(
+				findLastAssistantMessage([earlierStatus, finalLengthStop] as any[]),
+				"Subagent stopped before producing a result (stopReason: length)",
+			);
 		});
 	});
 
@@ -251,6 +284,39 @@ describe("session.ts", () => {
 			] as any[];
 
 			assert.equal(findLastSubagentOutput(entries), "Final assistant summary.");
+		});
+
+		it("does not fall back to stale output after a terminal length stop", () => {
+			const entries = [
+				{
+					type: "message",
+					message: {
+						role: "assistant",
+						content: [{ type: "text", text: "I'll review the diff now." }],
+					},
+				},
+				{
+					type: "message",
+					message: {
+						role: "toolResult",
+						toolName: "bash",
+						content: [{ type: "text", text: "intermediate command output" }],
+					},
+				},
+				{
+					type: "message",
+					message: {
+						role: "assistant",
+						content: [{ type: "thinking", thinking: "still reviewing" }],
+						stopReason: "length",
+					},
+				},
+			] as any[];
+
+			assert.equal(
+				findLastSubagentOutput(entries),
+				"Subagent stopped before producing a result (stopReason: length)",
+			);
 		});
 
 		it("falls back to the last meaningful tool result when assistant only calls subagent_done", () => {

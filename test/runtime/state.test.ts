@@ -78,6 +78,17 @@ describe("getSubagentCompletionStatus (via buildCompletedSubagentResult)", () =>
 		assert.equal(result.status, "failed");
 	});
 
+	it("returns failed when the child stopped before producing a result", () => {
+		const result = buildCompletedSubagentResult(
+			makeRunning(),
+			makeResult({
+				exitCode: 0,
+				summary: "Subagent stopped before producing a result (stopReason: length)",
+			}),
+		);
+		assert.equal(result.status, "failed");
+	});
+
 	it("prefers cancelled over errorMessage", () => {
 		const result = buildCompletedSubagentResult(
 			makeRunning(),

@@ -1,4 +1,5 @@
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
+import { getSubagentTerminalStopReason } from "../session/session.ts";
 import type {
 	CompletedSubagentResult,
 	RunningSubagent,
@@ -17,6 +18,7 @@ function getSubagentCompletionStatus(
 	// Provider/network errors may set errorMessage with exitCode 0
 	// (Pi exits cleanly even when model calls fail after retry exhaustion).
 	if (result.errorMessage) return "failed";
+	if (getSubagentTerminalStopReason(result.summary)) return "failed";
 	return result.exitCode === 0 ? "completed" : "failed";
 }
 
