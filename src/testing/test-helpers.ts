@@ -62,12 +62,12 @@ import {
 	readSubagentLaunchMetadata,
 	resolveEffectiveSessionMode,
 	resolveTaskSessionMode,
-	seedSubagentSessionFile,
 	type PersistedSubagentLaunchMetadata,
 	type SubagentSessionMode,
 	writeSubagentLaunchMetadataEntryWhenReady,
 	writeSubagentModelStateEntries,
 } from "../session/session-files.ts";
+import { ChildSessionStorage } from "../session/child-session-storage.ts";
 import {
 	writeSystemPromptArtifact,
 } from "../launch/prompt-artifacts.ts";
@@ -210,7 +210,7 @@ export function seedSubagentSessionFileForTest(
 		activeLeafId?: string | null;
 	},
 ) {
-	seedSubagentSessionFile(mode, parentSessionFile, childSessionFile, cwd, seedOptions);
+	new ChildSessionStorage(childSessionFile).seed(mode, parentSessionFile, cwd, seedOptions);
 }
 
 export function resolveTaskSessionModeForTest(agentDefs: AgentDefaults | null) {

@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -7,7 +6,6 @@ import {
 	getSubagentChildProcessEnv,
 } from "./child-command.ts";
 import {
-	getBaseSubagentEnvVars,
 	getFlagsLaunchArgs,
 	getPreparedExtensionLaunchArgs,
 	getPreparedModel,
@@ -16,29 +14,21 @@ import {
 	getPreparedSkillInjection,
 	getPreparedSkillLaunchArgs,
 	getPreparedSkillList,
-	prepareSubagentLaunch,
 	type SubagentLaunchContext,
 } from "./prep.ts";
 import {
 	resolveSubagentNoContextFiles,
-	resolveSubagentNoSession,
 	resolveSubagentParentClosePolicy,
 } from "./policy.ts";
 import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
 import {
 	buildPiPromptArgs,
-	resolveEffectiveSessionMode,
-	writeSubagentLaunchMetadataEntry,
-	writeSubagentLaunchMetadataEntryWhenReady,
-	writeSubagentModelStateEntries,
 } from "../session/session-files.ts";
-import { seedPreparedSubagentSession, getNoSessionSeedMode } from "./seed-child-session.ts";
+import { coordinateSubagentLaunch } from "./launch-coordinator.ts";
 import { writeTaskArtifact } from "./prompt-artifacts.ts";
 import { getSubagentDisplayTitle } from "../agents/titles.ts";
 import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
-import { buildPersistedSubagentLaunchMetadata } from "./prep.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
-import { getEntryCount } from "../session/session.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
 
 export interface BackgroundLaunchRuntime {
@@ -52,17 +42,14 @@ export async function launchBackgroundSubagent(
 ): Promise<RunningSubagent> {
 	const startTime = Date.now();
 	const id = Math.random().toString(16).slice(2, 10);
-	const prepared = await prepareSubagentLaunch(params, ctx);
+	const launch = await coordinateSubagentLaunch(params, ctx, { mode: "background" });
+	const { prepared, noSession, directTask } = launch;
 	const subagentDonePath = join(
 		dirname(dirname(fileURLToPath(import.meta.url))),
 		"tools",
 		"subagent-done.ts",
 	);
 	const roleBlock = getPreparedRoleBlock(prepared);
-	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
-	const noSession = resolveSubagentNoSession(prepared.agentDefs);
-	const noSessionSeedMode = noSession ? getNoSessionSeedMode(sessionMode) : null;
-	const directTask = sessionMode === "fork" || noSessionSeedMode === "fork";
 	const modeHint = prepared.agentDefs?.autoExit
 		? "Complete your task autonomously."
 		: "Manual lifecycle: do not stop after your final text. After completing the task, you MUST call the subagent_done tool unless you intentionally need the human operator to terminate this session. If operator close is required, say exactly `MANUAL CLOSE REQUIRED:` followed by the reason and wait.";
@@ -80,40 +67,15 @@ export async function launchBackgroundSubagent(
 		...getPreparedSessionLaunchArgs(prepared),
 		...getPreparedExtensionLaunchArgs(prepared, subagentDonePath),
 	];
-	const { seedMode, boundarySystemPrompt } = seedPreparedSubagentSession(
-		prepared,
-		params,
-		ctx,
-		sessionMode,
-		noSession,
-	);
-
 	const model = getPreparedModel(prepared);
 	if (model) args.push("--model", model);
 	if (resolveSubagentNoContextFiles(prepared.agentDefs)) args.push("--no-context-files");
 
-	let systemPrompt: string | undefined;
-	if (prepared.identityInSystemPrompt && prepared.identity) {
-		const flag = prepared.agentDefs?.systemPromptMode === "replace"
-			? "--system-prompt"
-			: "--append-system-prompt";
-		systemPrompt = prepared.identity;
-		args.push(flag, systemPrompt);
+	if (launch.systemPrompt) {
+		args.push(launch.systemPrompt.flag, launch.systemPrompt.text);
 	}
-	if (boundarySystemPrompt) {
+	if (launch.boundarySystemPrompt) {
 		args.push("--append-system-prompt", CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT);
-	}
-	const launchMetadata = buildPersistedSubagentLaunchMetadata(
-		prepared,
-		params,
-		"background",
-		sessionMode,
-		boundarySystemPrompt,
-		systemPrompt,
-	);
-	if (existsSync(prepared.subagentSessionFile)) {
-		if (seedMode === "fork") writeSubagentModelStateEntries(prepared.subagentSessionFile, launchMetadata);
-		writeSubagentLaunchMetadataEntry(prepared.subagentSessionFile, launchMetadata);
 	}
 	args.push(...getSubagentToolLaunchArgs(prepared.effectiveTools, prepared.denySet));
 	args.push(...getPreparedSkillLaunchArgs(prepared));
@@ -128,12 +90,7 @@ export async function launchBackgroundSubagent(
 		args.push(promptArg);
 	}
 
-	const envVars = getBaseSubagentEnvVars(prepared, params, resolveEffectiveSessionMode);
-	if (prepared.agentDefs?.autoExit) envVars.PI_SUBAGENT_AUTO_EXIT = "1";
-	envVars.PI_SUBAGENT_SESSION = prepared.subagentSessionFile;
-	const launchEntryCount = existsSync(prepared.subagentSessionFile)
-		? getEntryCount(prepared.subagentSessionFile)
-		: 0;
+	const { envVars, launchEntryCount } = launch;
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
 
 	const invocation = getPiInvocation(args);
@@ -146,13 +103,6 @@ export async function launchBackgroundSubagent(
 		env: getSubagentChildProcessEnv(invocation, envVars),
 	});
 	child.unref();
-	if (!existsSync(prepared.subagentSessionFile)) {
-		await writeSubagentLaunchMetadataEntryWhenReady(
-			prepared.subagentSessionFile,
-			launchMetadata,
-		);
-	}
-
 	const running: RunningSubagent = {
 		id,
 		name: params.name,

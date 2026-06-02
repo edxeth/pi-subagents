@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
@@ -6,8 +5,6 @@ import {
 	getPiShellParts,
 } from "./child-command.ts";
 import {
-	buildPersistedSubagentLaunchMetadata,
-	getBaseSubagentEnvVars,
 	getPreparedExtensionLaunchArgs,
 	getPreparedModel,
 	getPreparedRoleBlock,
@@ -16,12 +13,10 @@ import {
 	getPreparedSkillLaunchArgs,
 	getPreparedSkillList,
 	getFlagsLaunchArgs,
-	prepareSubagentLaunch,
 	type SubagentLaunchContext,
 } from "./prep.ts";
 import {
 	resolveSubagentNoContextFiles,
-	resolveSubagentNoSession,
 	resolveSubagentParentClosePolicy,
 } from "./policy.ts";
 import {
@@ -32,16 +27,11 @@ import {
 } from "../mux.ts";
 import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
-import { getEntryCount } from "../session/session.ts";
 import {
 	buildPiPromptArgs,
 	getDoneSentinelFile,
-	resolveEffectiveSessionMode,
-	writeSubagentLaunchMetadataEntry,
-	writeSubagentLaunchMetadataEntryWhenReady,
-	writeSubagentModelStateEntries,
 } from "../session/session-files.ts";
-import { getNoSessionSeedMode, seedPreparedSubagentSession } from "./seed-child-session.ts";
+import { coordinateSubagentLaunch } from "./launch-coordinator.ts";
 import { writeSystemPromptArtifact, writeTaskArtifact } from "./prompt-artifacts.ts";
 import { traceSubagentLaunch } from "./trace.ts";
 import {
@@ -65,8 +55,8 @@ export async function launchInteractiveSubagent(
 ): Promise<RunningSubagent> {
 	const startTime = Date.now();
 	const id = Math.random().toString(16).slice(2, 10);
-	const prepared = await prepareSubagentLaunch(params, ctx);
-	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
+	const launch = await coordinateSubagentLaunch(params, ctx, { mode: "interactive" });
+	const { prepared, sessionMode, noSession, directTask } = launch;
 	traceSubagentLaunch("interactive.prepared", {
 		id,
 		name: params.name,
@@ -78,9 +68,6 @@ export async function launchInteractiveSubagent(
 		skills: prepared.effectiveSkills,
 		injectSkills: prepared.effectiveInjectSkills,
 	});
-	const noSession = resolveSubagentNoSession(prepared.agentDefs);
-	const noSessionSeedMode = noSession ? getNoSessionSeedMode(sessionMode) : null;
-	const directTask = sessionMode === "fork" || noSessionSeedMode === "fork";
 	const surfacePreCreated = !!options?.surface;
 	const surface = options?.surface ?? createSurface(params.name);
 	traceSubagentLaunch("interactive.surface", {
@@ -117,8 +104,6 @@ export async function launchInteractiveSubagent(
 	if (skillInjection) fullTask = `${skillInjection}\n\n${fullTask}`;
 
 	const parts = getPiShellParts(getPreparedSessionLaunchArgs(prepared));
-	const { seedMode, boundarySystemPrompt: shouldWriteChildBoundary } =
-		seedPreparedSubagentSession(prepared, params, ctx, sessionMode, noSession);
 	const subagentDonePath = join(dirname(dirname(fileURLToPath(import.meta.url))), "tools", "subagent-done.ts");
 	for (const arg of getPreparedExtensionLaunchArgs(prepared, subagentDonePath)) {
 		parts.push(shellEscape(arg));
@@ -130,29 +115,12 @@ export async function launchInteractiveSubagent(
 		parts.push("--no-context-files");
 	}
 
-	let systemPrompt: string | undefined;
-	if (prepared.identityInSystemPrompt && prepared.identity) {
-		const flag = prepared.agentDefs?.systemPromptMode === "replace"
-			? "--system-prompt"
-			: "--append-system-prompt";
-		systemPrompt = prepared.identity;
-		const systemPromptPath = writeSystemPromptArtifact(params.name, systemPrompt, ctx);
-		parts.push(flag, shellEscape(systemPromptPath));
+	if (launch.systemPrompt) {
+		const systemPromptPath = writeSystemPromptArtifact(params.name, launch.systemPrompt.text, ctx);
+		parts.push(launch.systemPrompt.flag, shellEscape(systemPromptPath));
 	}
-	if (shouldWriteChildBoundary) {
+	if (launch.boundarySystemPrompt) {
 		parts.push("--append-system-prompt", shellEscape(CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT));
-	}
-	const launchMetadata = buildPersistedSubagentLaunchMetadata(
-		prepared,
-		params,
-		"interactive",
-		sessionMode,
-		shouldWriteChildBoundary,
-		systemPrompt,
-	);
-	if (existsSync(prepared.subagentSessionFile)) {
-		if (seedMode === "fork") writeSubagentModelStateEntries(prepared.subagentSessionFile, launchMetadata);
-		writeSubagentLaunchMetadataEntry(prepared.subagentSessionFile, launchMetadata);
 	}
 	for (const arg of getSubagentToolLaunchArgs(prepared.effectiveTools, prepared.denySet)) {
 		parts.push(shellEscape(arg));
@@ -164,10 +132,7 @@ export async function launchInteractiveSubagent(
 		parts.push(shellEscape(flag));
 	}
 
-	const envVars = getBaseSubagentEnvVars(prepared, params, resolveEffectiveSessionMode);
-	if (prepared.agentDefs?.autoExit) envVars.PI_SUBAGENT_AUTO_EXIT = "1";
-	envVars.PI_SUBAGENT_SESSION = prepared.subagentSessionFile;
-	envVars.PI_SUBAGENT_SURFACE = surface;
+	const envVars = { ...launch.envVars, PI_SUBAGENT_SURFACE: surface };
 	const envPrefix = `${Object.entries(envVars)
 		.map(([key, value]) => `${key}=${shellEscape(value)}`)
 		.join(" ")} `;
@@ -190,9 +155,7 @@ export async function launchInteractiveSubagent(
 	const cdPrefix = prepared.runtimePaths.effectiveCwd
 		? `cd ${shellEscape(prepared.runtimePaths.effectiveCwd)} && `
 		: "";
-	const launchEntryCount = existsSync(prepared.subagentSessionFile)
-		? getEntryCount(prepared.subagentSessionFile)
-		: 0;
+	const { launchEntryCount } = launch;
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
 	const sentinelPath = shellEscape(doneSentinelFile);
 	const exitVar = exitStatusVar();
@@ -208,10 +171,6 @@ export async function launchInteractiveSubagent(
 		envKeys: Object.keys(envVars).sort(),
 	});
 	sendShellCommand(surface, command);
-	if (!existsSync(prepared.subagentSessionFile)) {
-		await writeSubagentLaunchMetadataEntryWhenReady(prepared.subagentSessionFile, launchMetadata);
-	}
-
 	return {
 		id,
 		name: params.name,

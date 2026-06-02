@@ -3,20 +3,20 @@ import type {
 	CompletedSubagentResult,
 	RunningSubagent,
 	StartedSubagentToolDetails,
-	SubagentPingMessageDetails,
 	SubagentResult,
 } from "../types.ts";
 import {
-	buildCompletedSubagentResult,
-	cacheCompletedSubagentResult,
 	clearSubagentShutdownTimer,
 	completedSubagentResults,
 	getSubagentBatchStopMetadata,
 	isSubagentBatchBlocking,
 	requestSubagentBatchStop,
 	runningSubagents,
-	stopAfterCurrentSubagentBatch,
 } from "./state.ts";
+import {
+	deliverCompletedSubagentResult,
+	routeSubagentOutcome,
+} from "./result-router.ts";
 
 export interface RunningRegistryRuntime {
 	formatElapsed(elapsed: number): string;
@@ -211,95 +211,7 @@ export function deliverCompletedSubagentResultViaSteer(
 	cached: CompletedSubagentResult,
 	formatElapsed: (elapsed: number) => string,
 ): CompletedSubagentResult {
-	if (cached.deliveryState !== "detached" || cached.deliveredTo) return cached;
-
-	const deliverAs = stopAfterCurrentSubagentBatch ? "nextTurn" : "steer";
-	cached.deliveredTo = "steer";
-	const sessionRef = cached.sessionFile
-		? `\n\nSession: ${cached.sessionFile}\nResume: pi --session ${cached.sessionFile}`
-		: "";
-	let content: string;
-	if (cached.errorMessage) {
-		// Provider/agent error after auto-retry exhausted.
-		content =
-			`Sub-agent "${cached.name}" failed after ${formatElapsed(cached.elapsed)} ` +
-			`(provider/agent error — auto-retry exhausted).\n\n` +
-			`Error: ${cached.errorMessage}\n\n` +
-			`The subagent did not produce a result. You can retry by spawning a new ` +
-			`subagent or resume the session with subagent_resume.${sessionRef}`;
-	} else {
-		content =
-			cached.exitCode !== 0
-				? `Sub-agent "${cached.name}" failed (exit ${cached.exitCode}).\n\n${cached.summary}${sessionRef}`
-				: `Sub-agent "${cached.name}" completed (${formatElapsed(cached.elapsed)}).\n\n${cached.summary}${sessionRef}`;
-	}
-
-	pi.sendMessage(
-		{
-			customType: "subagent_result",
-			content,
-			display: true,
-			details: {
-				id: cached.id,
-				name: cached.name,
-				task: cached.task,
-				agent: cached.agent,
-				mode: cached.mode,
-				status: cached.status,
-				deliveryState: cached.deliveryState,
-				parentClosePolicy: cached.parentClosePolicy,
-				blocking: cached.blocking,
-				async: cached.async,
-				exitCode: cached.exitCode,
-				elapsed: cached.elapsed,
-				outputTokens: cached.outputTokens,
-				sessionFile: cached.sessionFile,
-				...(cached.errorMessage
-					? { errorMessage: cached.errorMessage }
-					: {}),
-			},
-		},
-		{ triggerTurn: true, deliverAs },
-	);
-
-	return cached;
-}
-
-function deliverSubagentPingViaSteer(
-	pi: Pick<ExtensionAPI, "sendMessage">,
-	running: RunningSubagent,
-	result: SubagentResult,
-	formatElapsed: (elapsed: number) => string,
-): void {
-	if (!result.ping) return;
-	const sessionRef = result.sessionFile
-		? `\n\nSession: ${result.sessionFile}\nResume: pi --session ${result.sessionFile}`
-		: "";
-	pi.sendMessage(
-		{
-			customType: "subagent_ping",
-			content:
-				`Sub-agent "${result.ping.name}" needs help (${formatElapsed(result.elapsed)}).\n\n` +
-				`${result.ping.message}${sessionRef}`,
-			display: true,
-			details: {
-				id: running.id,
-				name: result.ping.name,
-				task: running.task,
-				agent: running.agent,
-				mode: running.mode,
-				deliveryState: running.deliveryState,
-				parentClosePolicy: running.parentClosePolicy,
-				blocking: running.blocking,
-				async: running.async ?? !running.blocking,
-				elapsed: result.elapsed,
-				outputTokens: result.outputTokens,
-				sessionFile: result.sessionFile,
-				message: result.ping.message,
-			} as SubagentPingMessageDetails,
-		},
-		{ triggerTurn: true, deliverAs: "steer" },
-	);
+	return deliverCompletedSubagentResult(pi, cached, formatElapsed);
 }
 
 export function routeDetachedSubagentCompletion(
@@ -309,15 +221,17 @@ export function routeDetachedSubagentCompletion(
 	formatElapsed: (elapsed: number) => string,
 	updateWidget: () => void,
 ): CompletedSubagentResult {
-	clearSubagentShutdownTimer(running);
-	const cached =
-		running.allowSteerDelivery === false && !running.resultOwner
-			? buildCompletedSubagentResult(running, result)
-			: cacheCompletedSubagentResult(running, result);
-	runningSubagents.delete(running.id);
-	updateWidget();
-	if (running.allowSteerDelivery === false) return cached;
-	return deliverCompletedSubagentResultViaSteer(pi, cached, formatElapsed);
+	const routed = routeSubagentOutcome({
+		pi,
+		running,
+		result,
+		formatElapsed,
+		updateWidget,
+	});
+	if (routed.kind !== "completion") {
+		throw new Error("routeDetachedSubagentCompletion received a child ping result");
+	}
+	return routed.completed;
 }
 
 function handleDetachedSubagentOutcome(
@@ -327,15 +241,13 @@ function handleDetachedSubagentOutcome(
 	formatElapsed: (elapsed: number) => string,
 	updateWidget: () => void,
 ): void {
-	if (result.ping) {
-		clearSubagentShutdownTimer(running);
-		runningSubagents.delete(running.id);
-		updateWidget();
-		if (running.allowSteerDelivery === false) return;
-		deliverSubagentPingViaSteer(pi, running, result, formatElapsed);
-		return;
-	}
-	routeDetachedSubagentCompletion(pi, running, result, formatElapsed, updateWidget);
+	routeSubagentOutcome({
+		pi,
+		running,
+		result,
+		formatElapsed,
+		updateWidget,
+	});
 }
 
 export function wireSubagentSteerBack(

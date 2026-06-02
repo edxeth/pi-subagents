@@ -1,14 +1,18 @@
 import "./session/session.test.ts";
+import "./session/child-session-storage.test.ts";
 import "./session/exit-sidecar.test.ts";
 
 import "./tools/subagent-done.test.ts";
 import "./tools/message-renderers.test.ts";
 import "./artifacts/storage.test.ts";
+import "./launch/child-launch-plan.test.ts";
+import "./launch/launch-coordinator.test.ts";
 import "./launch/config.test.ts";
+import "./launch/env-frontmatter.test.ts";
 import "./agents/definitions-agent-list.test.ts";
 import "./runtime/launch-results.test.ts";
+import "./runtime/result-router.test.ts";
 import "./runtime/elapsed-format.test.ts";
-
 
 import "./agents/ambient-runtime-paths.test.ts";
 import "./launch/fork-session.test.ts";
@@ -18,4 +22,5 @@ import "./runtime/resume-tool.test.ts";
 import "./runtime/mixed-batch-classifier.test.ts";
 import "./launch/helpers.test.ts";
 import "./mux/mux.test.ts";
+import "./mux/runtime-probe.test.ts";
 import "./mux/zellij-placement.test.ts";

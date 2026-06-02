@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { getArtifactStorageRoot } from "../artifact-storage.ts";
 import type { AgentDefaults } from "../agents/definitions.ts";
 import { loadAgentDefaults as loadAgentDefaultsFromDefinitions } from "../agents/definitions.ts";
@@ -12,28 +12,26 @@ import {
 	resolveSubagentNoContextFiles,
 	resolveSubagentNoSession,
 	resolveSubagentParentClosePolicy,
-	resolveSubagentExtensions,
 } from "./policy.ts";
 import type { ResumeMode } from "./resume.ts";
-import { resolveSubagentCwd, resolveSubagentRuntimePaths, type ResolvedSubagentRuntimePaths } from "./runtime-paths.ts";
+import { resolveSubagentCwd, type ResolvedSubagentRuntimePaths } from "./runtime-paths.ts";
 import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
 import {
 	buildIdentityBlock,
-	generateSubagentSessionFile,
 	type PersistedSubagentLaunchMetadata,
 	type SubagentSessionMode,
 } from "../session/session-files.ts";
-import { buildSubagentSessionTitle } from "../agents/titles.ts";
-import { addToolModeDeniedNames, getSubagentToolLaunchArgs, resolveDenyTools } from "../tools/policy.ts";
+import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
 import { buildSkillLaunchPlan, formatInjectedSkills, type SkillLaunchPlan } from "./skills.ts";
-
-export interface ModelRegistryLike {
-	getAvailable(): Array<{
-		provider: string;
-		id: string;
-		thinkingLevelMap?: Record<string, string | null | undefined>;
-	}>;
-}
+import {
+	buildChildLaunchPlan,
+	type ModelRegistryLike,
+} from "./child-launch-plan.ts";
+export {
+	normalizeModelRef,
+	resolveAvailableModelRef,
+	splitModelRefThinking,
+} from "./child-launch-plan.ts";
 
 export interface SubagentLaunchContext {
 	sessionManager: {
@@ -87,101 +85,6 @@ function loadAgentDefaults(
 	);
 }
 
-/**
- * Normalize model and thinking into a safe model ref.
- *
- * Handles two edge cases:
- * 1. When the model string already carries a `:thinking` suffix (e.g.
- *    `provider/model:high`) and an explicit thinking level is also set,
- *    strip the embedded suffix to avoid double suffixes like `:high:low`.
- * 2. When no model is available at all (undefined), suppress both thinking
- *    and modelRef — persisting `undefined:<thinking>` would break resume.
- */
-export function normalizeModelRef(
-	model: string | undefined,
-	thinking: string | undefined,
-): { effectiveModel: string | undefined; effectiveThinking: string | undefined; effectiveModelRef: string | undefined } {
-	if (!model) {
-		return { effectiveModel: undefined, effectiveThinking: undefined, effectiveModelRef: undefined };
-	}
-	// Strip any embedded :thinking suffix when we also have an explicit thinking
-	// level, so the combined ref doesn't double up: "provider/model:high:low".
-	let baseModel = model;
-	if (thinking) {
-		const idx = model.lastIndexOf(":");
-		if (idx !== -1) {
-			const suffix = model.slice(idx + 1);
-			if (["minimal", "low", "medium", "high", "xhigh"].includes(suffix)) {
-				baseModel = model.slice(0, idx);
-			}
-		}
-	}
-	const ref = thinking ? `${baseModel}:${thinking}` : baseModel;
-	return { effectiveModel: baseModel, effectiveThinking: thinking, effectiveModelRef: ref };
-}
-
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
-
-export function splitModelRefThinking(
-	model: string | undefined,
-	fallbackThinking: string | undefined,
-): { model: string | undefined; thinking: string | undefined; explicitThinking: boolean } {
-	if (!model) return { model, thinking: fallbackThinking, explicitThinking: false };
-	const idx = model.lastIndexOf(":");
-	if (idx === -1) return { model, thinking: fallbackThinking, explicitThinking: false };
-	const suffix = model.slice(idx + 1);
-	if (!THINKING_LEVELS.has(suffix)) return { model, thinking: fallbackThinking, explicitThinking: false };
-	return { model: model.slice(0, idx), thinking: suffix, explicitThinking: true };
-}
-
-export function resolveAvailableModelRef(
-	model: string | undefined,
-	thinking: string | undefined,
-	explicitThinking: boolean,
-	modelRegistry: ModelRegistryLike | undefined,
-	parentModelRef?: string,
-): { model: string | undefined; thinking: string | undefined } {
-	if (!model || !modelRegistry) return { model, thinking };
-	const available = modelRegistry.getAvailable();
-	if (available.length === 0) return { model, thinking };
-	const [parentProvider] = parentModelRef?.split("/") ?? [];
-	let resolved = model;
-	let provider: string | undefined;
-	let id: string;
-	const slash = model.indexOf("/");
-	if (slash === -1) {
-		id = model;
-		const matches = available.filter((candidate) => candidate.id === id);
-		if (matches.length === 1) {
-			provider = matches[0]?.provider;
-			resolved = `${provider}/${id}`;
-		} else if (matches.length > 1 && parentProvider) {
-			const parentProviderMatch = matches.find((candidate) => candidate.provider === parentProvider);
-			if (parentProviderMatch) {
-				provider = parentProviderMatch.provider;
-				resolved = `${provider}/${id}`;
-			} else {
-				throw new Error(`Ambiguous model override '${model}'. Use provider/model.`);
-			}
-		} else if (matches.length > 1) {
-			throw new Error(`Ambiguous model override '${model}'. Use provider/model.`);
-		} else {
-			throw new Error(`Unknown model override '${model}'.`);
-		}
-	} else {
-		provider = model.slice(0, slash);
-		id = model.slice(slash + 1);
-		const match = available.find((candidate) => candidate.provider === provider && candidate.id === id);
-		if (!match) throw new Error(`Unknown model override '${model}'.`);
-	}
-	const match = available.find((candidate) => `${candidate.provider}/${candidate.id}` === resolved);
-	if (thinking && match?.thinkingLevelMap?.[thinking] === null) {
-		if (!explicitThinking) return { model: resolved, thinking: undefined };
-		throw new Error(`Model '${resolved}' does not support thinking level '${thinking}'.`);
-	}
-	return { model: resolved, thinking };
-}
-
 export async function prepareSubagentLaunch(
 	params: SubagentParamsInput,
 	ctx: SubagentLaunchContext,
@@ -197,26 +100,6 @@ export async function prepareSubagentLaunch(
 	if (ctx.autoExit !== undefined && agentDefs) {
 		agentDefs.autoExit = ctx.autoExit;
 	}
-	const requestedModel = params.model ?? agentDefs?.model ?? ctx.parentModelRef;
-	const requested = splitModelRefThinking(requestedModel, params.thinking ?? agentDefs?.thinking ?? ctx.parentThinking);
-	const explicitThinking = requested.explicitThinking || params.thinking != null;
-	const availableRequested = params.model
-		? resolveAvailableModelRef(
-			requested.model,
-			requested.thinking,
-			explicitThinking,
-			ctx.modelRegistry,
-			ctx.parentModelRef,
-		)
-		: requested;
-	const { effectiveModel, effectiveThinking, effectiveModelRef } = normalizeModelRef(
-		availableRequested.model,
-		availableRequested.thinking,
-	);
-	const effectiveTools = params.tools ?? agentDefs?.tools;
-	const effectiveSkills = params.skills ?? agentDefs?.skills;
-	const effectiveInjectSkills = agentDefs?.injectSkills;
-
 	const sessionFile = ctx.sessionManager.getSessionFile() ?? null;
 	// When there is no parent session file (pi --no-session), standalone
 	// no-session children can still launch with a tmpdir fallback.
@@ -224,30 +107,31 @@ export async function prepareSubagentLaunch(
 	// seedSubagentSessionFile with a clear error.
 	const parentSessionDir =
 		sessionFile !== null ? dirname(sessionFile) : join(tmpdir(), "pi-subagents", "parentless");
-	const runtimePaths = resolveSubagentRuntimePaths(
+	const childLaunchPlan = await buildChildLaunchPlan({
 		params,
 		agentDefs,
-		ctx.cwd,
+		parentCwd: ctx.cwd,
 		parentSessionDir,
-	);
-	const subagentSessionFile = generateSubagentSessionFile(
-		resolveSubagentNoSession(agentDefs)
-			? join(tmpdir(), "pi-subagents", "sessions")
-			: runtimePaths.sessionDir,
-	);
-	const sessionTitle = buildSubagentSessionTitle(params);
-	const denySet = addToolModeDeniedNames(
-		resolveDenyTools(agentDefs),
-		effectiveTools,
-	);
-	const effectiveExtensions = resolveSubagentExtensions(agentDefs);
-	const skillLaunchPlan = await buildSkillLaunchPlan(
-		effectiveSkills,
-		effectiveInjectSkills,
-		runtimePaths.effectiveCwd ?? ctx.cwd,
-		runtimePaths.effectiveAgentConfigDir,
-		effectiveExtensions,
-	);
+		modelRegistry: ctx.modelRegistry,
+		parentModelRef: ctx.parentModelRef,
+		parentThinking: ctx.parentThinking,
+	});
+	const {
+		effectiveModel,
+		effectiveThinking,
+		effectiveModelRef,
+		runtimePaths,
+		subagentSessionFile,
+		sessionTitle,
+	} = childLaunchPlan;
+	const {
+		tools: effectiveTools,
+		skills: effectiveSkills,
+		injectSkills: effectiveInjectSkills,
+		denySet,
+		extensions: effectiveExtensions,
+		skillLaunchPlan,
+	} = childLaunchPlan.capability;
 	const identity = buildIdentityBlock(agentDefs, params.systemPrompt);
 	const identityInSystemPrompt = !!(agentDefs?.systemPromptMode && identity);
 

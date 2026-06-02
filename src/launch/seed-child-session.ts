@@ -1,12 +1,8 @@
 import { buildChildContextBoundary, isChildContextBoundaryDisabled } from "./context-boundary.ts";
 import type { SubagentLaunchContext, PreparedSubagentLaunch } from "./prep.ts";
 import type { SubagentParamsInput } from "../types.ts";
-import {
-	seedSubagentSessionFile,
-	type SubagentSessionMode,
-	writeChildContextBoundaryEntry,
-	writeSubagentExtensionEntry,
-} from "../session/session-files.ts";
+import type { SubagentSessionMode } from "../session/session-files.ts";
+import { ChildSessionStorage } from "../session/child-session-storage.ts";
 
 export function getNoSessionSeedMode(
 	sessionMode: SubagentSessionMode,
@@ -41,6 +37,7 @@ export function seedPreparedSubagentSession(
 } {
 	const seedMode = getChildSeedMode(sessionMode, noSession);
 	const boundarySystemPrompt = shouldWriteChildContextBoundary(seedMode);
+	const storage = new ChildSessionStorage(prepared.subagentSessionFile);
 	if (seedMode) {
 		if (!prepared.sessionFile) {
 			throw new Error(
@@ -49,10 +46,9 @@ export function seedPreparedSubagentSession(
 					`or start pi with a persistent session (--session or --session-dir).`,
 			);
 		}
-		seedSubagentSessionFile(
+		storage.seed(
 			seedMode,
 			prepared.sessionFile,
-			prepared.subagentSessionFile,
 			prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
 			{
 				...(prepared.sessionTitle ? { sessionName: prepared.sessionTitle } : {}),
@@ -64,16 +60,12 @@ export function seedPreparedSubagentSession(
 				name: params.name,
 				spawningAllowed: prepared.agentDefs?.spawning === true,
 			};
-			writeChildContextBoundaryEntry(
-				prepared.subagentSessionFile,
+			storage.writeBoundary(
 				boundaryOptions,
 				buildChildContextBoundary(boundaryOptions),
 			);
 		}
 	}
-	writeSubagentExtensionEntry(
-		prepared.subagentSessionFile,
-		prepared.effectiveExtensions,
-	);
+	storage.writeExtensionEntry(prepared.effectiveExtensions);
 	return { seedMode, boundarySystemPrompt };
 }

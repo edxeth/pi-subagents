@@ -1,45 +1,14 @@
-import { execFile, execFileSync, execSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { basename } from "node:path";
 import { promisify } from "node:util";
+import { defaultMuxRuntimeProbe } from "./runtime-probe.ts";
 
 export const execFileAsync = promisify(execFile);
 
 export type MuxBackend = "cmux" | "tmux" | "zellij" | "wezterm";
 
-const commandAvailability = new Map<
-	string,
-	{ path: string; available: boolean }
->();
-
 function hasCommand(command: string): boolean {
-	const path = process.env.PATH ?? "";
-	const cached = commandAvailability.get(command);
-	if (cached && cached.path === path) return cached.available;
-
-	let available = false;
-	if (process.platform === "win32") {
-		try {
-			execFileSync("where.exe", [command], { stdio: "ignore" });
-			available = true;
-		} catch {
-			try {
-				execSync(`command -v ${command}`, { stdio: "ignore" });
-				available = true;
-			} catch {
-				available = false;
-			}
-		}
-	} else {
-		try {
-			execSync(`command -v ${command}`, { stdio: "ignore" });
-			available = true;
-		} catch {
-			available = false;
-		}
-	}
-
-	commandAvailability.set(command, { path, available });
-	return available;
+	return defaultMuxRuntimeProbe.hasCommand(command);
 }
 
 function muxPreference(): MuxBackend | null {

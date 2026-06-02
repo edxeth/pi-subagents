@@ -98,7 +98,7 @@ function getTerminalStopMessage(msg: MessageEntry): string | null {
 	return getSubagentTerminalStopMessage(stopReason);
 }
 
-export function getSubagentTerminalStopMessage(stopReason: string): string {
+function getSubagentTerminalStopMessage(stopReason: string): string {
 	return `Subagent stopped before producing a result (stopReason: ${stopReason})`;
 }
 
