@@ -86,6 +86,25 @@ import {
 	shouldReapStableTerminalSummary,
 	type SubagentTitleParams,
 } from "../agents/titles.ts";
+export { buildSkillLaunchPlan as buildSkillLaunchPlanForTest } from "../launch/skills.ts";
+export {
+	getCompletedSubagentResultForTest,
+	getLaunchedSubagentResultForTest,
+	getStartedSubagentDetailsForTest,
+	renderSubagentWidgetForTest,
+	resetSubagentStateForTest,
+	routeDetachedSubagentCompletionForTest,
+	setRunningSubagentForTest,
+	shutdownSubagentsForTest,
+	waitForSubagentForTest,
+} from "../runtime/wiring.ts";
+export {
+	getSubagentBatchStopMetadata as getSubagentBatchStopMetadataForTest,
+	markSubagentBatchBlocking as markSubagentBatchBlockingForTest,
+	requestSubagentBatchStop as requestSubagentBatchStopForTest,
+} from "../runtime/state.ts";
+export { shouldAwaitSubagentLaunch as shouldAwaitSubagentLaunchForTest } from "../runtime/running-registry.ts";
+export { classifyAssistantMessageForMixedBatch as classifyAssistantMessageForMixedBatchForTest } from "../runtime/batch-classifier.ts";
 
 export function resolveDenyToolsForTest(agentDefs: AgentDefaults | null) {
 	return resolveDenyTools(agentDefs);

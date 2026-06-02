@@ -12,6 +12,11 @@ export {
 } from "../../src/auto-exit.ts";
 export { default as subagentsExtension } from "../../src/subagents.ts";
 export {
+	getShellReadyDelayMs,
+	loadAgentDefaults,
+	resolveSubagentConfigDir,
+} from "../../src/subagents.ts";
+export {
 	buildChildContextBoundaryForTest,
 	buildChildContextBoundarySystemPromptForTest,
 	buildPersistedSubagentLaunchMetadataForTest,
@@ -33,7 +38,6 @@ export {
 	getPersistedSessionParityArgsForTest,
 	getPreparedSessionLaunchArgsForTest,
 	getResumeCwdForTest,
-	getShellReadyDelayMs,
 	getStartedSubagentDetailsForTest,
 	getSubagentAgentOverrideErrorForTest,
 	getSubagentAgentRequirementErrorForTest,
@@ -51,7 +55,6 @@ export {
 	getSubagentToolsConfigErrorForTest,
 	getTerminalAssistantSummaryAfterLaunchForTest,
 	getTerminalAssistantSummaryForTest,
-	loadAgentDefaults,
 	markSubagentBatchBlockingForTest,
 	readSubagentLaunchMetadataForTest,
 	renderAgentListReminderForTest,
@@ -60,12 +63,10 @@ export {
 	resolveAvailableModelRefForTest,
 	resolveDenyToolsForTest,
 	resolveEffectiveSessionModeForTest,
-
 	resolveResumeLaunchMetadataForInvocationForTest,
 	resolveResumeLaunchMetadataForTest,
 	resolveSubagentBlockingForTest,
 	enforceAgentFrontmatterForTest,
-	resolveSubagentConfigDir,
 	resolveSubagentExtensionsForTest,
 	resolveSubagentNoContextFilesForTest,
 	resolveSubagentNoSessionForTest,
@@ -80,11 +81,12 @@ export {
 	classifyAssistantMessageForMixedBatchForTest,
 	shouldReapStableTerminalSummaryForTest,
 	shutdownSubagentsForTest,
+	splitModelRefThinkingForTest,
 	waitForSubagentForTest,
 	writeSubagentLaunchMetadataEntryForTest,
 	writeSubagentModelStateEntriesForTest,
 	writeSystemPromptArtifactForTest,
-} from "../../src/subagents.ts";
+} from "../../src/testing/test-helpers.ts";
 export {
 	closeSurface,
 	createSurface,

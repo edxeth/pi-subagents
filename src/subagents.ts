@@ -23,7 +23,6 @@ import {
 } from "./launch/policy.ts";
 import { resolveSubagentCwd } from "./launch/runtime-paths.ts";
 export { resolveSubagentConfigDir } from "./launch/runtime-paths.ts";
-export { buildSkillLaunchPlan as buildSkillLaunchPlanForTest } from "./launch/skills.ts";
 import {
 	resolveEffectiveSessionMode as resolveEffectiveSessionModeFromSessionFiles,
 	resolveTaskSessionMode as resolveTaskSessionModeFromSessionFiles,
@@ -50,20 +49,6 @@ import {
 	wireSubagentSteerBack,
 } from "./runtime/wiring.ts";
 export { getShellReadyDelayMs } from "./runtime/wiring.ts";
-export {
-	getCompletedSubagentResultForTest,
-	getLaunchedSubagentResultForTest,
-	getPiInvocationForTest,
-	getPiShellPartsForTest,
-	getStartedSubagentDetailsForTest,
-	getSubagentChildProcessEnvForTest,
-	renderSubagentWidgetForTest,
-	resetSubagentStateForTest,
-	routeDetachedSubagentCompletionForTest,
-	setRunningSubagentForTest,
-	shutdownSubagentsForTest,
-	waitForSubagentForTest,
-} from "./runtime/wiring.ts";
 import {
 	markSubagentBatchBlocking,
 	requestSubagentBatchStop,
@@ -79,12 +64,6 @@ import { markInitialPromptLaunchComplete, registerSubagentCoreTools } from "./to
 import { traceSubagentLaunch } from "./launch/trace.ts";
 import { registerSubagentsView } from "./tools/subagents-view.ts";
 
-export { markSubagentBatchBlocking as markSubagentBatchBlockingForTest } from "./runtime/state.ts";
-export { requestSubagentBatchStop as requestSubagentBatchStopForTest } from "./runtime/state.ts";
-export { getSubagentBatchStopMetadata as getSubagentBatchStopMetadataForTest } from "./runtime/state.ts";
-export { shouldAwaitSubagentLaunch as shouldAwaitSubagentLaunchForTest } from "./runtime/running-registry.ts";
-export { classifyAssistantMessageForMixedBatch as classifyAssistantMessageForMixedBatchForTest } from "./runtime/batch-classifier.ts";
-export * from "./testing/test-helpers.ts";
 
 export function loadAgentDefaults(
 	agentName: string,
