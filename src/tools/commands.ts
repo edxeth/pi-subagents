@@ -10,6 +10,5 @@ export function registerSubagentCommands(
 	runtime: SubagentCommandRuntime,
 ): void {
 	// /subagent-kill was removed in favor of the /subagents TUI overlay (alt+s).
-	// The subagent_kill LLM tool remains for orchestrator agents.
 	// Re-add /subagent-kill here if a CLI kill shortcut is needed later.
 }

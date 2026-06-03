@@ -100,3 +100,42 @@ export function getAgentListSignature(
 		})),
 	);
 }
+
+/**
+ * Renders a clean roster of available sub-agents suitable for inclusion
+ * directly in a system prompt. Focused on name + description + key behavioral
+ * flags so the main orchestrator agent knows exactly what it can delegate to.
+ */
+export function renderAgentRosterForSystemPrompt(
+	entries: AgentListEntry[],
+): string {
+	if (entries.length === 0) return "";
+
+	const agentLines = entries.map((entry) => {
+		const desc = entry.description?.trim() || "(no description)";
+		return [
+			"- `" + entry.name + "`: " + desc,
+			"  tool_return: " + getToolReturn(entry),
+			"  runs_as: " + getRunsAs(entry),
+			"  context: " + getContext(entry),
+			"  completion: " + getCompletion(entry),
+		].join("\n");
+	});
+
+	return [
+		"You can launch separate helper agents with the subagent tool. Use this roster to choose exact agent names and to understand how each launched agent behaves.",
+		"<subagent-roster>",
+		agentLines.join("\n\n"),
+		"</subagent-roster>",
+		"<subagent-rules>",
+		"- Agent names are exact values for subagent.agent or children[].agent.",
+		"- tool_return=wait_here means the subagent tool call waits until the helper finishes.",
+		"- tool_return=later_message means the tool call starts the helper and returns before the work is done; do not invent its findings.",
+		"- runs_as=visible_terminal means a human can watch or type into the helper session.",
+		"- context=fresh_chat_needs_full_brief means write a self-contained task with objective, files, constraints, and expected output.",
+		"- context=copy_of_this_chat means the helper starts from this conversation; give scope, boundary, and expected output without repeating all background.",
+		"- completion=exits_automatically means the helper should finish and close itself.",
+		"- If the user names an agent that is not listed, say it was not found and stop; do not suggest a different listed agent.",
+		"</subagent-rules>",
+	].join("\n");
+}

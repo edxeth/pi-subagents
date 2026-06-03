@@ -253,7 +253,7 @@ export function registerSubagentCoreTools(
 		promptSnippet:
 			"Subagents are separate helper processes you can launch to do work outside this chat turn.\n" +
 			"\n" +
-			"Use this tool when a listed agent is a clear fit for specialist, complex, or parallel work. Do small direct work yourself: quick answers, simple file reads, and tiny one-shot edits.\n" +
+			"Use this tool when a listed agent is a clear fit for specialist, complex, or parallel work. Break complex work into multiple mini-tasks instead of handing the whole job to one helper. If subtasks are independent and won't interfere, launch multiple helpers in parallel to finish faster. Do small direct work yourself: quick answers, simple file reads, and tiny one-shot edits.\n" +
 			"\n" +
 			"Use exact agent names and behavior fields from the subagent roster when present; field meanings are defined in <subagent-rules>.\n" +
 			"\n" +

@@ -55,14 +55,3 @@ export const PI_SUBAGENTS_INTERNAL_TOOL_NAMES: ReadonlySet<string> = new Set([
 	SUBAGENT_KILL_TOOL_NAME,
 	SET_TAB_TITLE_TOOL_NAME,
 ]);
-
-/**
- * Parent-side tools allowed when PI_ORCHESTRATOR_MODE=1 turns the parent
- * into a delegation-only orchestrator.
- */
-export const ORCHESTRATOR_ALLOWED_TOOL_NAMES: ReadonlySet<string> = new Set([
-	SUBAGENT_TOOL_NAME,
-	SUBAGENT_KILL_TOOL_NAME,
-	SUBAGENT_RESUME_TOOL_NAME,
-	SET_TAB_TITLE_TOOL_NAME,
-]);

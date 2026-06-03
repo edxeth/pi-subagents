@@ -438,6 +438,11 @@ describe("agent definitions and catalog", () => {
 			tool.promptSnippet,
 			/Use exact agent names and behavior fields from the subagent roster when present; field meanings are defined in <subagent-rules>/,
 		);
+		assert.match(tool.promptSnippet, /Break complex work into multiple mini-tasks/);
+		assert.match(
+			tool.promptSnippet,
+			/launch multiple helpers in parallel to finish faster/,
+		);
 		assert.match(tool.promptSnippet, /make one subagent call with children/);
 		assert.match(
 			tool.promptSnippet,

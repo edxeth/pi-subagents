@@ -69,7 +69,7 @@ export function getFooterHints(state: OverlayState): FooterHint[] {
 	];
 
 	if (state.activeTab === "running" && state.items.length > 0) {
-		hints.push({ key: "k", action: "kill" });
+		hints.push({ key: "x", action: "kill" });
 	}
 	if (state.activeTab === "completed" && state.items.length > 0) {
 		hints.push({ key: "m", action: "resume" });

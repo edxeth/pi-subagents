@@ -122,7 +122,7 @@ export class SubagentsOverlayController implements Component {
 			this.state.view = { kind: "detail", item, scroll: 0 };
 			return;
 		}
-		if (matchesKey(data, "k") && item.canKill && item.onKill) {
+		if (matchesKey(data, "x") && item.canKill && item.onKill) {
 			void item.onKill().finally(() => {
 				this.refreshItems();
 				this.requestRender();
