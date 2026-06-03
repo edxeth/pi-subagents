@@ -35,6 +35,7 @@ describe("widget manager direct module tests", () => {
 			toolUses: 1,
 			pendingToolCount: 1,
 			activity: "reading auth module",
+			modelRef: "zai-messages/glm-5.1:high",
 		};
 
 		const widget = new SubagentWidgetManager(() => [running]);
@@ -45,7 +46,7 @@ describe("widget manager direct module tests", () => {
 		assert.doesNotMatch(lines, /└─ [-\\|/] Research \[researcher\]/);
 		assert.match(lines, /1 tool use/);
 		assert.doesNotMatch(lines, /3 messages/);
-		assert.match(lines, /Auth session review/);
+		assert.match(lines, /Auth session review · zai-messages\/glm-5\.1:high/);
 		assert.doesNotMatch(lines, /return a concise report/);
 		assert.match(lines, /reading auth module/);
 		assert.doesNotMatch(lines, /\[detached\]/);

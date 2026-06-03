@@ -25,7 +25,7 @@ const SECTION_FIELDS = [
 	},
 	{
 		title: "Model",
-		fields: ["model", "thinking", "allow-model-override", "override-model", "override-thinking"],
+		fields: ["model", "thinking", "resolved", "allow-model-override", "override-model", "override-thinking"],
 	},
 	{
 		title: "Workspace",
@@ -63,6 +63,9 @@ function buildSections(
 	}
 	fields.push({ label: "model", value: inherited(meta?.definitionModel ?? defs?.model ?? meta?.model) });
 	fields.push({ label: "thinking", value: inherited(meta?.definitionThinking ?? defs?.thinking ?? meta?.thinking) });
+	if (meta?.modelRef) {
+		fields.push({ label: "resolved", value: meta.modelRef });
+	}
 	fields.push({ label: "allow-model-override", value: String(meta ? meta.allowModelOverride === true : defs?.allowModelOverride === true) });
 	if (meta?.modelSource === "launch-override" || meta?.modelSource === "resume-override") {
 		fields.push({ label: "override-model", value: inherited(meta.model) });
@@ -297,6 +300,7 @@ export function buildRunningItems(ctx: OverlayContext): OverlayItem[] {
 		sections.push(buildRuntimeSection(true, a));
 
 		const stats: string[] = [];
+		const modelRef = a.modelRef ?? meta?.modelRef;
 		if (a.toolUses) stats.push(`${a.toolUses} tool${a.toolUses === 1 ? "" : "s"}`);
 		const used = a.totalTokens ?? 0;
 		if (used > 0 && a.modelContextWindow) {
@@ -314,6 +318,7 @@ export function buildRunningItems(ctx: OverlayContext): OverlayItem[] {
 			iconColor: "accent",
 			name: a.name,
 			agent: a.agent,
+			modelRef,
 			stats,
 			activity: a.activity ?? a.taskPreview ?? "starting…",
 			detailSections: sections,
@@ -373,6 +378,7 @@ export async function buildCompletedItems(ctx: OverlayContext): Promise<OverlayI
 			iconColor: visual.color,
 			name: r.name,
 			agent: r.agent,
+			modelRef: meta?.modelRef,
 			status: r.status === "completed" ? undefined : visual.label,
 			statusColor: r.status === "completed" ? undefined : visual.color,
 			stats: [formatElapsedSeconds(r.elapsed), ...compactStats(sessionStats, r.outputTokens)],
@@ -412,6 +418,7 @@ export async function buildCompletedItems(ctx: OverlayContext): Promise<OverlayI
 					iconColor: visual.color,
 					name: recovered.name,
 					agent: recovered.agent,
+					modelRef: meta?.modelRef,
 					status: recovered.status === "completed" ? undefined : visual.label,
 					statusColor: recovered.status === "completed" ? undefined : visual.color,
 					stats: [

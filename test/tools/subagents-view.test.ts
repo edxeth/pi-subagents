@@ -452,6 +452,30 @@ describe("subagents-view overlay", () => {
 			assert.ok(text.includes("s"), `Expected seconds in elapsed:\n${text}`);
 			overlay.dispose();
 		});
+
+		it("shows the resolved model ref in the running list row", () => {
+			setRunningSubagentForTest({
+				id: "test-model",
+				name: "scout",
+				task: "Explore codebase",
+				mode: "background",
+				executionState: "running",
+				deliveryState: "detached",
+				parentClosePolicy: "terminate",
+				startTime: Date.now(),
+				sessionFile: "/tmp/test.jsonl",
+				modelRef: "zai-messages/glm-5.1:high",
+			} as any);
+
+			const overlay = createOverlay();
+			const lines = renderLines(overlay);
+			const text = lines.map(stripAnsi).join("\n");
+			assert.ok(
+				text.includes("zai-messages/glm-5.1:high"),
+				`Expected model ref in list row:\n${text}`,
+			);
+			overlay.dispose();
+		});
 	});
 });
 

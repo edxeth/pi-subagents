@@ -28,6 +28,7 @@ export interface OverlayItem {
 	iconColor: string;
 	name: string;
 	agent?: string;
+	modelRef?: string;
 	status?: string;
 	statusColor?: string;
 	stats: string[];

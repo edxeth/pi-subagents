@@ -91,6 +91,8 @@ export interface RunningSubagent {
 	toolUses?: number;
 	totalTokens?: number;
 	modelContextWindow?: number;
+	/** Resolved provider/model:thinking ref for this child, for display in the widget/overlay. */
+	modelRef?: string;
 	contextLabel?: string;
 	activity?: string;
 	taskPreview?: string;

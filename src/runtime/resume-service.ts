@@ -252,6 +252,7 @@ export async function resumeSubagentSession(
 		sessionFile,
 		launchEntryCount: entryCountBefore,
 		modelContextWindow: runtime.getContextWindow(invocationMetadata?.modelRef),
+		modelRef: invocationMetadata?.modelRef,
 	};
 
 	if (metadata.mode === "background") {

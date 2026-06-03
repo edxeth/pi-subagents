@@ -122,6 +122,7 @@ export async function launchBackgroundSubagent(
 		sessionFile: prepared.subagentSessionFile,
 		launchEntryCount,
 		modelContextWindow: runtime.getContextWindow(prepared.effectiveModelRef),
+		modelRef: prepared.effectiveModelRef,
 	};
 	const rememberTail = (current: string | undefined, chunk: Buffer | string) =>
 		`${current ?? ""}${chunk.toString()}`.slice(-4000);

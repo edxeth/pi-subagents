@@ -190,6 +190,7 @@ export async function launchInteractiveSubagent(
 		sessionFile: prepared.subagentSessionFile,
 		launchEntryCount,
 		modelContextWindow: runtime.getContextWindow(prepared.effectiveModelRef),
+		modelRef: prepared.effectiveModelRef,
 		doneSentinelFile,
 	};
 }

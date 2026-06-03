@@ -416,9 +416,13 @@ export class SubagentWidgetManager {
 					agent.taskPreview ??
 					firstNonEmptyLine(agent.title ?? agent.task, 46);
 				if (displayTitle) {
+					const modelSuffix = agent.modelRef
+						? theme.fg("dim", ` · ${agent.modelRef}`)
+						: "";
 					lines.push(
 						theme.fg("dim", childConnector) +
-							theme.fg("muted", `  ${displayTitle}`),
+							theme.fg("muted", `  ${displayTitle}`) +
+							modelSuffix,
 					);
 				}
 

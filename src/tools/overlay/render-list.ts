@@ -74,8 +74,9 @@ function renderItem(
 	const pointer = isSelected ? theme.fg("accent", "▸") : " ";
 	const icon = theme.fg(item.iconColor, item.icon);
 	const badge = item.agent ? theme.fg("muted", ` [${item.agent}]`) : "";
+	const model = item.modelRef ? theme.fg("dim", ` · ${item.modelRef}`) : "";
 	const status = item.status ? ` ${theme.fg(item.statusColor ?? "dim", item.status)}` : "";
-	const rows = [`${pointer} ${icon} ${theme.bold(item.name)}${badge}${status}`];
+	const rows = [`${pointer} ${icon} ${theme.bold(item.name)}${badge}${model}${status}`];
 
 	const meta = item.stats.join(" · ");
 	if (meta) rows.push(`    ${theme.fg("dim", meta)}`);
