@@ -69,6 +69,7 @@ import {
 } from "../session/session-files.ts";
 import { ChildSessionStorage } from "../session/child-session-storage.ts";
 import {
+	writeResumeTaskArtifact,
 	writeSystemPromptArtifact,
 } from "../launch/prompt-artifacts.ts";
 import {
@@ -321,6 +322,15 @@ export function writeSystemPromptArtifactForTest(
 	ctx: { sessionManager: { getSessionId(): string }; cwd: string },
 ) {
 	return writeSystemPromptArtifact(name, systemPrompt, ctx);
+}
+
+export function writeResumeTaskArtifactForTest(
+	name: string,
+	task: string,
+	sessionFile: string,
+	cwd: string,
+) {
+	return writeResumeTaskArtifact(name, task, sessionFile, cwd);
 }
 
 export function resolveSubagentRuntimePathsForTest(

@@ -83,6 +83,7 @@ export {
 	shutdownSubagentsForTest,
 	splitModelRefThinkingForTest,
 	waitForSubagentForTest,
+	writeResumeTaskArtifactForTest,
 	writeSubagentLaunchMetadataEntryForTest,
 	writeSubagentModelStateEntriesForTest,
 	writeSystemPromptArtifactForTest,

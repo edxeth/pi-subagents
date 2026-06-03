@@ -1,10 +1,15 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { getSessionArtifactDir } from "../artifact-storage.ts";
 
 interface ArtifactContext {
 	sessionManager: { getSessionId(): string };
 	cwd: string;
+}
+
+interface SessionHeaderArtifactContext {
+	id: string;
+	cwd?: string;
 }
 
 function getArtifactDir(cwd: string, sessionId: string): string {
@@ -40,6 +45,41 @@ export function writeTaskArtifact(
 	mkdirSync(dirname(artifactPath), { recursive: true });
 	writeFileSync(artifactPath, task, "utf8");
 	return artifactPath;
+}
+
+function safeArtifactSessionId(value: unknown, fallback: string): string {
+	const raw = typeof value === "string" && value ? value : fallback;
+	const safe = raw.replace(/[^a-zA-Z0-9._-]/g, "-");
+	return safe && safe !== "." && safe !== ".." ? safe : fallback;
+}
+
+function readSessionHeaderArtifactContext(
+	sessionFile: string,
+): SessionHeaderArtifactContext {
+	const fallbackId = basename(sessionFile, ".jsonl");
+	try {
+		const firstLine = readFileSync(sessionFile, "utf8").split("\n", 1)[0];
+		const header = JSON.parse(firstLine) as Record<string, unknown>;
+		return {
+			id: safeArtifactSessionId(header.id, fallbackId),
+			cwd: typeof header.cwd === "string" && header.cwd ? header.cwd : undefined,
+		};
+	} catch {
+		return { id: fallbackId };
+	}
+}
+
+export function writeResumeTaskArtifact(
+	name: string,
+	task: string,
+	sessionFile: string,
+	cwd: string,
+): string {
+	const header = readSessionHeaderArtifactContext(sessionFile);
+	return writeTaskArtifact(name, task, {
+		cwd: header.cwd ?? cwd,
+		sessionManager: { getSessionId: () => header.id },
+	});
 }
 
 export function writeSystemPromptArtifact(

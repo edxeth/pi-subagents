@@ -260,15 +260,14 @@ export class SubagentsOverlayController implements Component {
 	}
 
 	private submitResume(rawText: string): void {
-		const text = rawText.trim();
-		if (!text || this.state.view.kind !== "editor") return;
+		if (!rawText.trim() || this.state.view.kind !== "editor") return;
 		const item = this.state.items[this.state.view.itemIndex];
 		this.state.view = { kind: "list" };
 		if (!item?.sessionFile) {
 			this.ctx.ui.notify("No session file.", "error");
 			return;
 		}
-		void this.doResume(item, text);
+		void this.doResume(item, rawText);
 	}
 
 	private async doResume(item: OverlayItem, message: string): Promise<void> {

@@ -7,11 +7,15 @@ import {
 	it,
 	createTestDir,
 	readSubagentLaunchMetadataForTest,
+	writeResumeTaskArtifactForTest,
 	writeSubagentLaunchMetadataEntryForTest,
 	resolveResumeLaunchMetadataForTest,
 	resetSubagentStateForTest,
 	requestSubagentBatchStopForTest,
 	getSubagentBatchStopMetadataForTest,
+	writeExecutable,
+	readFileSync,
+	mkdirSync,
 } from "../support/index.ts";
 import { resolve } from "node:path";
 import { resumeSubagentSession } from "../../src/runtime/resume-service.ts";
@@ -157,6 +161,97 @@ describe("subagent_resume coordinator-only-turn", () => {
 		// With the classifier-marked flag, the same async resume should await.
 		markSubagentBatchBlockingForTest();
 		assert.equal(shouldAwaitSubagentLaunchForTest(asyncRunning), true);
+	});
+});
+
+describe("subagent_resume interactive prompt delivery", () => {
+	it("writes follow-up text to a resume artifact without trimming user content", () => {
+		const dir = createTestDir();
+		const sessionFile = join(dir, "child.jsonl");
+		writeFileSync(
+			sessionFile,
+			JSON.stringify({ type: "session", version: 3, id: "child-session", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+		);
+
+		const task = "  preserve leading space\n\nand trailing space  \n";
+		const artifactPath = writeResumeTaskArtifactForTest("resume-child", task, sessionFile, dir);
+
+		assert.equal(readFileSync(artifactPath, "utf8"), task);
+		assert.match(artifactPath, /child-session\/context\/resume-child-/);
+	});
+
+	it("sanitizes resumed session ids before using them in artifact paths", () => {
+		const dir = createTestDir();
+		const sessionFile = join(dir, "child.jsonl");
+		writeFileSync(
+			sessionFile,
+			JSON.stringify({ type: "session", version: 3, id: "../../evil/session", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+		);
+
+		const artifactPath = writeResumeTaskArtifactForTest("resume-child", "safe", sessionFile, dir);
+
+		assert.doesNotMatch(artifactPath, /\.\.\/\.\.\/evil\/session|evil\/session/);
+		assert.match(artifactPath, /\.\.-\.\.-evil-session\/context\/resume-child-/);
+	});
+
+	it("passes follow-up task as an @artifact startup prompt instead of typing into the pane", async () => {
+		const dir = createTestDir();
+		const binDir = join(dir, "bin");
+		mkdirSync(binDir, { recursive: true });
+		const logFile = join(dir, "tmux.log");
+		writeExecutable(binDir, "tmux", `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_TMUX_LOG"
+case "$1" in
+  new-window) printf '%%42\\n' ;;
+esac
+`);
+		process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
+		process.env.PI_SUBAGENT_MUX = "tmux";
+		process.env.TMUX = "fake-tmux-socket";
+		process.env.FAKE_TMUX_LOG = logFile;
+
+		const sessionFile = join(dir, "child.jsonl");
+		writeFileSync(
+			sessionFile,
+			JSON.stringify({ type: "session", version: 3, id: "child-session", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+		);
+		await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
+			version: 1,
+			timestamp: new Date().toISOString(),
+			name: "resume-child",
+			agent: "scout",
+			mode: "interactive",
+			sessionMode: "fork",
+			autoExit: true,
+			parentClosePolicy: "terminate",
+			blocking: false,
+			async: true,
+			denyTools: [],
+			noContextFiles: false,
+			noSession: false,
+			agentConfigDir: dir,
+			cwd: dir,
+			boundarySystemPrompt: false,
+		});
+
+		await resumeSubagentSession(
+			{ sessionFile, task: "follow up\nwith newline" },
+			{
+				isMuxAvailable: () => true,
+				getShellReadyDelayMs: () => 0,
+				waitForInteractivePrompt: async () => {},
+				watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
+				watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
+				getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
+				startWidgetRefresh: () => {},
+				getContextWindow: () => undefined,
+				runningSubagents: new Map<string, any>(),
+			},
+		);
+
+		const log = readFileSync(logFile, "utf8");
+		assert.match(log, /@.*child-session.*resume-child-/);
+		assert.doesNotMatch(log, /send-keys -t %42 -l follow up/);
 	});
 });
 

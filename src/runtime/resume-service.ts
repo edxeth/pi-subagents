@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getArtifactStorageRoot } from "../artifact-storage.ts";
 import { getPiInvocation, getPiShellParts, getSubagentChildProcessEnv } from "../launch/child-command.ts";
+import { writeResumeTaskArtifact } from "../launch/prompt-artifacts.ts";
 import { parseEnvString } from "../launch/env.ts";
 import {
 	getExtensionLaunchArgs,
@@ -18,7 +19,7 @@ import {
 	getResumeCwd,
 	resolveResumeLaunchMetadata,
 } from "../launch/resume.ts";
-import { createSurface, exitStatusVar, muxSetupHint, sendCommand, sendShellCommand, shellEscape } from "../mux.ts";
+import { createSurface, exitStatusVar, muxSetupHint, sendShellCommand, shellEscape } from "../mux.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import { getEntryCount } from "../session/session.ts";
 import {
@@ -294,6 +295,15 @@ export async function resumeSubagentSession(
 		for (const arg of [...extensionArgs, ...parityArgs]) {
 			parts.push(shellEscape(arg));
 		}
+		if (task) {
+			const taskPath = writeResumeTaskArtifact(
+				name,
+				task,
+				sessionFile,
+				resumeCwd ?? process.cwd(),
+			);
+			parts.push(shellEscape(`@${taskPath}`));
+		}
 		resumeEnvVars.PI_SUBAGENT_SURFACE = surface;
 		const resumeEnvPrefix = `${Object.entries(resumeEnvVars)
 			.map(([key, value]) => `${key}=${shellEscape(value)}`)
@@ -303,17 +313,6 @@ export async function resumeSubagentSession(
 		const exitTrap = shellEscape(`printf "__SUBAGENT_DONE_${exitVar}__\\n" | tee ${sentinelPath}`);
 		const command = `trap ${exitTrap} EXIT; ${buildShellChangeDirectoryPrefix(resumeCwd)}${resumeEnvPrefix}${parts.join(" ")}`;
 		sendShellCommand(surface, command);
-		if (task) {
-			await new Promise<void>((resolve) =>
-				setTimeout(
-					resolve,
-					Math.max(3000, runtime.getShellReadyDelayMs()),
-				),
-			);
-			sendCommand(surface, "");
-			await new Promise<void>((resolve) => setTimeout(resolve, 500));
-			sendCommand(surface, task);
-		}
 		running.surface = surface;
 		running.doneSentinelFile = doneSentinelFile;
 	}
