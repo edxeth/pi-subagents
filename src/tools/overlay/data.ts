@@ -1,6 +1,6 @@
 import { runningSubagents, completedSubagentResults } from "../../runtime/state.ts";
 import { getEffectiveAgentDefinitions, loadAgentDefaults, type AgentDefaults } from "../../agents/definitions.ts";
-import { readSubagentLaunchMetadata, type PersistedSubagentLaunchMetadata } from "../../session/session-files.ts";
+import { readSubagentLaunchMetadata, getSubagentActivityStartIndex, type PersistedSubagentLaunchMetadata } from "../../session/session-files.ts";
 import { getEntries } from "../../session/session.ts";
 import { stopRunningSubagent } from "../../runtime/wiring.ts";
 import type { CompletedSubagentResult, RunningSubagent, SessionContentBlock, SessionMessageLike, SessionUsage } from "../../types.ts";
@@ -106,7 +106,8 @@ function buildSections(
 interface CompletedSessionStats {
 	messages: number;
 	toolUses: number;
-	totalTokens: number;
+	/** Snapshot of the final assistant message's usage total — the context footprint, not a cumulative sum. */
+	contextTokens: number;
 	inputTokens: number;
 	outputTokens: number;
 	model?: string;
@@ -126,14 +127,14 @@ function buildRuntimeSection(isRunning: boolean, r: RunningSubagent | CompletedS
 	if (running.messageCount != null) fields.push({ label: "messages", value: `${running.messageCount}` });
 	if (running.toolUses != null) fields.push({ label: "tool uses", value: `${running.toolUses}` });
 
-	const used = running.totalTokens ?? 0;
+	const ctxUsed = running.contextTokens ?? 0;
 	const ctxW = running.modelContextWindow;
-	if (used > 0 && ctxW) {
-		fields.push({ label: "context", value: `${compactCount(used)}/${compactCount(ctxW)}` });
+	if (ctxUsed > 0 && ctxW) {
+		fields.push({ label: "context", value: `${compactCount(ctxUsed)}/${compactCount(ctxW)}` });
 	} else if (running.contextLabel) {
 		fields.push({ label: "context", value: running.contextLabel });
-	} else if (used > 0) {
-		fields.push({ label: "tokens", value: compactCount(used) });
+	} else if ((running.contextTokens ?? 0) > 0) {
+		fields.push({ label: "tokens", value: compactCount(running.contextTokens ?? 0) });
 	}
 
 	if (running.activity) fields.push({ label: "activity", value: running.activity });
@@ -169,14 +170,18 @@ function readCompletedSessionStats(sessionFile?: string): CompletedSessionStats 
 	try {
 		let messages = 0;
 		let toolUses = 0;
-		let totalTokens = 0;
+		let contextTokens = 0;
 		let inputTokens = 0;
 		let outputTokens = 0;
 		let model: string | undefined;
 		let provider: string | undefined;
 
-		for (const entry of getEntries(sessionFile) as Array<{ [key: string]: unknown }>) {
-			const message = getSessionMessage(entry);
+		const entries = getEntries(sessionFile) as Array<{ [key: string]: unknown }>;
+		// Skip inherited parent history in forked child sessions; count only
+		// entries after this subagent's launch marker.
+		const startIndex = getSubagentActivityStartIndex(entries);
+		for (let i = startIndex; i < entries.length; i++) {
+			const message = getSessionMessage(entries[i]);
 			if (!message) continue;
 			if (message.role === "toolResult") {
 				toolUses++;
@@ -187,7 +192,9 @@ function readCompletedSessionStats(sessionFile?: string): CompletedSessionStats 
 			if (message.model) model = message.model;
 			if (message.provider) provider = message.provider;
 			if (message.usage) {
-				totalTokens += usageTotal(message.usage);
+				// Snapshot, not sum: the latest assistant turn reflects the context
+				// footprint. Cumulative input/output are tracked separately below.
+				contextTokens = usageTotal(message.usage);
 				inputTokens += message.usage.input ?? 0;
 				outputTokens += message.usage.output ?? 0;
 			}
@@ -196,7 +203,7 @@ function readCompletedSessionStats(sessionFile?: string): CompletedSessionStats 
 			}
 		}
 
-		return { messages, toolUses, totalTokens, inputTokens, outputTokens, model, provider };
+		return { messages, toolUses, contextTokens, inputTokens, outputTokens, model, provider };
 	} catch {
 		return undefined;
 	}
@@ -207,7 +214,7 @@ function compactStats(stats?: CompletedSessionStats, fallbackOutputTokens?: numb
 	const result: string[] = [];
 	if (stats.messages > 0) result.push(`${stats.messages} msg`);
 	if (stats.toolUses > 0) result.push(`${stats.toolUses} tool${stats.toolUses === 1 ? "" : "s"}`);
-	if (stats.totalTokens > 0) result.push(`${compactCount(stats.totalTokens)} tokens`);
+	if (stats.contextTokens > 0) result.push(`${compactCount(stats.contextTokens)} ctx`);
 	else if (fallbackOutputTokens) result.push(`${compactCount(fallbackOutputTokens)} output`);
 	return result;
 }
@@ -226,7 +233,7 @@ function completedRuntimeSection(args: {
 	if (args.exitCode != null) fields.push({ label: "exit", value: `${args.exitCode}` });
 	if (args.stats?.messages) fields.push({ label: "messages", value: `${args.stats.messages}` });
 	if (args.stats?.toolUses) fields.push({ label: "tool calls", value: `${args.stats.toolUses}` });
-	if (args.stats?.totalTokens) fields.push({ label: "context tokens", value: compactCount(args.stats.totalTokens) });
+	if (args.stats?.contextTokens) fields.push({ label: "context tokens", value: compactCount(args.stats.contextTokens) });
 	if (args.stats?.inputTokens) fields.push({ label: "input tokens", value: compactCount(args.stats.inputTokens) });
 	if (args.stats?.outputTokens) fields.push({ label: "output tokens", value: compactCount(args.stats.outputTokens) });
 	else if (args.outputTokens) fields.push({ label: "output tokens", value: compactCount(args.outputTokens) });
@@ -302,13 +309,13 @@ export function buildRunningItems(ctx: OverlayContext): OverlayItem[] {
 		const stats: string[] = [];
 		const modelRef = a.modelRef ?? meta?.modelRef;
 		if (a.toolUses) stats.push(`${a.toolUses} tool${a.toolUses === 1 ? "" : "s"}`);
-		const used = a.totalTokens ?? 0;
-		if (used > 0 && a.modelContextWindow) {
-			stats.push(`${compactCount(used)}/${compactCount(a.modelContextWindow)} ctx`);
+		const ctxUsed = a.contextTokens ?? 0;
+		if (ctxUsed > 0 && a.modelContextWindow) {
+			stats.push(`${compactCount(ctxUsed)}/${compactCount(a.modelContextWindow)} ctx`);
 		} else if (a.contextLabel) {
 			stats.push(a.contextLabel);
-		} else if (used > 0) {
-			stats.push(`${compactCount(used)} tokens`);
+		} else if ((a.contextTokens ?? 0) > 0) {
+			stats.push(`${compactCount(a.contextTokens ?? 0)} tokens`);
 		}
 		stats.push(formatElapsed(a.startTime));
 

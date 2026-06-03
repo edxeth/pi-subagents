@@ -296,6 +296,29 @@ export function isResumeMode(value: unknown): value is ResumeMode {
 	return value === "interactive" || value === "background";
 }
 
+/**
+ * Index of the first entry that belongs to this subagent's own activity.
+ *
+ * Forked child sessions are seeded with the parent transcript before the
+ * `pi-subagents_launch_metadata` marker. Counting stats or usage from index 0
+ * would include inherited parent history. Return the index just after the
+ * marker, or 0 for standalone/lineage sessions that have no marker.
+ */
+export function getSubagentActivityStartIndex(
+	entries: ReadonlyArray<{ type?: unknown; customType?: unknown }>,
+): number {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i];
+		if (
+			entry?.type === "custom" &&
+			entry.customType === SUBAGENT_LAUNCH_METADATA_CUSTOM_TYPE
+		) {
+			return i + 1;
+		}
+	}
+	return 0;
+}
+
 export function readSubagentLaunchMetadata(
 	path: string,
 ): PersistedSubagentLaunchMetadata | undefined {

@@ -90,6 +90,8 @@ export interface RunningSubagent {
 	messageCount?: number;
 	toolUses?: number;
 	totalTokens?: number;
+	/** Snapshot of the latest assistant message's usage total, for context-window ratio display. */
+	contextTokens?: number;
 	modelContextWindow?: number;
 	/** Resolved provider/model:thinking ref for this child, for display in the widget/overlay. */
 	modelRef?: string;

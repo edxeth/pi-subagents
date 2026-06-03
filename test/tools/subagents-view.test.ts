@@ -11,6 +11,7 @@ import {
 } from "../support/index.ts";
 import { SubagentsOverlay } from "../../src/tools/subagents-view.ts";
 import { runningSubagents } from "../../src/runtime/state.ts";
+import { buildCompletedItems } from "../../src/tools/overlay/data.ts";
 import { wrapPlainText } from "../../src/tools/overlay/render-helpers.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -174,6 +175,35 @@ describe("subagents-view overlay", () => {
 			const text = lines.map(stripAnsi).join("\n");
 			assert.ok(text.includes("scout"), `Expected "scout" in:\n${text}`);
 			overlay.dispose();
+		});
+
+		it("uses the per-message context snapshot, not cumulative totalTokens, for the ctx ratio", () => {
+			// totalTokens accumulates every assistant turn and can far exceed the
+			// window; contextTokens is the last-message snapshot. The overlay must
+			// show the snapshot ratio so it matches the widget.
+			setRunningSubagentForTest({
+				id: "ctx-snapshot",
+				name: "ctx-scout",
+				task: "Check ctx",
+				mode: "background",
+				executionState: "running",
+				deliveryState: "detached",
+				parentClosePolicy: "terminate",
+				startTime: Date.now(),
+				sessionFile: "/tmp/ctx-snapshot.jsonl",
+				totalTokens: 1_800_000,
+				contextTokens: 171_000,
+				modelContextWindow: 1_000_000,
+			} as any);
+
+			const overlay = createOverlay();
+			try {
+				const text = renderLines(overlay).map(stripAnsi).join("\n");
+				assert.ok(text.includes("171k/1M ctx"), `Expected snapshot ratio in:\n${text}`);
+				assert.ok(!text.includes("1.8M/1M"), `Should not use cumulative total in:\n${text}`);
+			} finally {
+				overlay.dispose();
+			}
 		});
 
 		it("shows frontmatter and override model fields in running item details", () => {
@@ -475,6 +505,150 @@ describe("subagents-view overlay", () => {
 				`Expected model ref in list row:\n${text}`,
 			);
 			overlay.dispose();
+		});
+
+		it("reports completed context tokens as the final-message snapshot, not a cumulative sum", async () => {
+			const dir = mkdtempSync(join(tmpdir(), "subagents-completed-"));
+			const childSession = join(dir, "child.jsonl");
+			// Two assistant turns: cumulative usageTotal would be 250k, but the
+			// context footprint is the last turn's 150k snapshot.
+			writeFileSync(
+				childSession,
+				`${JSON.stringify({
+					type: "message",
+					message: {
+						role: "assistant",
+						provider: "anthropic",
+						model: "anthropic/test",
+						usage: { totalTokens: 100_000, input: 90_000, output: 10_000 },
+						content: [{ type: "text", text: "first" }],
+					},
+				})}\n${JSON.stringify({
+					type: "message",
+					message: {
+						role: "assistant",
+						provider: "anthropic",
+						model: "anthropic/test",
+						usage: { totalTokens: 150_000, input: 140_000, output: 10_000 },
+						content: [{ type: "text", text: "second" }],
+					},
+				})}\n`,
+			);
+
+			const parentSession = join(dir, "parent.jsonl");
+			writeFileSync(
+				parentSession,
+				`${JSON.stringify({
+					type: "custom_message",
+					customType: "subagent_result",
+					details: {
+						id: "done-1",
+						name: "scout",
+						status: "completed",
+						exitCode: 0,
+						elapsed: 12,
+						sessionFile: childSession,
+					},
+				})}\n`,
+			);
+
+			const overlayCtx = {
+				ui: { confirm: async () => true, input: async () => "", notify: () => {} },
+				cwd: "/tmp",
+				sessionManager: { getSessionFile: () => parentSession },
+			} as any;
+
+			const items = await buildCompletedItems(overlayCtx);
+			const item = items.find((i) => i.name === "scout");
+			assert.ok(item, "expected recovered completed item");
+			const ctxField = item!.detailSections
+				.flatMap((s) => s.fields)
+				.find((f) => f.label === "context tokens");
+			assert.equal(ctxField?.value, "150k");
+			assert.ok(
+				item!.stats.includes("150k ctx"),
+				`Expected snapshot ctx in stats, got: ${JSON.stringify(item!.stats)}`,
+			);
+			assert.ok(
+				!item!.stats.some((s) => s.includes("250k")),
+				`Should not show cumulative total, got: ${JSON.stringify(item!.stats)}`,
+			);
+		});
+
+		it("excludes inherited parent history from forked completed-session stats", async () => {
+			const dir = mkdtempSync(join(tmpdir(), "subagents-fork-completed-"));
+			const childSession = join(dir, "forked-child.jsonl");
+			// Forked child: parent transcript is seeded BEFORE the launch marker,
+			// then the child's own activity follows. Stats must count only the
+			// child's turns, not the inherited parent history.
+			writeFileSync(
+				childSession,
+				`${JSON.stringify({
+					type: "message",
+					message: {
+						role: "assistant",
+						provider: "anthropic",
+						model: "anthropic/parent",
+						usage: { totalTokens: 900_000, input: 880_000, output: 20_000 },
+						content: [{ type: "toolCall", id: "p1", name: "bash" }],
+					},
+				})}\n${JSON.stringify({
+					type: "message",
+					message: { role: "toolResult", toolCallId: "p1" },
+				})}\n${JSON.stringify({
+					type: "custom",
+					customType: "pi-subagents_launch_metadata",
+					data: { version: 1, mode: "background" },
+				})}\n${JSON.stringify({
+					type: "message",
+					message: {
+						role: "assistant",
+						provider: "anthropic",
+						model: "anthropic/child",
+						usage: { totalTokens: 120_000, input: 110_000, output: 10_000 },
+						content: [{ type: "text", text: "child work" }],
+					},
+				})}\n`,
+			);
+
+			const parentSession = join(dir, "parent.jsonl");
+			writeFileSync(
+				parentSession,
+				`${JSON.stringify({
+					type: "custom_message",
+					customType: "subagent_result",
+					details: {
+						id: "fork-done",
+						name: "forked-scout",
+						status: "completed",
+						exitCode: 0,
+						elapsed: 5,
+						sessionFile: childSession,
+					},
+				})}\n`,
+			);
+
+			const overlayCtx = {
+				ui: { confirm: async () => true, input: async () => "", notify: () => {} },
+				cwd: "/tmp",
+				sessionManager: { getSessionFile: () => parentSession },
+			} as any;
+
+			const items = await buildCompletedItems(overlayCtx);
+			const item = items.find((i) => i.name === "forked-scout");
+			assert.ok(item, "expected recovered forked completed item");
+			const fields = item!.detailSections.flatMap((s) => s.fields);
+			// Context snapshot = child's last turn (120k), not the parent's 900k.
+			assert.equal(fields.find((f) => f.label === "context tokens")?.value, "120k");
+			// Input/output are cumulative over CHILD activity only: 110k / 10k.
+			assert.equal(fields.find((f) => f.label === "input tokens")?.value, "110k");
+			assert.equal(fields.find((f) => f.label === "output tokens")?.value, "10k");
+			// Only the child's single assistant message is counted.
+			assert.equal(fields.find((f) => f.label === "messages")?.value, "1");
+			assert.ok(
+				!item!.stats.some((s) => s.includes("900k") || s.includes("1M")),
+				`Should not include inherited parent usage, got: ${JSON.stringify(item!.stats)}`,
+			);
 		});
 	});
 });

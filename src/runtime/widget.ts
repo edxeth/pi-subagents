@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
+import { getSubagentActivityStartIndex } from "../session/session-files.ts";
 import type {
 	RunningSubagent,
 	SessionContentBlock,
@@ -48,19 +49,6 @@ function firstNonEmptyLine(text: string, maxLen = 60): string {
 			.map((value) => value.trim())
 			.find(Boolean) ?? "";
 	return line.length > maxLen ? `${line.slice(0, maxLen)}…` : line;
-}
-
-function getSubagentActivityStartIndex(entries: SessionEntryLike[]): number {
-	for (let i = entries.length - 1; i >= 0; i--) {
-		const entry = entries[i] as SessionEntryLike & { customType?: string };
-		if (
-			entry?.type === "custom" &&
-			entry.customType === "pi-subagents_launch_metadata"
-		) {
-			return i + 1;
-		}
-	}
-	return 0;
 }
 
 function describeActivity(toolNames: string[], responseText?: string): string {
@@ -339,6 +327,13 @@ export class SubagentWidgetManager {
 			agent.messageCount = messageCount;
 			agent.toolUses = toolUses;
 			agent.totalTokens = totalTokens;
+			agent.contextTokens = contextSource?.usage
+				? contextSource.usage.totalTokens ??
+					(contextSource.usage.input ?? 0) +
+						(contextSource.usage.output ?? 0) +
+						(contextSource.usage.cacheRead ?? 0) +
+						(contextSource.usage.cacheWrite ?? 0)
+				: undefined;
 			agent.contextLabel = this.resolveContextLabel(
 				contextSource?.provider,
 				contextSource?.model,
@@ -399,9 +394,11 @@ export class SubagentWidgetManager {
 				if (agent.contextLabel) {
 					stats.push(agent.contextLabel);
 				} else {
-					const totalTokens = agent.totalTokens ?? 0;
-					if (totalTokens > 0)
-						stats.push(`${formatCompactCount(totalTokens)} tokens`);
+					// No resolvable context window: show the last-message snapshot, not
+					// the cumulative totalTokens sum (which balloons past any window).
+					const snapshot = agent.contextTokens ?? 0;
+					if (snapshot > 0)
+						stats.push(`${formatCompactCount(snapshot)} tokens`);
 				}
 
 				const header =
