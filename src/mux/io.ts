@@ -47,6 +47,12 @@ export function sendCommand(surface: string, command: string): void {
 		);
 		return;
 	}
+	if (backend === "herdr") {
+		execFileSync("herdr", ["pane", "run", surface, command], {
+			encoding: "utf8",
+		});
+		return;
+	}
 	zellijActionSync(["write-chars", command], surface);
 	zellijActionSync(["write", "13"], surface);
 }
@@ -105,6 +111,13 @@ export function readScreen(surface: string, lines = 50): string {
 		});
 		return tailLines(raw, lines);
 	}
+	if (backend === "herdr") {
+		return execFileSync(
+			"herdr",
+			["pane", "read", surface, "--source", "recent", "--lines", String(lines)],
+			{ encoding: "utf8" },
+		);
+	}
 	const raw = execFileSync(
 		"zellij",
 		["action", "dump-screen", "--pane-id", zellijPaneId(surface)],
@@ -139,6 +152,14 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
 		);
 		return tailLines(stdout, lines);
 	}
+	if (backend === "herdr") {
+		const { stdout } = await execFileAsync(
+			"herdr",
+			["pane", "read", surface, "--source", "recent", "--lines", String(lines)],
+			{ encoding: "utf8" },
+		);
+		return stdout;
+	}
 	const { stdout } = await execFileAsync(
 		"zellij",
 		["action", "dump-screen", "--pane-id", zellijPaneId(surface)],
@@ -163,6 +184,10 @@ export function closeSurface(surface: string): void {
 		execFileSync("wezterm", ["cli", "kill-pane", "--pane-id", surface], {
 			encoding: "utf8",
 		});
+		return;
+	}
+	if (backend === "herdr") {
+		execFileSync("herdr", ["pane", "close", surface], { encoding: "utf8" });
 		return;
 	}
 	zellijActionSync(["close-pane"], surface);

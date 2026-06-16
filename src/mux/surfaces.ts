@@ -6,6 +6,7 @@ import {
 	zellijActionSync,
 } from "./core.ts";
 import { createCmuxSplit, createCmuxSurface } from "./cmux-surfaces.ts";
+import { createHerdrSplit } from "./herdr-surfaces.ts";
 import { createZellijSurface } from "./zellij-placement.ts";
 
 const DEFAULT_INTERACTIVE_MIN_COLUMNS = 50;
@@ -35,6 +36,10 @@ export function createSurface(name: string): string {
 
 	if (backend === "zellij") {
 		return createZellijSurface(name);
+	}
+
+	if (backend === "herdr") {
+		return createHerdrSplit(name, "right");
 	}
 
 	return createSurfaceSplit(name, "right");
@@ -293,6 +298,8 @@ export function createSurfaceSplit(
 		return createTmuxSplit(name, direction, fromSurface);
 	if (backend === "wezterm")
 		return createWezTermSplit(name, direction, fromSurface);
+	if (backend === "herdr")
+		return createHerdrSplit(name, direction, fromSurface);
 	return createZellijSplit(name, direction, fromSurface);
 }
 
@@ -329,6 +336,14 @@ export function renameCurrentTab(title: string): void {
 		if (paneId) args.push("--pane-id", paneId);
 		args.push(title);
 		execFileSync("wezterm", args, { encoding: "utf8" });
+		return;
+	}
+	if (backend === "herdr") {
+		const tabId = process.env.HERDR_TAB_ID;
+		if (!tabId) throw new Error("HERDR_TAB_ID not set");
+		execFileSync("herdr", ["tab", "rename", tabId, title], {
+			encoding: "utf8",
+		});
 		return;
 	}
 	const paneId = process.env.ZELLIJ_PANE_ID;
@@ -368,5 +383,13 @@ export function renameWorkspace(title: string): void {
 		try {
 			execFileSync("wezterm", args, { encoding: "utf8" });
 		} catch {}
+		return;
+	}
+	if (backend === "herdr") {
+		const workspaceId = process.env.HERDR_WORKSPACE_ID;
+		if (!workspaceId) throw new Error("HERDR_WORKSPACE_ID not set");
+		execFileSync("herdr", ["workspace", "rename", workspaceId, title], {
+			encoding: "utf8",
+		});
 	}
 }

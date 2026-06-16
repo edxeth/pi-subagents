@@ -15,6 +15,7 @@ import {
 	getMuxBackend,
 	isCmuxAvailable,
 	isFishShell,
+	isHerdrAvailable,
 	isMuxAvailable,
 	isTmuxAvailable,
 	isZellijAvailable,
@@ -94,6 +95,23 @@ describe("mux.ts", () => {
 			assert.equal(isMuxAvailable(), false);
 		});
 
+		it("selects herdr when it is the available runtime", () => {
+			const dir = createTestDir();
+			writeExecutable(dir, "herdr", "#!/usr/bin/env bash\nexit 0\n");
+			process.env.PATH = `${dir}:${process.env.PATH ?? ""}`;
+			process.env.PI_SUBAGENT_MUX = "herdr";
+			process.env.HERDR_ENV = "1";
+			delete process.env.CMUX_SOCKET_PATH;
+			delete process.env.TMUX;
+			delete process.env.WEZTERM_UNIX_SOCKET;
+			delete process.env.ZELLIJ;
+			delete process.env.ZELLIJ_SESSION_NAME;
+
+			assert.equal(getMuxBackend(), "herdr");
+			assert.equal(isHerdrAvailable(), true);
+			assert.equal(isMuxAvailable(), true);
+		});
+
 		it("returns a setup hint for the selected preference", () => {
 			process.env.PI_SUBAGENT_MUX = "tmux";
 			assert.match(muxSetupHint(), /tmux new -A -s pi 'pi'/);
@@ -103,6 +121,9 @@ describe("mux.ts", () => {
 
 			process.env.PI_SUBAGENT_MUX = "wezterm";
 			assert.match(muxSetupHint(), /WezTerm/);
+
+			process.env.PI_SUBAGENT_MUX = "herdr";
+			assert.match(muxSetupHint(), /herdr/);
 		});
 
 		it("reports cmux availability as a boolean", () => {
@@ -546,6 +567,52 @@ printf '%s\n' "$*" >> "$FAKE_CMUX_LOG"
 					rmSync(stagedPath, { force: true });
 				rmSync(dir, { recursive: true, force: true });
 			}
+		});
+
+		it("exercises the herdr backend with a fake herdr binary", async () => {
+			const dir = createTestDir();
+			const logFile = join(dir, "herdr.log");
+			const screenFile = join(dir, "herdr-screen.txt");
+			writeFileSync(screenFile, "herdr line 1\nherdr line 2\n");
+			writeExecutable(
+				dir,
+				"herdr",
+				`#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_HERDR_LOG"
+if [ "$1" = "pane" ] && [ "$2" = "split" ]; then
+  printf '{"result":{"pane":{"pane_id":"1-9"}}}\n'
+elif [ "$1" = "pane" ] && [ "$2" = "read" ]; then
+  cat "$FAKE_HERDR_SCREEN"
+fi
+`,
+			);
+
+			process.env.PATH = `${dir}:${ORIGINAL_ENV.PATH}`;
+			process.env.PI_SUBAGENT_MUX = "herdr";
+			process.env.HERDR_ENV = "1";
+			process.env.HERDR_PANE_ID = "1-1";
+			process.env.HERDR_TAB_ID = "1:1";
+			process.env.HERDR_WORKSPACE_ID = "1";
+			process.env.FAKE_HERDR_LOG = logFile;
+			process.env.FAKE_HERDR_SCREEN = screenFile;
+
+			const surface = createSurfaceSplit("Fake Herdr", "down");
+			assert.equal(surface, "1-9");
+			renameCurrentTab("Herdr Tab");
+			renameWorkspace("Herdr Workspace");
+			sendCommand(surface, "echo herdr");
+			assert.match(readScreen(surface, 10), /herdr line 1/);
+			assert.match(await readScreenAsync(surface, 10), /herdr line 2/);
+			closeSurface(surface);
+
+			const log = readFileSync(logFile, "utf8");
+			assert.match(log, /pane split 1-1 --direction down --no-focus/);
+			assert.match(log, /pane rename 1-9 Fake Herdr/);
+			assert.match(log, /tab rename 1:1 Herdr Tab/);
+			assert.match(log, /workspace rename 1 Herdr Workspace/);
+			assert.match(log, /pane run 1-9 echo herdr/);
+			assert.match(log, /pane read 1-9 --source recent --lines 10/);
+			assert.match(log, /pane close 1-9/);
 		});
 
 		it("exercises the wezterm backend with a fake wezterm binary", async () => {
