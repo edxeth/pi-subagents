@@ -179,6 +179,7 @@ describe("mux.ts", () => {
 		maybeIt(
 			"creates panes, sends commands, reads output, and closes them",
 			async () => {
+				process.env.PI_SUBAGENT_MUX = "tmux";
 				let baseSurface: string | undefined;
 				let splitSurface: string | undefined;
 				const marker = `pane-output-${Date.now()}`;
@@ -230,6 +231,7 @@ describe("mux.ts", () => {
 		);
 
 		maybeIt("renames the current tmux window and session", () => {
+			process.env.PI_SUBAGENT_MUX = "tmux";
 			const paneId = ORIGINAL_ENV.TMUX_PANE!;
 			const windowId = execFileSync(
 				"tmux",
@@ -303,6 +305,7 @@ describe("mux.ts", () => {
 		maybeIt(
 			"polls until the subagent completion sentinel appears",
 			async () => {
+				process.env.PI_SUBAGENT_MUX = "tmux";
 				const surface = createSurface("Pi Test Poll");
 
 				try {
@@ -330,6 +333,7 @@ describe("mux.ts", () => {
 		);
 
 		maybeIt("aborts polling when the caller aborts", async () => {
+			process.env.PI_SUBAGENT_MUX = "tmux";
 			const surface = createSurface("Pi Test Abort");
 			const controller = new AbortController();
 

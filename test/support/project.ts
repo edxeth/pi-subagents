@@ -96,6 +96,7 @@ export {
 	getMuxBackend,
 	isCmuxAvailable,
 	isFishShell,
+	isHerdrAvailable,
 	isMuxAvailable,
 	isTmuxAvailable,
 	isZellijAvailable,

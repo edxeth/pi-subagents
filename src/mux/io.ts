@@ -11,6 +11,7 @@ import {
 	zellijActionSync,
 	zellijPaneId,
 } from "./core.ts";
+import { readHerdrJson, runHerdrText, runHerdrTextAsync } from "./herdr.ts";
 
 export function sendCommand(surface: string, command: string): void {
 	const backend = requireMuxBackend();
@@ -37,6 +38,14 @@ export function sendCommand(surface: string, command: string): void {
 		execFileSync("tmux", ["send-keys", "-t", surface, "Enter"], {
 			encoding: "utf8",
 		});
+		return;
+	}
+	if (backend === "herdr") {
+		if (command.length > 0) {
+			runHerdrText(["pane", "run", surface, command]);
+			return;
+		}
+		runHerdrText(["pane", "send-keys", surface, "Enter"]);
 		return;
 	}
 	if (backend === "wezterm") {
@@ -99,6 +108,17 @@ export function readScreen(surface: string, lines = 50): string {
 			{ encoding: "utf8" },
 		);
 	}
+	if (backend === "herdr") {
+		return runHerdrText([
+			"pane",
+			"read",
+			surface,
+			"--source",
+			"visible",
+			"--lines",
+			String(Math.max(1, lines)),
+		]);
+	}
 	if (backend === "wezterm") {
 		const raw = execFileSync("wezterm", ["cli", "get-text", "--pane-id", surface], {
 			encoding: "utf8",
@@ -131,6 +151,17 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
 		);
 		return stdout;
 	}
+	if (backend === "herdr") {
+		return runHerdrTextAsync([
+			"pane",
+			"read",
+			surface,
+			"--source",
+			"visible",
+			"--lines",
+			String(Math.max(1, lines)),
+		]);
+	}
 	if (backend === "wezterm") {
 		const { stdout } = await execFileAsync(
 			"wezterm",
@@ -157,6 +188,10 @@ export function closeSurface(surface: string): void {
 	}
 	if (backend === "tmux") {
 		execFileSync("tmux", ["kill-pane", "-t", surface], { encoding: "utf8" });
+		return;
+	}
+	if (backend === "herdr") {
+		readHerdrJson(["pane", "close", surface], "pane close");
 		return;
 	}
 	if (backend === "wezterm") {

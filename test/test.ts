@@ -23,5 +23,6 @@ import "./runtime/resume-tool.test.ts";
 import "./runtime/mixed-batch-classifier.test.ts";
 import "./launch/helpers.test.ts";
 import "./mux/mux.test.ts";
+import "./mux/herdr.test.ts";
 import "./mux/runtime-probe.test.ts";
 import "./mux/zellij-placement.test.ts";

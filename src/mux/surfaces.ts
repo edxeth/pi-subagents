@@ -1,15 +1,22 @@
 import { execFileSync, execSync } from "node:child_process";
 import {
+	getHerdrCurrentPaneId,
 	getMuxBackend,
 	requireMuxBackend,
 	shellEscape,
 	zellijActionSync,
 } from "./core.ts";
 import { createCmuxSplit, createCmuxSurface } from "./cmux-surfaces.ts";
+import {
+	extractHerdrPaneInfo,
+	getHerdrPaneInfo,
+	readHerdrJson,
+} from "./herdr.ts";
 import { createZellijSurface } from "./zellij-placement.ts";
 
 const DEFAULT_INTERACTIVE_MIN_COLUMNS = 50;
 const DEFAULT_INTERACTIVE_MIN_ROWS = 10;
+const HERDR_CURRENT_PANE_ERROR = "HERDR_PANE_ID or HERDR_ACTIVE_PANE_ID not set";
 
 function positiveNumber(value: unknown): number | undefined {
 	const number = typeof value === "number" ? value : Number(value);
@@ -23,6 +30,10 @@ export function createSurface(name: string): string {
 
 	if (backend === "cmux") {
 		return createCmuxSurface(name);
+	}
+
+	if (backend === "herdr") {
+		return createHerdrSplit(name, "right");
 	}
 
 	if (backend === "tmux") {
@@ -188,6 +199,44 @@ function createTmuxSplit(
 	return pane;
 }
 
+function requireHerdrCurrentPaneId(): string {
+	const paneId = getHerdrCurrentPaneId();
+	if (!paneId) throw new Error(HERDR_CURRENT_PANE_ERROR);
+	return paneId;
+}
+
+function createHerdrSplit(
+	name: string,
+	direction: "left" | "right" | "up" | "down",
+	fromSurface?: string,
+): string {
+	const sourcePane = fromSurface ?? requireHerdrCurrentPaneId();
+	// Herdr's public split API exposes right/down. Preserve the requested axis
+	// when callers ask for left/up, even though exact before/after placement is
+	// backend-specific.
+	const splitDirection = direction === "up" || direction === "down"
+		? "down"
+		: "right";
+	const result = readHerdrJson(
+		[
+			"pane",
+			"split",
+			sourcePane,
+			"--direction",
+			splitDirection,
+			"--cwd",
+			process.cwd(),
+			"--no-focus",
+		],
+		"pane split",
+	);
+	const pane = extractHerdrPaneInfo(result, "pane split");
+	try {
+		readHerdrJson(["pane", "rename", pane.pane_id, name], "pane rename");
+	} catch {}
+	return pane.pane_id;
+}
+
 function createWezTermSurface(name: string): string {
 	const paneId = execFileSync(
 		"wezterm",
@@ -289,6 +338,8 @@ export function createSurfaceSplit(
 	const backend = requireMuxBackend();
 	if (backend === "cmux")
 		return createCmuxSplit(name, direction, fromSurface);
+	if (backend === "herdr")
+		return createHerdrSplit(name, direction, fromSurface);
 	if (backend === "tmux")
 		return createTmuxSplit(name, direction, fromSurface);
 	if (backend === "wezterm")
@@ -307,6 +358,11 @@ export function renameCurrentTab(title: string): void {
 				encoding: "utf8",
 			},
 		);
+		return;
+	}
+	if (backend === "herdr") {
+		const paneId = requireHerdrCurrentPaneId();
+		readHerdrJson(["pane", "rename", paneId, title], "pane rename");
 		return;
 	}
 	if (backend === "tmux") {
@@ -343,6 +399,16 @@ export function renameWorkspace(title: string): void {
 		execSync(
 			`cmux workspace-action --action rename --title ${shellEscape(title)}`,
 			{ encoding: "utf8" },
+		);
+		return;
+	}
+	if (backend === "herdr") {
+		const paneId = requireHerdrCurrentPaneId();
+		const workspaceId = process.env.HERDR_WORKSPACE_ID ?? getHerdrPaneInfo(paneId).workspace_id;
+		if (!workspaceId) throw new Error("Herdr workspace id not found");
+		readHerdrJson(
+			["workspace", "rename", workspaceId, title],
+			"workspace rename",
 		);
 		return;
 	}

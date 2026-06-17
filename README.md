@@ -34,7 +34,9 @@ Two axes matter:
 - `interactive` or `background`: where the child runs
 - async or sync: whether the parent waits
 
-`interactive` means foreground. Pi opens a visible surface through cmux, tmux, zellij, or WezTerm. To keep children usable, normal interactive launches use a non-shrinking surface such as a tab, window, or stacked pane when repeated splits would make panes too small.
+`interactive` means foreground. Pi opens a visible surface through Herdr, cmux, tmux, zellij, or WezTerm. To keep children usable, normal interactive launches use a non-shrinking surface such as a tab, window, or stacked pane when repeated splits would make panes too small.
+
+Herdr is used only when Pi is running in a compatible Herdr server. The extension checks the current Herdr pane environment, `herdr` command availability, and `herdr status server --json`; the server must be running and compatible.
 
 `background` means headless. Pi starts a `pi -p` child process without opening a pane.
 
@@ -546,7 +548,7 @@ User-facing knobs:
 | --- | --- |
 | `PI_ORCHESTRATOR_MODE` | Set `1` to turn the parent into an orchestrator (delegation-only tools, replacement system prompt) |
 | `PI_SUBAGENT_PI_COMMAND` | Launch children through a wrapper command |
-| `PI_SUBAGENT_MUX` | Force `cmux`, `tmux`, `zellij`, or `wezterm` |
+| `PI_SUBAGENT_MUX` | Force `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm` |
 | `PI_CODING_AGENT_DIR` | Use a different Pi agent config root |
 | `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN` | Set `1` to let the parent keep running after async launches |
 | `PI_SUBAGENT_DISABLE_CHILD_CONTEXT_BOUNDARY` | Set `1` for raw forks with no boundary marker |
