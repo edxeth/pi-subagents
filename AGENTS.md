@@ -113,25 +113,15 @@ Guidance:
 - Use at least one GLM model and one GPT-5.5 model for non-trivial orchestration changes.
 - Do not trust a single-model pass.
 
-### Preferred agents
+### Live-test agents
 
-Use repo-local smoke agents when possible:
+This repo does not commit fixed smoke agents (`.pi/` is gitignored). For each
+live repro, create a temporary agent file shaped for the behavior under test,
+either under `.pi/agents/` or under a temp root pointed at by
+`PI_CODING_AGENT_DIR`, then delete it after.
 
-- `.pi/agents/smoke.md`
-- `.pi/agents/smoke-slow.md`
-- `.pi/agents/bg-mode.md`
-- `.pi/agents/fg-mode.md`
-- `.pi/agents/sp-append.md`
-- `.pi/agents/sp-replace.md`
-
-For custom benchmark-style repros, use:
-
-- `~/.pi/agent/agents/test.md`
-
-If you enable the global `test` agent:
-
-- keep the change temporary
-- restore it to `enabled: false` after testing
+Keep any such agent file temporary and remove it (or set `enabled: false`)
+after testing.
 
 ### Standard live-test procedure
 
@@ -159,7 +149,6 @@ For guard or coordination changes, verify:
 
 After live testing:
 
-- restore modified agent files
-- restore `~/.pi/agent/agents/test.md` to `enabled: false` if changed
+- restore or delete any temporary agent files created for the repro
 - remove temporary session dirs if no longer needed
 - clear test-only environment variables
