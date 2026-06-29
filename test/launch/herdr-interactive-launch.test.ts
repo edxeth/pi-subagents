@@ -291,7 +291,8 @@ describe("Herdr interactive launch parity", () => {
 		assert.match(log, /status server --json/);
 		assert.match(log, /pane current --current/);
 		assert.match(log, /tab create --workspace w1 --cwd .* --label \[path-session\] Path session child --no-focus/);
-		assert.match(log, /tab rename w1:t2 2: \[path-session\] Path session child/);
+		assert.match(log, /tab rename w1:t2 \[path-session\] Path session child/);
+		assert.doesNotMatch(log, /tab list --workspace w1/);
 		assert.match(log, /pane run w1:p2 /);
 		assert.doesNotMatch(log, /pane send-keys w1:p2 Enter/);
 		const launchScript = readHerdrRunScript(log);
@@ -367,7 +368,8 @@ describe("Herdr interactive launch parity", () => {
 		assert.match(log, /status server --json/);
 		assert.match(log, /pane current --current/);
 		assert.match(log, /tab create --workspace w1 --cwd .* --label \[forced-herdr\] Forced herdr child --no-focus/);
-		assert.match(log, /tab rename w1:t2 2: \[forced-herdr\] Forced herdr child/);
+		assert.match(log, /tab rename w1:t2 \[forced-herdr\] Forced herdr child/);
+		assert.doesNotMatch(log, /tab list --workspace w1/);
 		assert.match(log, /pane run w1:p2 /);
 		assert.doesNotMatch(log, /pane send-keys w1:p2 Enter/);
 		const launchScript = readHerdrRunScript(log);
@@ -481,7 +483,8 @@ describe("Herdr interactive launch parity", () => {
 
 		const log = readFileSync(logFile, "utf8");
 		assert.match(log, /tab create --workspace w1 --cwd .* --label \[capability-lifecycle\] Capability child --no-focus/);
-		assert.match(log, /tab rename w1:t2 2: \[capability-lifecycle\] Capability child/);
+		assert.match(log, /tab rename w1:t2 \[capability-lifecycle\] Capability child/);
+		assert.doesNotMatch(log, /tab list --workspace w1/);
 		assert.match(log, /pane run w1:p2 /);
 		assert.doesNotMatch(log, /pane send-keys w1:p2 Enter/);
 		const launchScript = readHerdrRunScript(log);

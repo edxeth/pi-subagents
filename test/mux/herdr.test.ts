@@ -333,6 +333,21 @@ describe("Herdr mux backend", () => {
 			assert.doesNotMatch(log, /pane split/);
 		});
 
+		it("creates child agent Herdr tab labels without positional numbering", () => {
+			const { logFile } = useFakeHerdr();
+			process.env.PI_SUBAGENT_MUX = "herdr";
+
+			assert.equal(createSurface("[scout] Explore auth implementation"), "w1:p2");
+
+			const log = readFileSync(logFile, "utf8");
+			assert.match(
+				log,
+				/tab create --workspace w1 --cwd .* --label \[scout\] Explore auth implementation --no-focus/,
+			);
+			assert.doesNotMatch(log, /tab list --workspace w1/);
+			assert.match(log, /tab rename w1:t2 \[scout\] Explore auth implementation/);
+		});
+
 		it("closes the created Herdr tab when tab creation returns no root pane", () => {
 			const { logFile } = useFakeHerdr("tab-created-without-pane");
 			process.env.PI_SUBAGENT_MUX = "herdr";
@@ -459,7 +474,7 @@ describe("Herdr mux backend", () => {
 			assert.match(log, /workspace rename w1 Current Workspace/);
 		});
 
-		it("prefixes Herdr child tab labels with the positional tab index", () => {
+		it("does not prefix Herdr child agent tab labels with the positional tab index", () => {
 			const { logFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
 			process.env.PI_SUBAGENT_NAME = "scout-child";
@@ -468,8 +483,8 @@ describe("Herdr mux backend", () => {
 			delete process.env.PI_SUBAGENT_NAME;
 
 			const log = readFileSync(logFile, "utf8");
-			assert.match(log, /tab list --workspace w1/);
-			assert.match(log, /tab rename w1:t1 1: \[scout\] Exploring auth implementation/);
+			assert.doesNotMatch(log, /tab list --workspace w1/);
+			assert.match(log, /tab rename w1:t1 \[scout\] Exploring auth implementation/);
 		});
 
 		it("ignores already-closed Herdr panes but propagates cleanup failures", () => {

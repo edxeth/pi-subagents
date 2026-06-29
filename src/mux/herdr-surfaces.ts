@@ -18,9 +18,18 @@ function assertSupportedHerdrSplitDirection(
 	);
 }
 
+function cleanNumberedHerdrTabTitle(title: string): string {
+	return title.replace(/^\d+:\s*/, "").trim();
+}
+
+function isAgentTabTitle(title: string): boolean {
+	return /^\[[^\]\r\n]+\](?:\s|$)/.test(cleanNumberedHerdrTabTitle(title));
+}
+
 function numberedHerdrTabTitle(title: string, tabNumber: number | undefined): string {
+	const cleanTitle = cleanNumberedHerdrTabTitle(title);
+	if (isAgentTabTitle(cleanTitle)) return cleanTitle;
 	if (tabNumber === undefined) return title;
-	const cleanTitle = title.replace(/^\d+:\s*/, "").trim();
 	return `${tabNumber}: ${cleanTitle}`;
 }
 
@@ -49,15 +58,10 @@ export function createHerdrSurface(name: string): string {
 		);
 	}
 
-	renameHerdrTab(
-		surface.tab.tabId,
-		numberedHerdrTabTitle(
-			name,
-			parentPane.workspaceId
-				? herdrTabPosition(parentPane.workspaceId, surface.tab.tabId)
-				: undefined,
-		),
-	);
+	const tabNumber = !isAgentTabTitle(name) && parentPane.workspaceId
+		? herdrTabPosition(parentPane.workspaceId, surface.tab.tabId)
+		: undefined;
+	renameHerdrTab(surface.tab.tabId, numberedHerdrTabTitle(name, tabNumber));
 	return surface.pane.paneId;
 }
 
@@ -97,6 +101,10 @@ export function renameHerdrCurrentTab(title: string): void {
 	const tabId = currentHerdrTabId();
 	if (!isSubagentProcess()) {
 		renameHerdrTab(tabId, title);
+		return;
+	}
+	if (isAgentTabTitle(title)) {
+		renameHerdrTab(tabId, cleanNumberedHerdrTabTitle(title));
 		return;
 	}
 	const workspaceId = currentHerdrWorkspaceId();
