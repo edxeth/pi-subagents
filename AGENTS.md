@@ -1,5 +1,7 @@
 # AGENTS.md
 
+At the start of every task, read `README.md` first. Then inspect the relevant code paths before planning or changing anything so you understand the task's scope and the issue being addressed.
+
 ## Project structure contract
 
 Keep the repository organized by ownership. Do not recreate a catch-all `src/subagents/` or generic `test/parts/` directory.
