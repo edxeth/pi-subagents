@@ -120,13 +120,16 @@ function resolveTaskSessionMode(
 	);
 }
 
-let lastAmbientRosterSignature: string | null = null;
-let pendingAmbientRoster: {
+let activeAmbientRoster: {
 	signature: string;
 	content: string;
-	entries: AgentListEntry[];
-	supersedes?: true;
 } | null = null;
+
+function appendAmbientRosterSystemPrompt(systemPrompt: string): string {
+	return activeAmbientRoster
+		? `${systemPrompt}\n\n${activeAmbientRoster.content}`
+		: systemPrompt;
+}
 
 function muxUnavailableResult(kind: "subagents" | "tab-title" = "subagents") {
 	const text = kind === "tab-title"
@@ -172,33 +175,30 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			pi.setActiveTools(allowed);
 		}
 
-		if (!shouldRegister(SUBAGENT_TOOL_NAME)) return;
+		// Reset the cached roster on every fresh session so module-level state does
+		// not leak between sessions. The reload path keeps the active roster when
+		// the signature is unchanged.
+		if (event.reason !== "reload") activeAmbientRoster = null;
 
-		// Reset the cached signature on every fresh session so module-level state
-		// does not leak between sessions. The reload path still uses the cached
-		// signature to avoid duplicating the notification within the same session.
-		if (event.reason !== "reload") {
-			lastAmbientRosterSignature = null;
+		if (!shouldRegister(SUBAGENT_TOOL_NAME)) {
+			activeAmbientRoster = null;
+			return;
 		}
 
 		const entries = getAgentListEntries(ctx.cwd);
 		const signature = getAgentListSignature(entries);
 		if (entries.length === 0) {
-			if (event.reason === "reload") pendingAmbientRoster = null;
-			lastAmbientRosterSignature = null;
+			activeAmbientRoster = null;
 			return;
 		}
 
-		if (signature === lastAmbientRosterSignature) {
-			pendingAmbientRoster = null;
+		if (signature === activeAmbientRoster?.signature) {
 			return;
 		}
 
-		pendingAmbientRoster = {
+		activeAmbientRoster = {
 			signature,
 			content: renderAgentListReminder(entries),
-			entries,
-			supersedes: event.reason === "reload" ? true : undefined,
 		};
 	});
 
@@ -261,40 +261,22 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 - Do not set the model parameter on sub-agents — their agent definitions handle model selection.`;
 
 	pi.on("before_agent_start", (event) => {
-		const rosterResult = pendingAmbientRoster
-			? {
-					message: {
-						customType: "subagent_roster",
-						content: pendingAmbientRoster.content,
-						display: false,
-						details: {
-							entries: pendingAmbientRoster.entries,
-							signature: pendingAmbientRoster.signature,
-							...(pendingAmbientRoster.supersedes
-								? { supersedes: true }
-								: {}),
-						},
-					},
-				}
-			: undefined;
-		if (pendingAmbientRoster) {
-			lastAmbientRosterSignature = pendingAmbientRoster.signature;
-			pendingAmbientRoster = null;
-		}
-
+		// Keep the roster as context-only system prompt text rather than a hidden
+		// custom message. Pi resets to the base prompt for each top-level agent run,
+		// so append the active roster every time before_agent_start fires.
 		if (!ORCHESTRATOR_MODE) {
-			return rosterResult;
+			if (!activeAmbientRoster) return undefined;
+			return { systemPrompt: appendAmbientRosterSystemPrompt(event.systemPrompt) };
 		}
 
 		// Orchestrator mode: replace system prompt, but preserve user's APPEND_SYSTEM.md
 		const appendPrompt = event.systemPromptOptions?.appendSystemPrompt;
-		const systemPrompt = appendPrompt
+		const baseSystemPrompt = appendPrompt
 			? `${ORCHESTRATOR_BASE_PROMPT}\n\n${appendPrompt}`
 			: ORCHESTRATOR_BASE_PROMPT;
 
 		return {
-			...(rosterResult ?? {}),
-			systemPrompt,
+			systemPrompt: appendAmbientRosterSystemPrompt(baseSystemPrompt),
 		};
 	});
 
