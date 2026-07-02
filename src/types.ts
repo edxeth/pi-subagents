@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import type { RunningSubagentBackend } from "./backend/types.ts";
 
 export type DeliveryState = "detached" | "awaited";
 export type ParentClosePolicy = "terminate" | "continue";
@@ -51,6 +52,8 @@ export interface SubagentResult {
 export interface CompletedSubagentResult extends SubagentResult {
 	id: string;
 	agent?: string;
+	backend?: RunningSubagentBackend;
+	paseoAgentId?: string;
 	mode: "interactive" | "background";
 	status: SubagentCompletionStatus;
 	deliveryState: DeliveryState;
@@ -69,6 +72,9 @@ export interface RunningSubagent {
 	title?: string;
 	agent?: string;
 	mode: "interactive" | "background";
+	backend?: RunningSubagentBackend;
+	paseoAgentId?: string;
+	paseoWorkspaceId?: string;
 	executionState: "starting" | "running";
 	deliveryState: DeliveryState;
 	parentClosePolicy: ParentClosePolicy;
@@ -111,6 +117,8 @@ export interface StartedSubagentToolDetails {
 	id?: string;
 	name?: string;
 	title?: string;
+	backend?: RunningSubagentBackend;
+	paseoAgentId?: string;
 	status?: string;
 	error?: string;
 	deliveryState?: string;

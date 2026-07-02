@@ -186,6 +186,7 @@ export async function launchInteractiveSubagent(
 		title: getSubagentDisplayTitle(params),
 		agent: params.agent,
 		mode: "interactive",
+		backend: "local-mux",
 		executionState: "running",
 		deliveryState: "detached",
 		parentClosePolicy: resolveSubagentParentClosePolicy(prepared.agentDefs),

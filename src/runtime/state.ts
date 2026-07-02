@@ -59,6 +59,8 @@ export function buildCompletedSubagentResult(
 		...result,
 		id: running.id,
 		agent: running.agent,
+		backend: running.backend,
+		paseoAgentId: running.paseoAgentId,
 		mode: running.mode,
 		status: getSubagentCompletionStatus(result, running),
 		deliveryState: running.deliveryState,

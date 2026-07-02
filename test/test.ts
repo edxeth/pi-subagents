@@ -18,6 +18,10 @@ import "./runtime/launch-results.test.ts";
 import "./runtime/result-router.test.ts";
 import "./runtime/state.test.ts";
 import "./runtime/elapsed-format.test.ts";
+import "./backend/resolve.test.ts";
+import "./paseo/launch.test.ts";
+import "./paseo/watch.test.ts";
+import "./paseo/stop-shutdown.test.ts";
 
 import "./agents/ambient-runtime-paths.test.ts";
 import "./launch/fork-session.test.ts";

@@ -70,6 +70,56 @@ describe("subagent launch result delivery", () => {
 		assert.equal(result.terminate, undefined);
 	});
 
+	it("does not terminate awaited launch results even after an async launch requested a coordinator-only turn", async () => {
+		const asyncRunning = {
+			id: "child-async-first",
+			name: "Async child",
+			task: "Do async work",
+			mode: "background" as const,
+			executionState: "running" as const,
+			deliveryState: "detached" as const,
+			parentClosePolicy: "terminate" as const,
+			blocking: false,
+			async: true,
+			startTime: Date.now(),
+			sessionFile: "/tmp/child-async-first.jsonl",
+		};
+
+		const asyncResult = (await getLaunchedSubagentResultForTest(
+			asyncRunning as any,
+		)) as any;
+		assert.equal(asyncResult.terminate, true);
+
+		const awaitedRunning = {
+			id: "child-awaited-second",
+			name: "Awaited child",
+			task: "Finish before returning",
+			mode: "background" as const,
+			executionState: "running" as const,
+			deliveryState: "detached" as const,
+			parentClosePolicy: "terminate" as const,
+			blocking: true,
+			async: false,
+			startTime: Date.now(),
+			sessionFile: "/tmp/child-awaited-second.jsonl",
+			completionPromise: Promise.resolve({
+				name: "Awaited child",
+				task: "Finish before returning",
+				summary: "done",
+				sessionFile: "/tmp/child-awaited-second.jsonl",
+				exitCode: 0,
+				elapsed: 1,
+			}),
+		};
+
+		setRunningSubagentForTest(awaitedRunning as any);
+		const awaitedResult = (await getLaunchedSubagentResultForTest(
+			awaitedRunning as any,
+		)) as any;
+		assert.equal((awaitedResult.details as any).deliveryState, "awaited");
+		assert.equal(awaitedResult.terminate, undefined);
+	});
+
 	it("does not defer same-turn detached async completion when coordinator-only turn stop is disabled", async () => {
 		process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN = "1";
 		const sent: Array<{ message: any; options: any }> = [];
