@@ -27,9 +27,6 @@ export interface PaseoLaunchRuntime {
 	getContextWindow(modelRef: string | undefined): number | undefined;
 }
 
-export const PASEO_CREATE_THEN_SEND_PROMPT_REASON =
-	"Create Paseo child agents before sending their initial prompt so the parent subagents track can show them while the provider is still loading.";
-
 function buildPaseoInitialMessageId(runId: string): string {
 	return `pi-subagents-${runId}-initial`;
 }
