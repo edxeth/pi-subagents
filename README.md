@@ -609,6 +609,7 @@ Live test knobs:
 - `PI_SUBAGENT_LIVE_MODEL`
 - `PI_SUBAGENT_KEEP_E2E_TMP`
 - `PI_SUBAGENT_LIVE_LOCK_PATH`
+- `PI_SUBAGENT_PROVIDER_RECOVERY_DELAYS_MS` — override the provider-error recovery backoff windows (comma-separated ms, e.g. `1500,3000,4500`) so a live Pi process can exercise the wait → nudge → kill path without waiting the full 30/60/90s. Defaults to the production `30000,60000,90000`.
 
 ## Testing
 

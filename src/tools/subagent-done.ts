@@ -8,9 +8,11 @@ import { createRequire } from "node:module";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	findLatestAssistantError,
+	isOperatorInput,
 	shouldAutoExitOnAgentEnd,
 	shouldMarkUserTookOver,
 } from "../auto-exit.ts";
+import { ProviderErrorRecoveryController, resolveProviderRecoveryDelaysMs } from "./provider-error-recovery.ts";
 import {
 	CALLER_PING_TOOL_NAME,
 	SUBAGENT_DONE_TOOL_NAME,
@@ -183,6 +185,32 @@ export default function (pi: ExtensionAPI) {
 
 	const subagentName = process.env.PI_SUBAGENT_NAME ?? "";
 	const subagentAgent = process.env.PI_SUBAGENT_AGENT ?? "";
+	const recoveryStatusKey = "pi-subagent-recovery";
+	const providerErrorRecovery = new ProviderErrorRecoveryController(
+		{
+			sendUserMessage: (message) => pi.sendUserMessage(message),
+			requestShutdown,
+			writeExitSignal,
+			getOutputTokens: () => outputTokens,
+			// Only interactive panes have a status bar worth updating; background
+			// `pi -p` children have no operator watching and no TUI footer.
+			showRecoveryCountdown: (ctx, message) => {
+				if (isInteractive) ctx.ui.setStatus(recoveryStatusKey, message);
+			},
+			clearRecoveryCountdown: (ctx) => {
+				if (isInteractive) ctx.ui.setStatus(recoveryStatusKey, undefined);
+			},
+		},
+		{ recoveryDelaysMs: resolveProviderRecoveryDelaysMs() },
+	);
+
+	// The latest provider error whose recovery window has not yet been superseded
+	// by a successful assistant turn. `session_shutdown` uses it to report a clean
+	// failure when the process is about to exit before a delayed nudge can fire
+	// (notably `pi -p` background children, which exit as soon as Pi's own retries
+	// finish).
+	let pendingProviderError: { errorMessage: string; stopReason: "error" } | null =
+		null;
 
 	function enforceDeniedTools() {
 		const deniedNames = getDeniedToolNames(autoExit);
@@ -243,15 +271,28 @@ export default function (pi: ExtensionAPI) {
 	pi.on("message_end", (event) => {
 		const message = event.message as {
 			role?: string;
+			stopReason?: string;
 			usage?: { output?: number };
 		};
-		if (message.role !== "assistant" || !message.usage) return;
+		if (message.role !== "assistant") return;
+		if (!message.usage) return;
 		outputTokens += message.usage.output ?? 0;
 	});
 
 	// Every subagent child reports Pi shutdown through the session sidecar. This is
 	// the primary lifecycle signal; mux/shell sentinels are only pane-death fallback.
+	// If the run ended on an unrecovered provider error, surface that instead of a
+	// phony "done" so the parent learns it was a failure, not a clean completion.
 	pi.on("session_shutdown", () => {
+		if (pendingProviderError) {
+			writeExitSignal({
+				type: "error",
+				errorMessage: pendingProviderError.errorMessage,
+				stopReason: pendingProviderError.stopReason,
+				outputTokens,
+			});
+			return;
+		}
 		writeExitSignal({ type: "done", outputTokens });
 	});
 
@@ -270,11 +311,16 @@ export default function (pi: ExtensionAPI) {
 		});
 
 		pi.on("input", (event) => {
+			// The recovery controller resends the task as `source: "extension"`
+			// nudges. Those must never read as operator takeover — treating them as
+			// manual input would reset the consecutive-failure chain and loop forever.
+			if (!isOperatorInput((event as { source?: unknown }).source)) return;
 			// Ignore the initial task message that starts an autonomous subagent.
 			// Inputs while streaming, queued follow-ups, or later manual prompts mean
 			// the operator is steering and the child should stay open for that turn.
 			if (!shouldMarkUserTookOver(agentStarted, event.streamingBehavior)) return;
 			userTookOver = true;
+			providerErrorRecovery.cancelPendingRecovery(true);
 		});
 
 		pi.on("agent_end", (event, ctx) => {
@@ -283,33 +329,27 @@ export default function (pi: ExtensionAPI) {
 			>[0];
 			const shouldExit = shouldAutoExitOnAgentEnd(messages);
 			if (!shouldExit || userTookOver) {
-				// Agent turn was aborted (Escape). Leave the session open for
-				// inspection or another prompt.
+				// Agent turn was aborted (Escape), or the operator is steering. Leave
+				// the session open and cancel any pending autonomous recovery action.
+				providerErrorRecovery.cancelPendingRecovery(userTookOver);
 				return;
 			}
 
-			// Surface stopReason: "error" (auto-retry exhausted, provider overload, etc.)
-			// via the .exit sidecar so the watcher reports a clear failure instead of
-			// mistaking the crash for a successful completion.
+			// Provider errors can arrive before Pi's own retry machinery is truly done:
+			// a retryable error fires an agent_end, then Pi retries and may fire a
+			// second agent_end that succeeds. Arm a recovery window instead of killing
+			// immediately; any later successful assistant turn cancels it. The parent
+			// only receives a failure once the window actually fires (interactive panes)
+			// or the process exits still unrecovered (background `pi -p` children).
 			const errorInfo = findLatestAssistantError(messages);
 			if (errorInfo) {
-				const sessionFile = process.env.PI_SUBAGENT_SESSION;
-				if (sessionFile) {
-					try {
-						writeFileSync(
-							`${sessionFile}.exit`,
-							JSON.stringify({
-								type: "error",
-								errorMessage: errorInfo.errorMessage,
-								stopReason: errorInfo.stopReason,
-							}),
-						);
-					} catch {
-						// Best effort — session-file fallback can still recover errorMessage.
-					}
-				}
+				pendingProviderError = errorInfo;
+				providerErrorRecovery.handleProviderError(errorInfo, ctx);
+				return;
 			}
 
+			pendingProviderError = null;
+			providerErrorRecovery.cancelPendingRecovery(true);
 			writeExitSignal({ type: "done", outputTokens });
 			requestShutdown(ctx);
 		});

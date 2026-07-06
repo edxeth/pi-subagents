@@ -1,5 +1,5 @@
 import { assert, describe, it } from "./support/index.ts";
-import { findLatestAssistantError } from "../src/auto-exit.ts";
+import { findLatestAssistantError, isOperatorInput } from "../src/auto-exit.ts";
 
 describe("findLatestAssistantError", () => {
 	it("returns error info when last assistant has stopReason=error with errorMessage", () => {
@@ -57,5 +57,17 @@ describe("findLatestAssistantError", () => {
 			{ role: "toolResult", content: [] },
 		];
 		assert.equal(findLatestAssistantError(messages), null);
+	});
+});
+
+describe("isOperatorInput", () => {
+	it("treats interactive and rpc input as operator steering", () => {
+		assert.equal(isOperatorInput("interactive"), true);
+		assert.equal(isOperatorInput("rpc"), true);
+		assert.equal(isOperatorInput(undefined), true);
+	});
+
+	it("ignores extension-originated input so recovery nudges do not loop", () => {
+		assert.equal(isOperatorInput("extension"), false);
 	});
 });

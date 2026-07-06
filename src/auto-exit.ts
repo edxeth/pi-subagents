@@ -37,22 +37,35 @@ export function shouldMarkUserTookOver(
 	return agentStarted || streamingBehavior === "steer" || streamingBehavior === "followUp";
 }
 
+/**
+ * Whether an `input` event represents the operator (not the extension itself).
+ *
+ * pi-subagents' provider-error recovery resends the task as
+ * `pi.sendUserMessage(...)`, which Pi delivers with `source: "extension"`. That
+ * nudge is autonomous recovery, not operator steering — treating it as takeover
+ * would cancel the recovery and reset the consecutive-failure chain on every
+ * nudge, looping forever instead of escalating to the kill.
+ */
+export function isOperatorInput(source: unknown): boolean {
+	return source !== "extension";
+}
+
 type AgentMessageLike = {
 	role?: string;
 	stopReason?: string;
 };
 
 /**
- * Decide whether a subagent should auto-exit after an agent turn ends.
+ * Decide whether an auto-exit subagent reached a terminal agent turn.
  *
  * Manual input should not strand an auto-exit subagent. If the latest agent
  * turn completed normally, close the session. Escape/abort still leaves it
  * open for inspection or another prompt.
  *
- * `stopReason: "error"` (e.g. exhausted retries on a provider overload) also
- * returns true — we want to shut down so the parent is woken up — but the
- * caller should pair this with findLatestAssistantError() so the parent
- * learns it was an error, not a clean completion.
+ * `stopReason: "error"` also returns true because it is terminal from the
+ * current agent turn's point of view. The child-side lifecycle code must still
+ * let Pi's provider retries and pi-subagents recovery backoff run before it
+ * actually shuts the child down.
  */
 export function shouldAutoExitOnAgentEnd(
 	_messages: AgentMessageLike[] | undefined,

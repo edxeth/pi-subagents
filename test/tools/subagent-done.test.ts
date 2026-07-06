@@ -585,6 +585,127 @@ describe("subagent-done.ts", () => {
 		});
 	});
 
+	describe("provider-error recovery wiring (integration)", () => {
+		// These drive the REAL subagent-done extension with a realistic flaky-provider
+		// message sequence. The original infinite-nudge bug lived in this wiring
+		// (message_end resetting the failure chain), not in the isolated controller,
+		// so controller-only tests could not catch it. These can.
+		function loadRecoveryChild() {
+			const handlers = new Map<string, any>();
+			const sentMessages: string[] = [];
+			const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+			const dir = createTestDir();
+			const sessionFile = join(dir, "child.jsonl");
+			writeFileSync(sessionFile, "");
+
+			process.env.PI_SUBAGENT_SESSION = sessionFile;
+			process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+			process.env.PI_SUBAGENT_SURFACE = "fake-pane"; // interactive
+			process.env.PI_SUBAGENT_PROVIDER_RECOVERY_DELAYS_MS = "10,20,30";
+
+			subagentDoneExtension({
+				getAllTools: () => [],
+				getActiveTools: () => [],
+				setActiveTools() {},
+				registerTool(definition: { name: string }) {
+					return definition;
+				},
+				on(event: string, handler: any) {
+					handlers.set(event, handler);
+				},
+				sendUserMessage(message: string) {
+					sentMessages.push(message);
+				},
+				registerShortcut() {},
+			} as any);
+
+			const ctx = {
+				isIdle: () => true,
+				ui: {
+					setStatus: (key: string, text: string | undefined) =>
+						statusUpdates.push({ key, text }),
+					},
+				shutdown() {},
+			};
+			return { handlers, sentMessages, statusUpdates, sessionFile, ctx, dir };
+		}
+
+		function cleanup(dir: string) {
+			delete process.env.PI_SUBAGENT_SESSION;
+			delete process.env.PI_SUBAGENT_AUTO_EXIT;
+			delete process.env.PI_SUBAGENT_SURFACE;
+			delete process.env.PI_SUBAGENT_PROVIDER_RECOVERY_DELAYS_MS;
+			rmSync(dir, { recursive: true, force: true });
+		}
+
+		it("does not loop when the agent makes intermittent progress before each error", async () => {
+			const h = loadRecoveryChild();
+			try {
+				// Failed run 1: a successful tool call, THEN the connection error.
+				h.handlers.get("message_end")?.({
+					message: { role: "assistant", stopReason: "toolUse", usage: { output: 3 } },
+				});
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+					h.ctx,
+				);
+				await sleep(20); // window 1 (10ms) fires -> nudge
+				assert.deepEqual(h.sentMessages, ["continue"]);
+
+				// Failed run 2: again a successful tool call, then error. Pre-fix this
+				// reset the chain and looped forever; it must now escalate.
+				h.handlers.get("message_end")?.({
+					message: { role: "assistant", stopReason: "toolUse", usage: { output: 3 } },
+				});
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+					h.ctx,
+				);
+				await sleep(30); // window 2 (20ms)
+				assert.deepEqual(h.sentMessages, ["continue", "continue"]);
+
+				// Failed run 3 -> kill (no third nudge, error sidecar written).
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+					h.ctx,
+				);
+				await sleep(40); // window 3 (30ms) -> kill
+
+				assert.equal(h.sentMessages.length, 2, "must nudge exactly twice, never loop");
+				const exit = JSON.parse(readFileSync(`${h.sessionFile}.exit`, "utf8"));
+				assert.equal(exit.type, "error");
+				assert.match(exit.errorMessage, /exhausted after 3/);
+			} finally {
+				cleanup(h.dir);
+			}
+		});
+
+		it("resets and exits cleanly when a nudge leads to a successful completion", async () => {
+			const h = loadRecoveryChild();
+			try {
+				// Failed run -> nudge.
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+					h.ctx,
+				);
+				await sleep(20);
+				assert.deepEqual(h.sentMessages, ["continue"]);
+
+				// Recovered run completes normally -> reset + done sidecar, no further nudge.
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] }] },
+					h.ctx,
+				);
+				await sleep(10);
+				const exit = JSON.parse(readFileSync(`${h.sessionFile}.exit`, "utf8"));
+				assert.equal(exit.type, "done");
+				assert.equal(h.sentMessages.length, 1);
+			} finally {
+				cleanup(h.dir);
+			}
+		});
+	});
+
 	describe("set_tab_title registration", () => {
 		function loadChildExtension() {
 			const tools = new Map<string, any>();
