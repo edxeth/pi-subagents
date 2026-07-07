@@ -25,11 +25,13 @@
     "test:live-herdr-pi": "node scripts/test-live-herdr-pi.mjs"
   },
   "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.79.0",
     "@earendil-works/pi-coding-agent": ">=0.79.0",
     "@earendil-works/pi-tui": ">=0.79.0",
     "typebox": "*"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "^0.79.10",
     "@earendil-works/pi-coding-agent": "^0.79.10",
     "@earendil-works/pi-tui": "^0.79.10",
     "@types/node": "^25.9.1",

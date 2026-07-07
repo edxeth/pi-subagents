@@ -5,6 +5,7 @@ import {
 	formatCountdown,
 	formatRecoveryExhaustedMessage,
 	PROVIDER_ERROR_RECOVERY_DELAYS_MS,
+	MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
 	ProviderErrorRecoveryController,
 	resolveProviderRecoveryDelaysMs,
 } from "../../src/tools/provider-error-recovery.ts";
@@ -54,7 +55,7 @@ function createHarness(options: { idle?: boolean } = {}) {
 		},
 		error(message = "Connection error.") {
 			controller.handleProviderError(
-				{ stopReason: "error", errorMessage: message },
+				{ stopReason: "error", errorMessage: message, isRetryable: true, recoveryKind: "provider" },
 				ctx,
 			);
 		},
@@ -70,8 +71,16 @@ function createHarness(options: { idle?: boolean } = {}) {
 		});
 
 		it("parses a comma-separated override for live tests", () => {
+			assert.deepEqual(resolveProviderRecoveryDelaysMs("16000,17000,18000"), [
+				16000, 17000, 18000,
+			]);
+		});
+
+		it("clamps override delays above Pi's default auto-retry backoff window", () => {
 			assert.deepEqual(resolveProviderRecoveryDelaysMs("1500,3000,4500"), [
-				1500, 3000, 4500,
+				MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
+				MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
+				MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
 			]);
 		});
 
@@ -246,6 +255,68 @@ function createHarness(options: { idle?: boolean } = {}) {
 			h.setIdle(true);
 			mock.timers.tick(5);
 			assert.deepEqual(h.sentMessages, ["continue"]);
+		} finally {
+			mock.timers.reset();
+		}
+	});
+
+	it("cancels delayed idle checks without touching a stale context", () => {
+		mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+		try {
+			let stale = false;
+			const h = createHarness();
+			const ctx = {
+				isIdle() {
+					if (stale) throw new Error("stale context");
+					return true;
+				},
+				ui: { setStatus() {} },
+			} as unknown as ExtensionContext;
+
+			h.controller.handleProviderError(
+				{
+					stopReason: "error",
+					errorMessage: "Connection error.",
+					isRetryable: true,
+					recoveryKind: "provider",
+				},
+				ctx,
+			);
+			stale = true;
+			h.controller.cancelPendingRecovery();
+
+			assert.doesNotThrow(() => mock.timers.tick(30));
+			assert.deepEqual(h.sentMessages, []);
+			assert.deepEqual(h.exitSignals, []);
+		} finally {
+			mock.timers.reset();
+		}
+	});
+
+	it("treats stale context during idle polling as a cancelled recovery", () => {
+		mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+		try {
+			const h = createHarness();
+			const ctx = {
+				isIdle() {
+					throw new Error("stale context");
+				},
+				ui: { setStatus() {} },
+			} as unknown as ExtensionContext;
+
+			h.controller.handleProviderError(
+				{
+					stopReason: "error",
+					errorMessage: "Connection error.",
+					isRetryable: true,
+					recoveryKind: "provider",
+				},
+				ctx,
+			);
+
+			assert.doesNotThrow(() => mock.timers.tick(30));
+			assert.deepEqual(h.sentMessages, []);
+			assert.deepEqual(h.exitSignals, []);
 		} finally {
 			mock.timers.reset();
 		}

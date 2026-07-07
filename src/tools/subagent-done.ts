@@ -186,6 +186,8 @@ export default function (pi: ExtensionAPI) {
 	const subagentName = process.env.PI_SUBAGENT_NAME ?? "";
 	const subagentAgent = process.env.PI_SUBAGENT_AGENT ?? "";
 	const recoveryStatusKey = "pi-subagent-recovery";
+	const piRecoveryNoCompactionGraceMs = 180_000;
+	const piRecoveryCompactionTimeoutMs = 180_000;
 	const providerErrorRecovery = new ProviderErrorRecoveryController(
 		{
 			sendUserMessage: (message) => pi.sendUserMessage(message),
@@ -211,14 +213,61 @@ export default function (pi: ExtensionAPI) {
 	// finish).
 	let pendingProviderError: { errorMessage: string; stopReason: "error" } | null =
 		null;
+	type PendingPiRecovery = {
+		token: number;
+		errorMessage: string;
+		stopReason: "error";
+		ctx: Parameters<typeof requestShutdown>[0];
+		timer?: ReturnType<typeof setTimeout>;
+	};
+	let pendingPiRecovery: PendingPiRecovery | null = null;
+	let piRecoveryGeneration = 0;
+
+	function cancelPendingPiRecovery() {
+		piRecoveryGeneration++;
+		if (pendingPiRecovery?.timer) clearTimeout(pendingPiRecovery.timer);
+		pendingPiRecovery = null;
+	}
+
+	function failPendingPiRecovery(token: number) {
+		const pending = pendingPiRecovery;
+		if (!pending || pending.token !== token) return;
+		pendingPiRecovery = null;
+		writeExitSignal({
+			type: "error",
+			errorMessage: pending.errorMessage,
+			stopReason: pending.stopReason,
+			outputTokens,
+		});
+		requestShutdown(pending.ctx);
+	}
+
+	function armPiRecoveryFailureTimer(delayMs: number) {
+		if (!pendingPiRecovery) return;
+		const token = pendingPiRecovery.token;
+		if (pendingPiRecovery.timer) clearTimeout(pendingPiRecovery.timer);
+		const timer = setTimeout(() => failPendingPiRecovery(token), delayMs);
+		timer.unref?.();
+		pendingPiRecovery.timer = timer;
+	}
+
+	function deferToPiNativeRecovery(
+		errorInfo: { errorMessage: string; stopReason: "error" },
+		ctx: Parameters<typeof requestShutdown>[0],
+	) {
+		cancelPendingPiRecovery();
+		pendingPiRecovery = { token: piRecoveryGeneration, ...errorInfo, ctx };
+		armPiRecoveryFailureTimer(piRecoveryNoCompactionGraceMs);
+	}
 
 	function enforceDeniedTools() {
-		const deniedNames = getDeniedToolNames(autoExit);
-		const allowedTools = filterToolNames(pi.getActiveTools(), deniedNames);
 		try {
+			const deniedNames = getDeniedToolNames(autoExit);
+			const allowedTools = filterToolNames(pi.getActiveTools(), deniedNames);
 			pi.setActiveTools(allowedTools);
 		} catch {
-			// Tools may not be ready yet
+			// Tools may not be ready yet, or the extension context may be stale after
+			// session shutdown/reload while delayed startup guards are still pending.
 		}
 	}
 
@@ -284,6 +333,8 @@ export default function (pi: ExtensionAPI) {
 	// If the run ended on an unrecovered provider error, surface that instead of a
 	// phony "done" so the parent learns it was a failure, not a clean completion.
 	pi.on("session_shutdown", () => {
+		providerErrorRecovery.cancelPendingRecovery();
+		cancelPendingPiRecovery();
 		if (pendingProviderError) {
 			writeExitSignal({
 				type: "error",
@@ -294,6 +345,24 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 		writeExitSignal({ type: "done", outputTokens });
+	});
+
+	pi.on("session_before_compact", (event) => {
+		const pending = pendingPiRecovery;
+		if (!pending) return;
+		if (event.reason !== "overflow" || !event.willRetry) return;
+		armPiRecoveryFailureTimer(piRecoveryCompactionTimeoutMs);
+		event.signal.addEventListener(
+			"abort",
+			() => failPendingPiRecovery(pending.token),
+			{ once: true },
+		);
+	});
+
+	pi.on("session_compact", (event) => {
+		if (!pendingPiRecovery) return;
+		if (event.reason !== "overflow" || !event.willRetry) return;
+		cancelPendingPiRecovery();
 	});
 
 	// Auto-exit: when the agent loop ends, shut down automatically.
@@ -311,9 +380,9 @@ export default function (pi: ExtensionAPI) {
 		});
 
 		pi.on("input", (event) => {
-			// The recovery controller resends the task as `source: "extension"`
-			// nudges. Those must never read as operator takeover — treating them as
-			// manual input would reset the consecutive-failure chain and loop forever.
+			// The recovery controller sends `source: "extension"` nudges. Those
+			// must never read as operator takeover — treating them as manual input
+			// would reset the consecutive-failure chain and loop forever.
 			if (!isOperatorInput((event as { source?: unknown }).source)) return;
 			// Ignore the initial task message that starts an autonomous subagent.
 			// Inputs while streaming, queued follow-ups, or later manual prompts mean
@@ -321,6 +390,7 @@ export default function (pi: ExtensionAPI) {
 			if (!shouldMarkUserTookOver(agentStarted, event.streamingBehavior)) return;
 			userTookOver = true;
 			providerErrorRecovery.cancelPendingRecovery(true);
+			cancelPendingPiRecovery();
 		});
 
 		pi.on("agent_end", (event, ctx) => {
@@ -332,6 +402,7 @@ export default function (pi: ExtensionAPI) {
 				// Agent turn was aborted (Escape), or the operator is steering. Leave
 				// the session open and cancel any pending autonomous recovery action.
 				providerErrorRecovery.cancelPendingRecovery(userTookOver);
+				cancelPendingPiRecovery();
 				return;
 			}
 
@@ -344,12 +415,37 @@ export default function (pi: ExtensionAPI) {
 			const errorInfo = findLatestAssistantError(messages);
 			if (errorInfo) {
 				pendingProviderError = errorInfo;
+				if (errorInfo.recoveryKind === "pi") {
+					// Context overflow is recoverable by Pi's native compaction path,
+					// which runs after extension agent_end handlers. Do not enqueue a
+					// generic "continue" nudge here: ctx.isIdle() can become true while
+					// compaction is still in flight, racing the native compact-and-retry.
+					// If Pi does not start or finish that native path, fail explicitly so
+					// interactive auto-exit children do not stay open forever.
+					providerErrorRecovery.cancelPendingRecovery();
+					deferToPiNativeRecovery(errorInfo, ctx);
+					return;
+				}
+				if (errorInfo.recoveryKind === "none") {
+					providerErrorRecovery.cancelPendingRecovery();
+					cancelPendingPiRecovery();
+					writeExitSignal({
+						type: "error",
+						errorMessage: errorInfo.errorMessage,
+						stopReason: errorInfo.stopReason,
+						outputTokens,
+					});
+					requestShutdown(ctx);
+					return;
+				}
+				cancelPendingPiRecovery();
 				providerErrorRecovery.handleProviderError(errorInfo, ctx);
 				return;
 			}
 
 			pendingProviderError = null;
 			providerErrorRecovery.cancelPendingRecovery(true);
+			cancelPendingPiRecovery();
 			writeExitSignal({ type: "done", outputTokens });
 			requestShutdown(ctx);
 		});

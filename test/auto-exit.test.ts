@@ -1,5 +1,10 @@
 import { assert, describe, it } from "./support/index.ts";
-import { findLatestAssistantError, isOperatorInput } from "../src/auto-exit.ts";
+import {
+	findLatestAssistantError,
+	isOperatorInput,
+	isRetryableProviderErrorMessage,
+	shouldDeferErrorForPiRecovery,
+} from "../src/auto-exit.ts";
 
 describe("findLatestAssistantError", () => {
 	it("returns error info when last assistant has stopReason=error with errorMessage", () => {
@@ -10,6 +15,8 @@ describe("findLatestAssistantError", () => {
 		];
 		assert.deepEqual(findLatestAssistantError(messages), {
 			errorMessage: "Anthropic 529 Overloaded",
+			isRetryable: true,
+			recoveryKind: "provider",
 			stopReason: "error",
 		});
 	});
@@ -33,6 +40,8 @@ describe("findLatestAssistantError", () => {
 		const info = findLatestAssistantError(messages);
 		assert.ok(info);
 		assert.equal(info!.stopReason, "error");
+		assert.equal(info!.isRetryable, false);
+		assert.equal(info!.recoveryKind, "none");
 		assert.match(info!.errorMessage, /stopReason=error/);
 	});
 
@@ -57,6 +66,53 @@ describe("findLatestAssistantError", () => {
 			{ role: "toolResult", content: [] },
 		];
 		assert.equal(findLatestAssistantError(messages), null);
+	});
+
+	it("marks context overflow errors for Pi-native recovery only", () => {
+		const messages = [
+			{
+				role: "assistant",
+				provider: "openai",
+				model: "gpt-test",
+				stopReason: "error",
+				errorMessage: "Your input exceeds the context window of this model",
+			},
+		];
+
+		assert.deepEqual(findLatestAssistantError(messages), {
+			errorMessage: "Your input exceeds the context window of this model",
+			isRetryable: true,
+			recoveryKind: "pi",
+			stopReason: "error",
+		});
+	});
+});
+
+describe("isRetryableProviderErrorMessage", () => {
+	it("recognizes transient provider and transport failures", () => {
+		assert.equal(isRetryableProviderErrorMessage("Connection error."), true);
+		assert.equal(isRetryableProviderErrorMessage("HTTP 429 rate limit"), true);
+		assert.equal(isRetryableProviderErrorMessage("service unavailable"), true);
+		assert.equal(isRetryableProviderErrorMessage("stream ended before message_stop"), true);
+	});
+
+	it("rejects permanent quota, billing, and auth failures", () => {
+		assert.equal(isRetryableProviderErrorMessage("insufficient_quota"), false);
+		assert.equal(isRetryableProviderErrorMessage("Monthly usage limit reached"), false);
+		assert.equal(isRetryableProviderErrorMessage("invalid API key"), false);
+	});
+});
+
+describe("shouldDeferErrorForPiRecovery", () => {
+	it("recognizes Pi context-overflow messages that should reach compaction", () => {
+		assert.equal(
+			shouldDeferErrorForPiRecovery({
+				role: "assistant",
+				stopReason: "error",
+				errorMessage: "Requested token count exceeds the model's maximum context length of 131072 tokens",
+			}),
+			true,
+		);
 	});
 });
 

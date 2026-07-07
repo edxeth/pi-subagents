@@ -2,14 +2,17 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SubagentErrorInfo } from "../auto-exit.ts";
 
 export const PROVIDER_ERROR_RECOVERY_DELAYS_MS = [30_000, 60_000, 90_000] as const;
-export const PROVIDER_ERROR_RECOVERY_NUDGE = "continue";
+export const MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS = 10_000;
+const PROVIDER_ERROR_RECOVERY_NUDGE = "continue";
 
 /**
  * Override the recovery backoff windows. Mainly a live-test/debug knob so a real
  * Pi process can exercise the wait -> nudge -> kill path without waiting the full
- * 30/60/90s. Comma-separated milliseconds, e.g. "1500,3000,4500".
+ * 30/60/90s. Comma-separated milliseconds, e.g. "10000,11000,12000".
+ * Values below MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS are clamped so live child
+ * recovery cannot race Pi's own default auto-retry backoff.
  */
-export const PROVIDER_ERROR_RECOVERY_DELAYS_ENV =
+const PROVIDER_ERROR_RECOVERY_DELAYS_ENV =
 	"PI_SUBAGENT_PROVIDER_RECOVERY_DELAYS_MS";
 
 export function resolveProviderRecoveryDelaysMs(
@@ -19,7 +22,8 @@ export function resolveProviderRecoveryDelaysMs(
 	const parsed = raw
 		.split(",")
 		.map((part) => Number.parseInt(part.trim(), 10))
-		.filter((ms) => Number.isFinite(ms) && ms >= 0);
+		.filter((ms) => Number.isFinite(ms) && ms >= 0)
+		.map((ms) => Math.max(ms, MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS));
 	return parsed.length > 0 ? parsed : PROVIDER_ERROR_RECOVERY_DELAYS_MS;
 }
 
@@ -139,7 +143,14 @@ export class ProviderErrorRecoveryController {
 		action: () => void,
 	): void {
 		if (!this.isCurrent(token)) return;
-		if (ctx.isIdle()) {
+		let isIdle = false;
+		try {
+			isIdle = ctx.isIdle();
+		} catch {
+			this.cancelPendingRecovery();
+			return;
+		}
+		if (isIdle) {
 			action();
 			return;
 		}
@@ -178,10 +189,14 @@ export class ProviderErrorRecoveryController {
 		this.countdownCtx = ctx;
 		let remaining = Math.max(1, Math.ceil(delayMs / 1000));
 		const paint = () => {
-			this.runtime.showRecoveryCountdown(
-				ctx,
-				formatCountdown(failureNumber, remaining, this.recoveryDelaysMs.length),
-			);
+			try {
+				this.runtime.showRecoveryCountdown(
+					ctx,
+					formatCountdown(failureNumber, remaining, this.recoveryDelaysMs.length),
+				);
+			} catch {
+				this.cancelPendingRecovery();
+			}
 		};
 		const interval = setInterval(() => {
 			remaining = Math.max(0, remaining - 1);
@@ -199,7 +214,12 @@ export class ProviderErrorRecoveryController {
 		this.countdown = undefined;
 		const ctx = this.countdownCtx;
 		this.countdownCtx = undefined;
-		if (ctx) this.runtime.clearRecoveryCountdown(ctx);
+		if (!ctx) return;
+		try {
+			this.runtime.clearRecoveryCountdown(ctx);
+		} catch {
+			// Context may already be stale after session shutdown/reload.
+		}
 	}
 }
 
