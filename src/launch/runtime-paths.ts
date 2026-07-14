@@ -51,7 +51,11 @@ export function resolveSubagentRuntimePaths(
 	const rawCwd = params.cwd ?? agentDefs?.cwd ?? null;
 	const cwdBase = params.cwd ? parentCwd : (agentDefs?.cwdBase ?? parentCwd);
 	const effectiveCwd = rawCwd ? resolveSubagentCwd(rawCwd, cwdBase) : null;
-	const localAgentConfigDir = getEnvAgentConfigDir(agentDefs?.env) ?? resolveSubagentConfigDir(rawCwd, cwdBase);
+	// Use parentCwd for local .pi/agent detection when no explicit cwd is set.
+	// Global agents have cwdBase=~/.pi/agent (config dir); using it for detection
+	// can falsely match a nested .pi/agent/ inside it, picking up the wrong config.
+	const configCheckBase = rawCwd ? cwdBase : parentCwd;
+	const localAgentConfigDir = getEnvAgentConfigDir(agentDefs?.env) ?? resolveSubagentConfigDir(rawCwd, configCheckBase);
 	const effectiveAgentConfigDir = localAgentConfigDir ?? getAgentConfigDir();
 	const targetCwdForSession = effectiveCwd ?? parentCwd;
 	return {

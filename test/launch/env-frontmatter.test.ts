@@ -81,6 +81,29 @@ describe("env frontmatter field", () => {
 		assert.equal(paths.sessionDir, join(childConfigDir, "sessions", `--${dir.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`));
 	});
 
+	it("global agent: does not pick up nested .pi/agent/ inside its own cwdBase", () => {
+		const dir = createTestDir();
+		const configDir = join(dir, "global-config");
+		// Simulate the stale nested dir: ~/.pi/agent/.pi/agent/
+		const nestedDir = join(configDir, ".pi", "agent");
+		mkdirSync(nestedDir, { recursive: true });
+		const parentCwd = join(dir, "project");
+		mkdirSync(parentCwd, { recursive: true });
+		const parentSessionDir = join(dir, "parent-sessions");
+
+		// Global agent: cwdBase = configDir, no explicit cwd
+		const paths = resolveSubagentRuntimePathsForTest(
+			{},
+			{ cwdBase: configDir },
+			parentCwd,
+			parentSessionDir,
+		);
+
+		// Should NOT resolve to the nested dir inside configDir
+		assert.equal(paths.localAgentConfigDir, null);
+		assert.equal(paths.sessionDir, parentSessionDir);
+	});
+
 	it("returns empty env record when no env field is set", () => {
 		const env = getBaseSubagentEnvVarsForTest(null);
 		assert.equal(env["FOO"], undefined);
