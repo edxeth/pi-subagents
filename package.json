@@ -1,7 +1,7 @@
 {
   "name": "pi-subagents",
   "version": "2.5.3",
-  "description": "Serious subagent runtime for pi with interactive and background child agents",
+  "description": "Power-user multi-agent framework for Pi: named agents, interactive sessions via Herdr/cmux/tmux/zellij/WezTerm, background workers, async/sync coordination, fork/resume, child-to-parent messaging, orchestrator mode, and a live TUI",
   "keywords": [
     "pi-package"
   ],
