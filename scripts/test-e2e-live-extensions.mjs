@@ -28,6 +28,11 @@ const agentsDir = join(configDir, "agents");
 const extensionsDir = join(configDir, "extensions");
 const allowedExtensionFile = join(extensionsDir, "live-e2e-allowed.ts");
 const blockedExtensionFile = join(extensionsDir, "live-e2e-blocked.ts");
+const managedPackageName = "pi-subagents-live-managed-extension";
+const managedPackageRoot = join(configDir, "npm", "node_modules", managedPackageName);
+const managedExtensionFile = join(managedPackageRoot, "src", "index.ts");
+const managedGitSource = "git:github.com/nicobailon/visual-explainer";
+const managedGitRoot = join(configDir, "git", "github.com", "nicobailon", "visual-explainer");
 const snapshotsDir = join(tmpRoot, "snapshots");
 // Always source from the real user config.
 const sourceConfigDir = join(homedir(), ".pi", "agent");
@@ -37,7 +42,9 @@ const prompt = [
   "Use exactly this sequence.",
   'Call subagent with name "live-default-child", agent "live-e2e-ext-default", title "Live default extension check", task "Follow your exact built-in instructions."., and async false.',
   'Call subagent with name "live-allow-child", agent "live-e2e-ext-allow", title "Live allow extension check", task "Follow your exact built-in instructions."., and async false.',
-  'After both tool calls return, reply with exactly "LIVE_E2E_EXTENSIONS_OK" and nothing else.',
+  'Call subagent with name "live-managed-child", agent "live-e2e-ext-managed", title "Live managed extension check", task "Follow your exact built-in instructions."., and async false.',
+  'Call subagent with name "live-git-child", agent "live-e2e-ext-git", title "Live Git extension check", task "Follow your exact built-in instructions."., and async false.',
+  'After all four tool calls return, reply with exactly "LIVE_E2E_EXTENSIONS_OK" and nothing else.',
   "Do not call any other tools.",
 ].join(" ");
 
@@ -49,6 +56,25 @@ for (const name of ["auth.json", "settings.json", "models.json", "mcp.json"]) {
   const source = join(sourceConfigDir, name);
   if (existsSync(source)) copyFileSync(source, join(configDir, name));
 }
+const settingsPath = join(configDir, "settings.json");
+const settings = existsSync(settingsPath)
+  ? JSON.parse(readFileSync(settingsPath, "utf8"))
+  : {};
+const configuredSources = new Set((settings.packages ?? []).map((entry) =>
+  typeof entry === "string" ? entry : entry.source));
+settings.packages = [...(settings.packages ?? []), `npm:${managedPackageName}`];
+if (!configuredSources.has(managedGitSource)) settings.packages.push(managedGitSource);
+writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+mkdirSync(dirname(managedExtensionFile), { recursive: true });
+writeFileSync(
+  join(managedPackageRoot, "package.json"),
+  JSON.stringify({
+    name: managedPackageName,
+    version: "9.9.9",
+    pi: { extensions: ["src/index.ts"] },
+  }, null, 2),
+  "utf8",
+);
 
 writeFileSync(
   join(agentsDir, "live-e2e-ext-default.md"),
@@ -58,6 +84,41 @@ writeFileSync(
 writeFileSync(
   join(agentsDir, "live-e2e-ext-allow.md"),
   `---\nname: live-e2e-ext-allow\ndescription: Live extensions allowlist smoke test agent.\nthinking: high\nauto-exit: true\nmode: background\nasync: false\nspawning: false\nextensions: ./extensions/live-e2e-allowed.ts\n---\n\nCall \`allowed_probe_tool\` exactly once.\nThen reply with exactly \`LIVE_EXT_ALLOW_OK\`.`,
+  "utf8",
+);
+
+writeFileSync(
+  join(agentsDir, "live-e2e-ext-managed.md"),
+  `---\nname: live-e2e-ext-managed\ndescription: Live managed extension reuse smoke test agent.\nthinking: high\nauto-exit: true\nmode: background\nasync: false\nspawning: false\nextensions: npm:${managedPackageName}\n---\n\nCall \`managed_probe_tool\` exactly once.\nThen reply with exactly \`LIVE_EXT_MANAGED_OK\`.`,
+  "utf8",
+);
+
+writeFileSync(
+  join(agentsDir, "live-e2e-ext-git.md"),
+  `---\nname: live-e2e-ext-git\ndescription: Live managed Git extension reuse smoke test agent.\nthinking: high\nauto-exit: true\nmode: background\nasync: false\nspawning: false\nextensions: ${managedGitSource}\ntools: visual_explainer\n---\n\nCall \`visual_explainer\` exactly once with action \`prepare\`, topic \`Managed Git extension smoke\`, and goal \`Prove the configured Git extension loaded\`. Then reply with exactly \`LIVE_EXT_GIT_OK\`.`,
+  "utf8",
+);
+
+writeFileSync(
+  managedExtensionFile,
+  `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "managed_probe_tool",
+    label: "Managed Probe Tool",
+    description: "Proves the configured managed package was reused",
+    parameters: Type.Object({}),
+    async execute() {
+      return {
+        content: [{ type: "text", text: "MANAGED_PACKAGE_VERSION_9.9.9" }],
+        details: {},
+      };
+    },
+  });
+
+}
+`,
   "utf8",
 );
 
@@ -244,8 +305,8 @@ try {
     "subagent",
     (message) => message.details?.status === "completed" && !!message.details?.sessionFile,
   );
-  if (subagentResults.length !== 2) {
-    throw new Error(`Expected 2 subagent tool results, got ${subagentResults.length}.`);
+  if (subagentResults.length !== 4) {
+    throw new Error(`Expected 4 subagent tool results, got ${subagentResults.length}.`);
   }
 
   const byName = new Map();
@@ -265,17 +326,38 @@ try {
 
   const defaultDetails = byName.get("live-default-child");
   const allowDetails = byName.get("live-allow-child");
-  if (!defaultDetails || !allowDetails) {
+  const managedDetails = byName.get("live-managed-child");
+  const gitDetails = byName.get("live-git-child");
+  if (!defaultDetails || !allowDetails || !managedDetails || !gitDetails) {
     throw new Error(`Missing expected child results. Names seen: ${JSON.stringify([...byName.keys()])}`);
   }
 
   const defaultEvents = parseJsonl(defaultDetails.sessionFile);
   const allowEvents = parseJsonl(allowDetails.sessionFile);
+  const managedEvents = parseJsonl(managedDetails.sessionFile);
+  const gitEvents = parseJsonl(gitDetails.sessionFile);
   if (!getAssistantTexts(defaultEvents).some((text) => text.includes("LIVE_EXT_DEFAULT_OK"))) {
     throw new Error("Default child did not produce LIVE_EXT_DEFAULT_OK.");
   }
   if (!getAssistantTexts(allowEvents).some((text) => text.includes("LIVE_EXT_ALLOW_OK"))) {
     throw new Error("Allowlist child did not produce LIVE_EXT_ALLOW_OK.");
+  }
+  if (!getAssistantTexts(managedEvents).some((text) => text.includes("LIVE_EXT_MANAGED_OK"))) {
+    throw new Error("Managed child did not produce LIVE_EXT_MANAGED_OK.");
+  }
+  if (!getToolResults(managedEvents, "managed_probe_tool").some((message) =>
+    message.content?.some((part) => part.type === "text" && part.text.includes("MANAGED_PACKAGE_VERSION_9.9.9")))) {
+    throw new Error("Managed child did not execute the configured managed package tool.");
+  }
+  if (!getAssistantTexts(gitEvents).some((text) => text.includes("LIVE_EXT_GIT_OK"))) {
+    throw new Error("Git child did not produce LIVE_EXT_GIT_OK.");
+  }
+  if (!getToolResults(gitEvents, "visual_explainer").some((message) => message.isError !== true)) {
+    throw new Error("Git child did not successfully execute visual_explainer from the managed checkout.");
+  }
+  const gitExtensionEntry = JSON.parse(readFileSync(`${gitDetails.sessionFile}.ext`, "utf8").trim());
+  if (!gitExtensionEntry.extensions?.includes(managedGitRoot)) {
+    throw new Error(`Git child did not persist the managed checkout path. Entry: ${JSON.stringify(gitExtensionEntry)}`);
   }
 
   const defaultSnapshot = readSnapshot("live-e2e-ext-default");
@@ -293,8 +375,7 @@ try {
   if (allowSnapshot.all?.includes("blocked_probe_tool") || allowSnapshot.active?.includes("blocked_probe_tool")) {
     throw new Error(`Allowlist child still loaded blocked_probe_tool. Snapshot: ${JSON.stringify(allowSnapshot)}`);
   }
-
-  console.log(`live extensions ok: unrestricted child loaded both probe tools, allowlisted child loaded only allowed_probe_tool (${defaultDetails.id}, ${allowDetails.id})`);
+  console.log(`live extensions ok: unrestricted child loaded both probe tools, allowlisted child loaded only allowed_probe_tool, configured npm allowlist reused ${managedPackageRoot}, configured Git allowlist reused ${managedGitRoot} (${defaultDetails.id}, ${allowDetails.id}, ${managedDetails.id}, ${gitDetails.id})`);
 } finally {
   for (const file of [allowedExtensionFile, blockedExtensionFile]) {
     try {

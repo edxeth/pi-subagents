@@ -372,7 +372,9 @@ extensions: .pi/extensions/safe-tools.ts, npm:@foo/bar
 
 When `extensions` is `none` or an allowlist, Pi launches the child with `--no-extensions`, injects the subagent protocol helper, then loads only the allowlisted extensions.
 
-Local paths stay paths. Package and remote sources keep their normal prefixes:
+For an unversioned `npm:` source that is already configured and installed in the child's effective Pi settings, pi-subagents reuses Pi's managed package directory instead of creating a second temporary CLI installation. Exactly matching configured Git sources are reused too, including the same explicit ref when one is present. Resolution uses Pi's settings and package APIs, so it respects the child's Pi config root and configured `npmCommand` such as Bun. Unconfigured, filtered, explicitly versioned, and tagged npm sources retain Pi's normal temporary `-e` behavior; Git sources that do not exactly match the configured source do the same. Project-installed packages are reused only when the child's final approval flags trust the project.
+
+Local paths stay paths. Package and remote sources keep their normal prefixes when managed reuse does not apply:
 
 ```md
 ---

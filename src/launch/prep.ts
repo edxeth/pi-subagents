@@ -88,6 +88,7 @@ function loadAgentDefaults(
 export async function prepareSubagentLaunch(
 	params: SubagentParamsInput,
 	ctx: SubagentLaunchContext,
+	mode: ResumeMode = "background",
 ): Promise<PreparedSubagentLaunch> {
 	const agentDefs = params.agent
 		? loadAgentDefaults(params.agent, params.cwd, ctx.cwd)
@@ -115,6 +116,7 @@ export async function prepareSubagentLaunch(
 		modelRegistry: ctx.modelRegistry,
 		parentModelRef: ctx.parentModelRef,
 		parentThinking: ctx.parentThinking,
+		mode,
 	});
 	const {
 		effectiveModel,

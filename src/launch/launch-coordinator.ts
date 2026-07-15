@@ -41,7 +41,7 @@ export async function coordinateSubagentLaunch(
 	ctx: SubagentLaunchContext,
 	options: { mode: ResumeMode; systemPrompt?: string },
 ): Promise<CoordinatedSubagentLaunch> {
-	const prepared = await prepareSubagentLaunch(params, ctx);
+	const prepared = await prepareSubagentLaunch(params, ctx, options.mode);
 	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
 	const noSession = resolveSubagentNoSession(prepared.agentDefs);
 	const noSessionSeedMode = noSession ? getNoSessionSeedMode(sessionMode) : null;

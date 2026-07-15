@@ -5,6 +5,7 @@ import { assertModelAllowed } from "../agents/model-refs.ts";
 import { buildSubagentSessionTitle } from "../agents/titles.ts";
 import {
 	generateSubagentSessionFile,
+	type ResumeMode,
 } from "../session/session-files.ts";
 import type { SubagentParamsInput } from "../types.ts";
 import {
@@ -19,6 +20,7 @@ import {
 	resolveSubagentRuntimePaths,
 	type ResolvedSubagentRuntimePaths,
 } from "./runtime-paths.ts";
+import { resolveConfiguredExtensionSources } from "./extensions.ts";
 import {
 	buildSkillLaunchPlan,
 	type SkillLaunchPlan,
@@ -60,6 +62,7 @@ export interface ChildLaunchPlanOptions {
 	modelRegistry?: ModelRegistryLike;
 	parentModelRef?: string;
 	parentThinking?: string;
+	mode?: ResumeMode;
 }
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
@@ -208,7 +211,13 @@ export async function buildChildLaunchPlan(
 	const tools = params.tools ?? agentDefs?.tools;
 	const skills = params.skills ?? agentDefs?.skills;
 	const injectSkills = agentDefs?.injectSkills;
-	const extensions = resolveSubagentExtensions(agentDefs);
+	const extensionSources = resolveSubagentExtensions(agentDefs);
+	const extensions = resolveConfiguredExtensionSources(extensionSources, {
+		cwd: runtimePaths.effectiveCwd ?? parentCwd,
+		agentDir: runtimePaths.effectiveAgentConfigDir,
+		agentDefs,
+		mode: options.mode ?? "background",
+	});
 	const denySet = addToolModeDeniedNames(resolveDenyTools(agentDefs), tools);
 	const skillLaunchPlan = await buildSkillLaunchPlan(
 		skills,
