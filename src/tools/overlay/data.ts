@@ -334,8 +334,6 @@ export function buildRunningItems(ctx: OverlayContext): OverlayItem[] {
 			canResume: false,
 			sessionFile: a.sessionFile,
 			onKill: async () => {
-				const ok = await ctx.ui.confirm("Kill subagent?", `Stop "${a.name}"?`);
-				if (!ok) return;
 				stopRunningSubagent(a);
 				ctx.ui.notify(`Stopped ${a.name}`, "info");
 			},

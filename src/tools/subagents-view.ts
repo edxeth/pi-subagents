@@ -15,24 +15,21 @@ export function registerSubagentsView(pi: ExtensionAPI, runtime: OverlayRuntime)
 			return;
 		}
 
-		ctx.ui.custom<null>(
-			(tui, theme, _keybindings, done) => {
-				const overlay = new SubagentsOverlayController(
-					done,
-					ctx,
-					{
-						fg: (tone, text) => theme.fg(tone as Parameters<typeof theme.fg>[0], text),
-						bg: (color, text) => theme.bg(color as Parameters<typeof theme.bg>[0], text),
-						bold: (text) => theme.bold(text),
-					},
-					runtime,
-					tui,
-				);
-				activeOverlay = overlay;
-				return overlay;
-			},
-			{ overlay: true, overlayOptions: { width: "100%" } },
-		)
+		ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+			const overlay = new SubagentsOverlayController(
+				done,
+				ctx,
+				{
+					fg: (tone, text) => theme.fg(tone as Parameters<typeof theme.fg>[0], text),
+					bg: (color, text) => theme.bg(color as Parameters<typeof theme.bg>[0], text),
+					bold: (text) => theme.bold(text),
+				},
+				runtime,
+				tui,
+			);
+			activeOverlay = overlay;
+			return overlay;
+		})
 			.finally(() => {
 				activeOverlay = null;
 			});

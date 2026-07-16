@@ -81,6 +81,7 @@ export class SubagentsOverlayController implements Component {
 		}
 
 		if (this.state.view.kind === "detail") this.handleDetailInput(data);
+		else if (this.state.view.kind === "confirm") this.handleConfirmInput(data);
 		else if (this.state.view.kind === "editor") this.handleEditorInput(data);
 		else this.handleListInput(data);
 
@@ -92,6 +93,8 @@ export class SubagentsOverlayController implements Component {
 		const bodyHeight = this.bodyHeight();
 		if (this.state.view.kind === "detail") {
 			lines.push(...renderDetail(this.state.view.item, this.state.view.scroll, this.theme, width, bodyHeight));
+		} else if (this.state.view.kind === "confirm") {
+			lines.push(...this.renderConfirmView(this.state.view.item, this.state.view.confirmed, width));
 		} else if (this.state.view.kind === "editor") {
 			const item = this.state.items[this.state.view.itemIndex];
 			if (item) lines.push(...this.renderEditorView(item, width));
@@ -123,10 +126,7 @@ export class SubagentsOverlayController implements Component {
 			return;
 		}
 		if (matchesKey(data, "k") && item.canKill && item.onKill) {
-			void item.onKill().finally(() => {
-				this.refreshItems();
-				this.requestRender();
-			});
+			this.state.view = { kind: "confirm", item, confirmed: true };
 			return;
 		}
 		if (matchesKey(data, "m") && item.canResume) {
@@ -151,6 +151,31 @@ export class SubagentsOverlayController implements Component {
 		}
 	}
 
+	private handleConfirmInput(data: string): void {
+		if (this.state.view.kind !== "confirm") return;
+		if (matchesKey(data, Key.escape) || matchesKey(data, "n")) {
+			this.state.view = { kind: "list" };
+			return;
+		}
+		if (matchesKey(data, Key.left) || matchesKey(data, Key.up) || matchesKey(data, "y")) {
+			this.state.view = { ...this.state.view, confirmed: true };
+			return;
+		}
+		if (matchesKey(data, Key.right) || matchesKey(data, Key.down)) {
+			this.state.view = { ...this.state.view, confirmed: false };
+			return;
+		}
+		if (!matchesKey(data, Key.enter)) return;
+
+		const { item, confirmed } = this.state.view;
+		this.state.view = { kind: "list" };
+		if (!confirmed || !item.onKill) return;
+		void item.onKill().finally(() => {
+			this.refreshItems();
+			this.requestRender();
+		});
+	}
+
 	private handleEditorInput(data: string): void {
 		if (matchesKey(data, Key.escape)) {
 			this.state.view = { kind: "list" };
@@ -158,6 +183,17 @@ export class SubagentsOverlayController implements Component {
 		}
 		this.editor.disableSubmit = false;
 		this.editor.handleInput(data);
+	}
+
+	private renderConfirmView(item: OverlayItem, confirmed: boolean, width: number): string[] {
+		const selected = (text: string, active: boolean) =>
+			active ? this.theme.bg("selectedBg", ` ${text} `) : ` ${text} `;
+		return [
+			` ${this.theme.fg("warning", "Kill subagent?")}`,
+			` Stop ${this.theme.bold(item.name)}?`,
+			"",
+			` ${selected("Yes", confirmed)}  ${selected("No", !confirmed)}`,
+		].map((line) => fitLine(line, width));
 	}
 
 	private renderEditorView(item: OverlayItem, width: number): string[] {

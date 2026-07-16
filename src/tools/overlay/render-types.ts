@@ -53,6 +53,7 @@ export interface DetailField {
 type ViewState =
 	| { kind: "list" }
 	| { kind: "detail"; item: OverlayItem; scroll: number }
+	| { kind: "confirm"; item: OverlayItem; confirmed: boolean }
 	| { kind: "editor"; itemIndex: number };
 
 export interface OverlayState {

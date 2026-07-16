@@ -56,6 +56,14 @@ export function getFooterHints(state: OverlayState): FooterHint[] {
 		];
 	}
 
+	if (state.view.kind === "confirm") {
+		return [
+			{ key: "←→", action: "choose" },
+			{ key: "Enter", action: "confirm" },
+			{ key: "Esc", action: "cancel" },
+		];
+	}
+
 	if (state.view.kind === "editor") {
 		return [
 			{ key: "Enter", action: "send" },

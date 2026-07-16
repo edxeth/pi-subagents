@@ -186,18 +186,44 @@ describe("subagents-view overlay", () => {
 			} as any);
 
 			const overlay = createOverlay();
-			let confirmCalls = 0;
-			(overlay as any).ctx.ui.confirm = async () => {
-				confirmCalls += 1;
-				return true;
-			};
 
 			simulateKey(overlay, "k");
+			const confirmText = renderLines(overlay).map(stripAnsi).join("\n");
+			assert.ok(confirmText.includes("Kill subagent?"));
+			assert.equal(firstAbort.signal.aborted, false);
+
+			simulateKey(overlay, "\r");
 			await new Promise((resolve) => setImmediate(resolve));
 
-			assert.equal(confirmCalls, 1);
 			assert.equal(firstAbort.signal.aborted, true);
 			assert.equal(secondAbort.signal.aborted, false);
+			overlay.dispose();
+		});
+
+		it("cancels the built-in kill confirmation with Escape", async () => {
+			const abortController = new AbortController();
+			setRunningSubagentForTest({
+				id: "test-1",
+				name: "scout",
+				task: "Explore codebase",
+				mode: "background",
+				executionState: "running",
+				deliveryState: "detached",
+				parentClosePolicy: "terminate",
+				startTime: Date.now(),
+				sessionFile: "/tmp/test.jsonl",
+				abortController,
+			} as any);
+
+			const overlay = createOverlay();
+			simulateKey(overlay, "k");
+			simulateKey(overlay, "\x1b");
+			await new Promise((resolve) => setImmediate(resolve));
+
+			assert.equal(abortController.signal.aborted, false);
+			const text = renderLines(overlay).map(stripAnsi).join("\n");
+			assert.ok(text.includes("scout"));
+			assert.ok(!text.includes("Kill subagent?"));
 			overlay.dispose();
 		});
 
@@ -738,7 +764,7 @@ describe("subagents-view registration", () => {
 		assert.equal(shortcutRegistered, true);
 	});
 
-	it("opens the manager as a full-width overlay", async () => {
+	it("opens the manager as an editor replacement instead of a chat overlay", async () => {
 		setRunningSubagentForTest({
 			id: "test-1",
 			name: "scout",
@@ -775,7 +801,7 @@ describe("subagents-view registration", () => {
 			cwd: "/tmp",
 		});
 
-		assert.deepEqual(customOptions, { overlay: true, overlayOptions: { width: "100%" } });
+		assert.equal(customOptions, undefined);
 	});
 
 	it("shows notification when no subagents or agent definitions exist", async () => {
