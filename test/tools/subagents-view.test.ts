@@ -157,6 +157,50 @@ describe("subagents-view overlay", () => {
 	});
 
 	describe("item navigation", () => {
+		it("kills the selected running subagent with k instead of moving selection", async () => {
+			const firstAbort = new AbortController();
+			const secondAbort = new AbortController();
+			setRunningSubagentForTest({
+				id: "test-1",
+				name: "first-scout",
+				task: "Explore first area",
+				mode: "background",
+				executionState: "running",
+				deliveryState: "detached",
+				parentClosePolicy: "terminate",
+				startTime: Date.now(),
+				sessionFile: "/tmp/test-1.jsonl",
+				abortController: firstAbort,
+			} as any);
+			setRunningSubagentForTest({
+				id: "test-2",
+				name: "second-scout",
+				task: "Explore second area",
+				mode: "background",
+				executionState: "running",
+				deliveryState: "detached",
+				parentClosePolicy: "terminate",
+				startTime: Date.now(),
+				sessionFile: "/tmp/test-2.jsonl",
+				abortController: secondAbort,
+			} as any);
+
+			const overlay = createOverlay();
+			let confirmCalls = 0;
+			(overlay as any).ctx.ui.confirm = async () => {
+				confirmCalls += 1;
+				return true;
+			};
+
+			simulateKey(overlay, "k");
+			await new Promise((resolve) => setImmediate(resolve));
+
+			assert.equal(confirmCalls, 1);
+			assert.equal(firstAbort.signal.aborted, true);
+			assert.equal(secondAbort.signal.aborted, false);
+			overlay.dispose();
+		});
+
 		it("renders running subagents in the list", () => {
 			setRunningSubagentForTest({
 				id: "test-1",
@@ -692,6 +736,46 @@ describe("subagents-view registration", () => {
 		assert.equal(commands[0].name, "subagents");
 		assert.ok(commands[0].description.includes("subagent"));
 		assert.equal(shortcutRegistered, true);
+	});
+
+	it("opens the manager as a full-width overlay", async () => {
+		setRunningSubagentForTest({
+			id: "test-1",
+			name: "scout",
+			task: "Explore codebase",
+			mode: "background",
+			executionState: "running",
+			deliveryState: "detached",
+			parentClosePolicy: "terminate",
+			startTime: Date.now(),
+			sessionFile: "/tmp/test.jsonl",
+		} as any);
+		let commandHandler: ((args: string, ctx: any) => Promise<void>) | null = null;
+		let customOptions: unknown;
+		const { registerSubagentsView } = await import("../../src/tools/subagents-view.ts");
+
+		registerSubagentsView({
+			registerCommand(_name: string, opts: any) {
+				commandHandler = opts.handler;
+			},
+			registerShortcut() {},
+			on() {},
+		} as any, mockRuntime);
+
+		assert.ok(commandHandler);
+		await (commandHandler as (args: string, ctx: any) => Promise<void>)("", {
+			ui: {
+				notify: () => {},
+				custom: (_factory: unknown, options: unknown) => {
+					customOptions = options;
+					return Promise.resolve(null);
+				},
+			},
+			sessionManager: { getSessionFile: () => null },
+			cwd: "/tmp",
+		});
+
+		assert.deepEqual(customOptions, { overlay: true, overlayOptions: { width: "100%" } });
 	});
 
 	it("shows notification when no subagents or agent definitions exist", async () => {

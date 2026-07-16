@@ -113,8 +113,8 @@ export class SubagentsOverlayController implements Component {
 		}
 		if (matchesKey(data, Key.left)) return this.switchTab(-1);
 		if (matchesKey(data, Key.right)) return this.switchTab(1);
-		if (matchesKey(data, Key.up) || matchesKey(data, "k")) return this.moveSelection(-1);
-		if (matchesKey(data, Key.down) || matchesKey(data, "j")) return this.moveSelection(1);
+		if (matchesKey(data, Key.up)) return this.moveSelection(-1);
+		if (matchesKey(data, Key.down)) return this.moveSelection(1);
 
 		const item = this.selectedItem();
 		if (!item) return;
