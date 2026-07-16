@@ -10,6 +10,25 @@ function stripAnsi(text: string): string {
 	return text.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
+function makeRunningSubagent(index: number): RunningSubagent {
+	return {
+		id: `child-${index}`,
+		name: `Child ${index}`,
+		agent: "scout",
+		task: `Inspect area ${index}`,
+		title: `Area ${index} review`,
+		mode: "background",
+		executionState: "running",
+		deliveryState: "detached",
+		parentClosePolicy: "terminate",
+		blocking: false,
+		async: true,
+		startTime: Date.now(),
+		sessionFile: `/tmp/child-${index}.jsonl`,
+		activity: "reading",
+	};
+}
+
 describe("widget manager direct module tests", () => {
 	it("renders nothing when no subagents are running", () => {
 		const widget = new SubagentWidgetManager(() => []);
@@ -77,6 +96,28 @@ describe("widget manager direct module tests", () => {
 
 		assert.ok(lines.length > 0);
 		assert.ok(lines.every((line) => stripAnsi(line).length <= 32));
+	});
+
+	it("shows a singular overflow hint with the subagent TUI shortcut", () => {
+		const agents = Array.from({ length: 3 }, (_, index) =>
+			makeRunningSubagent(index + 1),
+		);
+		const widget = new SubagentWidgetManager(() => agents);
+		const lines = widget.renderForTest();
+
+		assert.ok(lines.length <= 10);
+		assert.equal(lines.at(-1), "... (+1 more subagent — Alt+S to show all)");
+	});
+
+	it("shows a plural overflow hint with the hidden subagent count", () => {
+		const agents = Array.from({ length: 7 }, (_, index) =>
+			makeRunningSubagent(index + 1),
+		);
+		const widget = new SubagentWidgetManager(() => agents);
+		const lines = widget.renderForTest();
+
+		assert.ok(lines.length <= 10);
+		assert.equal(lines.at(-1), "... (+5 more subagents — Alt+S to show all)");
 	});
 
 	it("uses native totalTokens and caps ctx at 100%", () => {

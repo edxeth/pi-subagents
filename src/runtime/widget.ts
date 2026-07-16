@@ -13,6 +13,8 @@ import type {
 } from "../types.ts";
 
 const SPINNER = ["◜", "◠", "◝", "◞", "◡", "◟"];
+const MAX_WIDGET_LINES = 10;
+const LINES_PER_AGENT = 3;
 
 const TOOL_DISPLAY: Record<string, string> = {
 	read: "reading",
@@ -361,6 +363,13 @@ export class SubagentWidgetManager {
 
 		const width = tui?.terminal?.columns ?? getTerminalColumns();
 		const lines: string[] = [];
+		const maxVisibleAgents = Math.floor(
+			(MAX_WIDGET_LINES - 2) / LINES_PER_AGENT,
+		);
+		const visibleAgents =
+			agents.length > maxVisibleAgents
+				? agents.slice(0, maxVisibleAgents)
+				: agents;
 
 		// Show running subagents section
 		if (agents.length > 0) {
@@ -378,9 +387,9 @@ export class SubagentWidgetManager {
 					),
 			);
 
-			for (let i = 0; i < agents.length; i++) {
-				const agent = agents[i]!;
-				const isLast = i === agents.length - 1;
+			for (let i = 0; i < visibleAgents.length; i++) {
+				const agent = visibleAgents[i]!;
+				const isLast = i === visibleAgents.length - 1;
 				const connector = isLast ? "└─" : "├─";
 				const childConnector = isLast ? "   " : "│  ";
 				const stats: string[] = [];
@@ -427,6 +436,17 @@ export class SubagentWidgetManager {
 				lines.push(
 					theme.fg("dim", childConnector) +
 					theme.fg("dim", `  ${activity}`),
+				);
+			}
+
+			const hiddenCount = agents.length - visibleAgents.length;
+			if (hiddenCount > 0) {
+				const noun = hiddenCount === 1 ? "subagent" : "subagents";
+				lines.push(
+					theme.fg(
+						"muted",
+						`... (+${hiddenCount} more ${noun} — Alt+S to show all)`,
+					),
 				);
 			}
 		}
