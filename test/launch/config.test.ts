@@ -1,5 +1,6 @@
 import {
 	assert,
+	existsSync,
 	mkdirSync,
 	writeFileSync,
 	join,
@@ -291,11 +292,13 @@ describe("agent launch configuration", () => {
 		]);
 	});
 
-	it("resolves extension-package skills by name", async () => {
+	it("resolves extension-package skills without executing extension code", async () => {
 		const dir = createTestDir();
+		const configDir = join(dir, "agent-root");
 		const packageDir = join(dir, "skill-package");
 		const extensionDir = join(packageDir, "extensions");
 		const skillDir = join(packageDir, "skills", "pkg-skill");
+		const executionMarker = join(dir, "extension-executed");
 		mkdirSync(extensionDir, { recursive: true });
 		mkdirSync(skillDir, { recursive: true });
 		writeFileSync(
@@ -305,7 +308,10 @@ describe("agent launch configuration", () => {
 				pi: { extensions: ["./extensions"], skills: ["./skills"] },
 			}),
 		);
-		writeFileSync(join(extensionDir, "index.ts"), "export default function extension() {}\n");
+		writeFileSync(
+			join(extensionDir, "index.ts"),
+			`import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(executionMarker)}, "executed");\nexport default function extension() {}\n`,
+		);
 		writeFileSync(
 			join(skillDir, "SKILL.md"),
 			"---\nname: pkg-skill\ndescription: Packaged skill.\n---\n\n# Packaged Skill",
@@ -315,7 +321,7 @@ describe("agent launch configuration", () => {
 			"pkg-skill",
 			"pkg-skill",
 			dir,
-			undefined,
+			configDir,
 			[packageDir],
 		);
 
@@ -325,6 +331,41 @@ describe("agent launch configuration", () => {
 			"--skill",
 			join(skillDir, "SKILL.md"),
 		]);
+		assert.equal(existsSync(executionMarker), false);
+	});
+
+	it("derives better-skills formatting from the child extension policy", async () => {
+		const dir = createTestDir();
+		const configDir = join(dir, "agent-root");
+		const extensionsDir = join(configDir, "extensions");
+		const skillDir = join(configDir, "skills", "review");
+		const betterSkillsPath = join(extensionsDir, "pi-better-skills.ts");
+		const unrelatedPath = join(extensionsDir, "unrelated.ts");
+		mkdirSync(extensionsDir, { recursive: true });
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(betterSkillsPath, "export default function extension() {}\n");
+		writeFileSync(unrelatedPath, "export default function extension() {}\n");
+		writeFileSync(
+			join(skillDir, "SKILL.md"),
+			"---\nname: review\ndescription: Review changes.\n---\n\n# Review",
+		);
+
+		assert.equal(
+			(await buildSkillLaunchPlanForTest("review", "review", dir, configDir)).betterSkillsActive,
+			true,
+		);
+		assert.equal(
+			(await buildSkillLaunchPlanForTest("review", "review", dir, configDir, [])).betterSkillsActive,
+			false,
+		);
+		assert.equal(
+			(await buildSkillLaunchPlanForTest("review", "review", dir, configDir, [unrelatedPath])).betterSkillsActive,
+			false,
+		);
+		assert.equal(
+			(await buildSkillLaunchPlanForTest("review", "review", dir, configDir, [betterSkillsPath])).betterSkillsActive,
+			true,
+		);
 	});
 
 	it("resolves project .agents skills by name", async () => {

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import {
+	DefaultPackageManager,
 	DefaultResourceLoader,
 	SettingsManager,
 	stripFrontmatter,
@@ -28,27 +29,72 @@ function splitSkillNames(raw: string | undefined): string[] {
 		.filter(Boolean);
 }
 
+function includesBetterSkills(values: Array<string | undefined>): boolean {
+	return values.some((value) => value?.includes("pi-better-skills"));
+}
+
+async function resolveExtensionSkillResources(
+	cwd: string,
+	agentDir: string,
+	settingsManager: SettingsManager,
+	extensionSpecs: string[] | undefined,
+): Promise<{ additionalSkillPaths: string[]; betterSkillsActive: boolean }> {
+	const packageManager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
+	if (extensionSpecs === undefined) {
+		const resolved = await packageManager.resolve();
+		return {
+			additionalSkillPaths: [],
+			betterSkillsActive: resolved.extensions.some((extension) =>
+				extension.enabled && includesBetterSkills([
+					extension.path,
+					extension.metadata.source,
+				]),
+			),
+		};
+	}
+	if (extensionSpecs.length === 0) {
+		return { additionalSkillPaths: [], betterSkillsActive: false };
+	}
+	const resolved = await packageManager.resolveExtensionSources(extensionSpecs, {
+		temporary: true,
+	});
+	return {
+		additionalSkillPaths: resolved.skills
+			.filter((skill) => skill.enabled)
+			.map((skill) => skill.path),
+		betterSkillsActive: resolved.extensions.some((extension) =>
+			extension.enabled && includesBetterSkills([
+				extension.path,
+				extension.metadata.source,
+			]),
+		),
+	};
+}
+
 async function discoverSkills(
 	cwd: string,
 	agentDir = getAgentConfigDir(),
-	extensionSpecs: string[] = [],
+	extensionSpecs?: string[],
 ): Promise<{ skills: Skill[]; betterSkillsActive: boolean }> {
 	const settingsManager = SettingsManager.create(cwd, agentDir);
+	const extensionResources = await resolveExtensionSkillResources(
+		cwd,
+		agentDir,
+		settingsManager,
+		extensionSpecs,
+	);
 	const loader = new DefaultResourceLoader({
 		cwd,
 		agentDir,
 		settingsManager,
-		additionalExtensionPaths: extensionSpecs,
+		additionalSkillPaths: extensionResources.additionalSkillPaths,
+		noExtensions: true,
 	});
 	await loader.reload();
-	const betterSkillsActive = loader
-		.getExtensions()
-		.extensions.some((extension) =>
-			[extension.path, extension.resolvedPath, extension.sourceInfo.source]
-				.filter(Boolean)
-				.some((value) => value.includes("pi-better-skills")),
-		);
-	return { skills: loader.getSkills().skills, betterSkillsActive };
+	return {
+		skills: loader.getSkills().skills,
+		betterSkillsActive: extensionResources.betterSkillsActive,
+	};
 }
 
 function resolveSkillNames(names: string[], skills: Skill[]): Skill[] {
