@@ -33,7 +33,6 @@ import {
 	formatElapsed,
 	getLaunchedSubagentResult,
 	getShellReadyDelayMs,
-	waitForInteractivePrompt,
 	getWatcherSignal,
 	launchBackgroundSubagent,
 	launchSubagent,
@@ -398,7 +397,6 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 
 	registerSubagentResumeTool(pi, shouldRegister, {
 		getShellReadyDelayMs,
-		waitForInteractivePrompt,
 		isMuxAvailable,
 		watchBackgroundSubagent,
 		watchSubagent,
@@ -421,7 +419,6 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 
 	registerSubagentsView(pi, {
 		getShellReadyDelayMs,
-		waitForInteractivePrompt,
 		isMuxAvailable,
 		watchBackgroundSubagent,
 		watchSubagent,

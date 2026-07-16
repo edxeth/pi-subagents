@@ -183,7 +183,6 @@ describe("subagent_resume approval args", () => {
 		return {
 			isMuxAvailable: () => true,
 			getShellReadyDelayMs: () => 0,
-			waitForInteractivePrompt: async () => {},
 			watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 			watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 			getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
@@ -367,7 +366,6 @@ esac
 				{
 					isMuxAvailable: () => true,
 					getShellReadyDelayMs: () => 0,
-					waitForInteractivePrompt: async () => {},
 					watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 					watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 					getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
@@ -479,7 +477,6 @@ esac
 			{
 				isMuxAvailable: () => true,
 				getShellReadyDelayMs: () => 0,
-				waitForInteractivePrompt: async () => {},
 				watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 				watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 				getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
@@ -535,7 +532,6 @@ cat > '${stdinLog}'
 				{
 					isMuxAvailable: () => true,
 					getShellReadyDelayMs: () => 0,
-					waitForInteractivePrompt: async () => {},
 					watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 					watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 					getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
@@ -599,7 +595,6 @@ esac
 			{
 				isMuxAvailable: () => true,
 				getShellReadyDelayMs: () => 0,
-				waitForInteractivePrompt: async () => {},
 				watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 				watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 				getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
@@ -658,7 +653,6 @@ describe("subagent_resume same-session guard", () => {
 				{
 					isMuxAvailable: () => true,
 					getShellReadyDelayMs: () => 0,
-					waitForInteractivePrompt: async () => {},
 					watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 					watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
 					getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,

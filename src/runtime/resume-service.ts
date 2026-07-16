@@ -38,7 +38,6 @@ import type { RunningSubagent, SubagentResult } from "../types.ts";
 
 export interface ResumeServiceRuntime {
 	getShellReadyDelayMs(): number;
-	waitForInteractivePrompt(surface: string): Promise<void>;
 	isMuxAvailable(): boolean;
 	watchBackgroundSubagent(
 		running: RunningSubagent,
@@ -309,7 +308,6 @@ export async function resumeSubagentSession(
 		await new Promise<void>((resolve) =>
 			setTimeout(resolve, runtime.getShellReadyDelayMs()),
 		);
-		await runtime.waitForInteractivePrompt(surface);
 		const doneSentinelFile = getDoneSentinelFile(sessionFile, id);
 		const parts = getPiShellParts(
 			buildResumePiArgs(sessionFile, "interactive"),

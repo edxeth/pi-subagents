@@ -46,7 +46,6 @@ import { SET_TAB_TITLE_TOOL_NAME } from "../tools/tool-names.ts";
 export interface InteractiveLaunchRuntime {
 	getContextWindow(modelRef: string | undefined): number | undefined;
 	getShellReadyDelayMs(): number;
-	waitForInteractivePrompt(surface: string): Promise<void>;
 }
 
 export async function launchInteractiveSubagent(
@@ -84,7 +83,6 @@ export async function launchInteractiveSubagent(
 		await new Promise<void>((resolve) =>
 			setTimeout(resolve, runtime.getShellReadyDelayMs()),
 		);
-		await runtime.waitForInteractivePrompt(surface);
 	}
 	const modeHint = prepared.agentDefs?.autoExit
 		? "Complete your task autonomously."

@@ -187,7 +187,6 @@ describe("Herdr interactive launch parity", () => {
 				{
 					getContextWindow: () => undefined,
 					getShellReadyDelayMs: () => 0,
-					waitForInteractivePrompt: async () => {},
 				},
 			);
 
@@ -246,7 +245,6 @@ describe("Herdr interactive launch parity", () => {
 			].join("\n"),
 		);
 		const parentSession = writeParentSession(cwd);
-		const waitedSurfaces: string[] = [];
 
 		const running = await launchInteractiveSubagent(
 			{
@@ -266,9 +264,6 @@ describe("Herdr interactive launch parity", () => {
 			{
 				getContextWindow: () => 4096,
 				getShellReadyDelayMs: () => 0,
-				waitForInteractivePrompt: async (surface) => {
-					waitedSurfaces.push(surface);
-				},
 			},
 		);
 
@@ -276,7 +271,6 @@ describe("Herdr interactive launch parity", () => {
 		assert.equal(running.surface, "w1:p2");
 		assert.equal(running.noSession, true);
 		assert.equal(running.modelContextWindow, 4096);
-		assert.deepEqual(waitedSurfaces, ["w1:p2"]);
 
 		const metadata = readSubagentLaunchMetadataForTest(running.sessionFile);
 		assert.equal(metadata?.mode, "interactive");
@@ -349,7 +343,6 @@ describe("Herdr interactive launch parity", () => {
 			{
 				getContextWindow: () => 4096,
 				getShellReadyDelayMs: () => 0,
-				waitForInteractivePrompt: async () => {},
 			},
 		);
 
@@ -449,7 +442,6 @@ describe("Herdr interactive launch parity", () => {
 					return modelRef === "zai-messages/glm-5-turbo:off" ? 8192 : undefined;
 				},
 				getShellReadyDelayMs: () => 0,
-				waitForInteractivePrompt: async () => {},
 			},
 		);
 

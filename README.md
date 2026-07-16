@@ -589,7 +589,7 @@ User-facing knobs:
 | `PI_SUBAGENT_DISABLE_CHILD_CONTEXT_BOUNDARY` | Set `1` for raw forks with no boundary marker |
 | `PI_SUBAGENT_DISABLE_SESSION_TITLES` | Disable automatic child session names |
 | `PI_ARTIFACT_PROJECT_ROOT` | Override internal artifact storage root |
-| `PI_SUBAGENT_SHELL_READY_DELAY_MS` | Change the pane startup delay before Pi sends the child command |
+| `PI_SUBAGENT_SHELL_READY_DELAY_MS` | Change the fixed pane startup delay before Pi sends the child command (default: 500ms) |
 | `PI_SUBAGENT_ENABLE_SET_TAB_TITLE` | Register the optional `set_tab_title` tool |
 | `PI_SUBAGENT_RENAME_TMUX_WINDOW` | Let `set_tab_title` rename the tmux window |
 | `PI_SUBAGENT_RENAME_TMUX_SESSION` | Let `set_tab_title` rename the tmux session |

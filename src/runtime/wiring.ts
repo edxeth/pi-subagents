@@ -3,7 +3,7 @@ import { launchBackgroundSubagent as launchBackgroundSubagentWithRuntime, type B
 import { cleanupNoSessionSessionFile } from "../launch/prep.ts";
 import { watchBackgroundSubagent as watchBackgroundSubagentWithRuntime, type BackgroundWatchRuntime } from "./background-watch.ts";
 import { getPiInvocation, getPiShellParts, getSubagentChildProcessEnv } from "../launch/child-command.ts";
-import { closeSurface, readScreenAsync } from "../mux.ts";
+import { closeSurface } from "../mux.ts";
 import { launchInteractiveSubagent, type InteractiveLaunchRuntime } from "../launch/interactive.ts";
 import { watchSubagent as watchSubagentWithRuntime, type InteractiveWatchRuntime } from "./interactive-watch.ts";
 import { shutdownSubagentsForParentExit as shutdownSubagentsForParentExitWithRuntime, terminateBackgroundChildProcess, type ShutdownRuntime, type ShutdownSubagentsOptions } from "./shutdown.ts";
@@ -25,18 +25,6 @@ export function getShellReadyDelayMs(): number {
 	const raw = process.env.PI_SUBAGENT_SHELL_READY_DELAY_MS;
 	const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
 	return Number.isFinite(parsed) && parsed >= 0 ? parsed : 500;
-}
-
-export async function waitForInteractivePrompt(surface: string): Promise<void> {
-	const start = Date.now();
-	const timeoutMs = 15000;
-	let previous = "";
-	while (Date.now() - start < timeoutMs) {
-		await new Promise((resolve) => setTimeout(resolve, 300));
-		const screen = await readScreenAsync(surface).catch(() => "");
-		if (screen && screen === previous) return;
-		previous = screen;
-	}
 }
 
 function updateWidget() {
@@ -183,7 +171,7 @@ export async function watchBackgroundSubagent(
 }
 
 function getInteractiveLaunchRuntime(): InteractiveLaunchRuntime {
-	return { getContextWindow: (modelRef) => widgetManager.resolveModelContextWindow(modelRef), getShellReadyDelayMs, waitForInteractivePrompt };
+	return { getContextWindow: (modelRef) => widgetManager.resolveModelContextWindow(modelRef), getShellReadyDelayMs };
 }
 
 export async function launchSubagent(
