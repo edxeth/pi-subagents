@@ -149,6 +149,8 @@ export function getStartedSubagentDetails(
 		title: running.title,
 		task: running.task,
 		agent: running.agent,
+		backend: running.backend,
+		paseoAgentId: running.paseoAgentId,
 		sessionFile: running.noSession ? undefined : running.sessionFile,
 		noSession: running.noSession,
 		status: "started" as const,
@@ -188,7 +190,7 @@ export async function getLaunchedSubagentResult(
 	const parentShouldWait = shouldAwaitSubagentLaunch(running);
 	if (!parentShouldWait) return getStartedSubagentResult(running);
 	const result = await runtime.waitForSubagentResult({ id: running.id }, signal);
-	return runtime.withSubagentBatchStop(runtime.asSubagentToolResult(result));
+	return runtime.asSubagentToolResult(result);
 }
 
 /**

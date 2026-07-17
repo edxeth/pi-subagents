@@ -8,9 +8,9 @@ import {
 	it,
 	subagentsExtension,
 	getCompletedSubagentResultForTest,
+	getAgentListEntriesForTest,
 	getLaunchedSubagentResultForTest,
 	markSubagentBatchBlockingForTest,
-	getAgentListSignatureForTest,
 	renderAgentListReminderForTest,
 	resetSubagentStateForTest,
 	routeDetachedSubagentCompletionForTest,
@@ -68,6 +68,56 @@ describe("subagent launch result delivery", () => {
 		assert.equal((result.details as any).status, "started");
 		assert.equal((result.details as any).async, true);
 		assert.equal(result.terminate, undefined);
+	});
+
+	it("does not terminate awaited launch results even after an async launch requested a coordinator-only turn", async () => {
+		const asyncRunning = {
+			id: "child-async-first",
+			name: "Async child",
+			task: "Do async work",
+			mode: "background" as const,
+			executionState: "running" as const,
+			deliveryState: "detached" as const,
+			parentClosePolicy: "terminate" as const,
+			blocking: false,
+			async: true,
+			startTime: Date.now(),
+			sessionFile: "/tmp/child-async-first.jsonl",
+		};
+
+		const asyncResult = (await getLaunchedSubagentResultForTest(
+			asyncRunning as any,
+		)) as any;
+		assert.equal(asyncResult.terminate, true);
+
+		const awaitedRunning = {
+			id: "child-awaited-second",
+			name: "Awaited child",
+			task: "Finish before returning",
+			mode: "background" as const,
+			executionState: "running" as const,
+			deliveryState: "detached" as const,
+			parentClosePolicy: "terminate" as const,
+			blocking: true,
+			async: false,
+			startTime: Date.now(),
+			sessionFile: "/tmp/child-awaited-second.jsonl",
+			completionPromise: Promise.resolve({
+				name: "Awaited child",
+				task: "Finish before returning",
+				summary: "done",
+				sessionFile: "/tmp/child-awaited-second.jsonl",
+				exitCode: 0,
+				elapsed: 1,
+			}),
+		};
+
+		setRunningSubagentForTest(awaitedRunning as any);
+		const awaitedResult = (await getLaunchedSubagentResultForTest(
+			awaitedRunning as any,
+		)) as any;
+		assert.equal((awaitedResult.details as any).deliveryState, "awaited");
+		assert.equal(awaitedResult.terminate, undefined);
 	});
 
 	it("does not defer same-turn detached async completion when coordinator-only turn stop is disabled", async () => {
@@ -308,7 +358,7 @@ describe("subagent launch result delivery", () => {
 		);
 	});
 
-	it("injects one hidden startup catalog for top-level actionable sessions", () => {
+	it("appends the startup catalog to each top-level system prompt", () => {
 		const dir = createTestDir();
 		const configDir = join(dir, "agent-root");
 		const agentsDir = join(configDir, "agents");
@@ -352,49 +402,45 @@ describe("subagent launch result delivery", () => {
 			prompt: "hi",
 			systemPrompt: "sys",
 		});
-		const message = result?.message;
-		assert.ok(message);
-		assert.equal(message.customType, "subagent_roster");
-		assert.equal(message.display, false);
-		assert.equal((message.details as any).entries[0].name, "reviewer");
-		assert.equal(
-			(message.details as any).signature,
-			getAgentListSignatureForTest((message.details as any).entries),
-		);
-		assert.match(message.content, /^<system-reminder>\nYou can launch separate helper agents/);
+		assert.equal(result?.message, undefined);
+		assert.ok(result?.systemPrompt);
+		assert.match(result.systemPrompt, /^sys\n\n<system-reminder>\nYou can launch separate helper agents/);
 		assert.match(
-			message.content,
+			result.systemPrompt,
 			/`reviewer`: Review changes for regressions[\s\S]*?tool_return: later_message/m,
 		);
-		assert.match(message.content, /\n<\/subagent-roster>\n<subagent-rules>\n/);
+		assert.match(result.systemPrompt, /\n<\/subagent-roster>\n<subagent-rules>\n/);
 		assert.match(
-			message.content,
+			result.systemPrompt,
 			/tool_return=later_message means the tool call starts the helper and returns before the work is done; do not invent its findings/,
 		);
 		assert.match(
-			message.content,
+			result.systemPrompt,
 			/context=fresh_chat_needs_full_brief means write a self-contained task with objective, files, constraints, and expected output/,
 		);
 		assert.match(
-			message.content,
+			result.systemPrompt,
 			/context=copy_of_this_chat means the helper starts from this conversation/,
 		);
-		assert.match(message.content, /\n<\/subagent-rules>\n<\/system-reminder>$/);
+		assert.match(result.systemPrompt, /\n<\/subagent-rules>\n<\/system-reminder>$/);
 		assert.equal(
-			renderAgentListReminderForTest((message.details as any).entries),
-			message.content,
+			renderAgentListReminderForTest(getAgentListEntriesForTest(dir)),
+			result.systemPrompt.slice("sys\n\n".length),
 		);
+
+		const nextTurn = handlers.get("before_agent_start")({
+			type: "before_agent_start",
+			prompt: "again",
+			systemPrompt: "sys",
+		});
+		assert.equal(nextTurn?.message, undefined);
 		assert.equal(
-			handlers.get("before_agent_start")({
-				type: "before_agent_start",
-				prompt: "again",
-				systemPrompt: "sys",
-			}),
-			undefined,
+			nextTurn?.systemPrompt,
+			result.systemPrompt,
 		);
 	});
 
-	it("queues reload catalog changes for the next turn instead of interrupting immediately", () => {
+	it("refreshes reload catalog changes on the next system prompt", () => {
 		const dir = createTestDir();
 		const configDir = join(dir, "agent-root");
 		const agentsDir = join(configDir, "agents");
@@ -439,8 +485,9 @@ describe("subagent launch result delivery", () => {
 			prompt: "start",
 			systemPrompt: "sys",
 		});
-		assert.ok(startup?.message);
-		assert.equal((startup.message.details as any).supersedes, undefined);
+		assert.equal(startup?.message, undefined);
+		assert.match(startup?.systemPrompt ?? "", /`reviewer`: Review changes for regressions/);
+		assert.doesNotMatch(startup?.systemPrompt ?? "", /`researcher`:/);
 
 		writeFileSync(
 			join(agentsDir, "researcher.md"),
@@ -456,10 +503,9 @@ describe("subagent launch result delivery", () => {
 			prompt: "continue",
 			systemPrompt: "sys",
 		});
-		assert.ok(reloaded?.message);
-		assert.equal((reloaded.message.details as any).supersedes, true);
+		assert.equal(reloaded?.message, undefined);
 		assert.match(
-			reloaded.message.content,
+			reloaded?.systemPrompt ?? "",
 			/`researcher`: Investigate open-ended questions[\s\S]*?tool_return: later_message[\s\S]*?runs_as: hidden_process[\s\S]*?context: fresh_chat_needs_full_brief[\s\S]*?completion: exits_automatically/,
 		);
 
@@ -467,13 +513,15 @@ describe("subagent launch result delivery", () => {
 			{ type: "session_start", reason: "reload" },
 			ctx,
 		);
+		const unchangedReload = handlers.get("before_agent_start")({
+			type: "before_agent_start",
+			prompt: "continue again",
+			systemPrompt: "sys",
+		});
+		assert.equal(unchangedReload?.message, undefined);
 		assert.equal(
-			handlers.get("before_agent_start")({
-				type: "before_agent_start",
-				prompt: "continue again",
-				systemPrompt: "sys",
-			}),
-			undefined,
+			unchangedReload?.systemPrompt,
+			reloaded?.systemPrompt,
 		);
 	});
 

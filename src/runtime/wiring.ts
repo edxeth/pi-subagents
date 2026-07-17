@@ -12,6 +12,12 @@ import type { SubagentLaunchContext } from "../launch/prep.ts";
 import { getStartedSubagentDetails, getLaunchedSubagentResult as getLaunchedSubagentResultWithRuntime, routeDetachedSubagentCompletion as routeDetachedSubagentCompletionWithDeps, stopRunningSubagent as stopRunningSubagentWithDeps, wireSubagentSteerBack as wireSubagentSteerBackWithDeps, deliverCompletedSubagentResultViaSteer as deliverCompletedSubagentResultViaSteerWithDeps, findTrackedSubagent } from "./running-registry.ts";
 import { waitForSubagentResult as waitForSubagentResultWithRuntime, type WaitRuntime } from "./wait.ts";
 import { asSubagentToolResult, cacheCompletedSubagentResult, completedSubagentResults, moduleAbortController, resetRuntimeStateForTest, runningSubagents, widgetManager, withSubagentBatchStop } from "./state.ts";
+import { resolveSubagentBackend } from "../backend/resolve.ts";
+import type { SubagentBackendResolution } from "../backend/types.ts";
+import { isPaseoUnavailableError } from "../paseo/client.ts";
+import { launchPaseoSubagent, type PaseoLaunchRuntime } from "../paseo/launch.ts";
+import { stopPaseoSubagent } from "../paseo/stop.ts";
+import { watchPaseoSubagent } from "../paseo/watch.ts";
 
 export { getWatcherSignal, moduleAbortController, runningSubagents, widgetManager } from "./state.ts";
 
@@ -79,6 +85,12 @@ export function renderSubagentWidgetForTest() {
 }
 
 export function stopRunningSubagent(running: RunningSubagent): void {
+	if (running.backend === "paseo") {
+		running.abortController?.abort();
+		void stopPaseoSubagent(running).catch(() => {});
+		updateWidget();
+		return;
+	}
 	stopRunningSubagentWithDeps(running, closeSurface);
 	updateWidget();
 }
@@ -144,7 +156,7 @@ function getWaitRuntime(): WaitRuntime {
 		cacheCompletedSubagentResult,
 		updateWidget,
 		deliverCompletedSubagentResultViaSteer,
-		stopRunningSubagent: (running) => stopRunningSubagentWithDeps(running, closeSurface),
+		stopRunningSubagent,
 		closeSurface,
 	};
 }
@@ -161,11 +173,43 @@ function getBackgroundLaunchRuntime(): BackgroundLaunchRuntime {
 	return { getContextWindow: (modelRef) => widgetManager.resolveModelContextWindow(modelRef) };
 }
 
+async function launchWithResolvedBackend(
+	params: SubagentParamsInput,
+	ctx: SubagentLaunchContext,
+	runtime: PaseoLaunchRuntime,
+	localLaunch: () => Promise<RunningSubagent>,
+): Promise<RunningSubagent> {
+	const backend = resolveSubagentBackend();
+	if (backend.kind !== "paseo") return localLaunch();
+
+	try {
+		return await launchPaseoSubagent(params, ctx, runtime, backend);
+	} catch (error) {
+		if (shouldFallbackToLocal(backend, error)) return localLaunch();
+		throw error;
+	}
+}
+
+function shouldFallbackToLocal(
+	backend: SubagentBackendResolution,
+	error: unknown,
+): boolean {
+	return backend.kind === "paseo" &&
+		backend.fallbackLocalOnUnavailable &&
+		isPaseoUnavailableError(error);
+}
+
 export async function launchBackgroundSubagent(
 	params: SubagentParamsInput,
 	ctx: SubagentLaunchContext,
 ): Promise<RunningSubagent> {
-	const running = await launchBackgroundSubagentWithRuntime(params, ctx, getBackgroundLaunchRuntime());
+	const runtime = getBackgroundLaunchRuntime();
+	const running = await launchWithResolvedBackend(
+		params,
+		ctx,
+		runtime,
+		() => launchBackgroundSubagentWithRuntime(params, ctx, runtime),
+	);
 	runningSubagents.set(running.id, running);
 	return running;
 }
@@ -179,6 +223,9 @@ export async function watchBackgroundSubagent(
 	signal?: AbortSignal,
 	timeoutMs?: number,
 ) {
+	if (running.backend === "paseo") {
+		return watchPaseoSubagent(running, signal ?? moduleAbortController.signal);
+	}
 	return watchBackgroundSubagentWithRuntime(running, getBackgroundWatchRuntime(), signal ?? moduleAbortController.signal, timeoutMs);
 }
 
@@ -191,7 +238,13 @@ export async function launchSubagent(
 	ctx: SubagentLaunchContext,
 	options?: { surface?: string },
 ): Promise<RunningSubagent> {
-	const running = await launchInteractiveSubagent(params, ctx, getInteractiveLaunchRuntime(), options);
+	const runtime = getInteractiveLaunchRuntime();
+	const running = await launchWithResolvedBackend(
+		params,
+		ctx,
+		runtime,
+		() => launchInteractiveSubagent(params, ctx, runtime, options),
+	);
 	runningSubagents.set(running.id, running);
 	return running;
 }
@@ -201,6 +254,9 @@ function getInteractiveWatchRuntime(): InteractiveWatchRuntime {
 }
 
 export async function watchSubagent(running: RunningSubagent, signal?: AbortSignal) {
+	if (running.backend === "paseo") {
+		return watchPaseoSubagent(running, signal ?? moduleAbortController.signal);
+	}
 	return watchSubagentWithRuntime(running, getInteractiveWatchRuntime(), signal ?? moduleAbortController.signal);
 }
 

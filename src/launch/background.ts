@@ -117,6 +117,7 @@ export async function launchBackgroundSubagent(
 		title: getSubagentDisplayTitle(params),
 		agent: params.agent,
 		mode: "background",
+		backend: "local-process",
 		executionState: "running",
 		deliveryState: "detached",
 		parentClosePolicy: resolveSubagentParentClosePolicy(prepared.agentDefs),

@@ -39,7 +39,7 @@ export const SPAWNING_TOOL_NAMES: ReadonlySet<string> = new Set([
  * unless explicitly denied. `set_tab_title` is optional and is added only when
  * PI_SUBAGENT_ENABLE_SET_TAB_TITLE=1 and not denied.
  */
-export const SUBAGENT_PROTOCOL_TOOL_NAMES: readonly string[] = [
+const SUBAGENT_PROTOCOL_TOOL_NAMES: readonly string[] = [
 	CALLER_PING_TOOL_NAME,
 	SUBAGENT_DONE_TOOL_NAME,
 	SET_TAB_TITLE_TOOL_NAME,

@@ -1,4 +1,5 @@
 import { closeSurface } from "../mux.ts";
+import { stopPaseoSubagent } from "../paseo/stop.ts";
 import type {
 	CompletedSubagentResult,
 	ParentClosePolicy,
@@ -57,6 +58,11 @@ function terminateInteractiveSubagent(running: RunningSubagent): void {
 	} catch {}
 }
 
+function terminatePaseoSubagent(running: RunningSubagent): void {
+	running.abortController?.abort();
+	void stopPaseoSubagent(running).catch(() => {});
+}
+
 export function shutdownSubagentsForParentExit(
 	runtime: ShutdownRuntime,
 	options: ShutdownSubagentsOptions = {},
@@ -92,7 +98,8 @@ export function shutdownSubagentsForParentExit(
 			policy: agent.parentClosePolicy,
 			action: "terminate",
 		});
-		if (agent.mode === "interactive") terminateInteractiveSubagent(agent);
+		if (agent.backend === "paseo") terminatePaseoSubagent(agent);
+		else if (agent.mode === "interactive") terminateInteractiveSubagent(agent);
 		else abortBackgroundSubagent(agent, escalationMs);
 	}
 

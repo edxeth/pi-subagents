@@ -67,6 +67,8 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 			id: cached.id,
 			name: cached.name,
 			agent: cached.agent,
+			backend: cached.backend,
+			paseoAgentId: cached.paseoAgentId,
 			status: cached.status,
 			mode: cached.mode,
 			parentClosePolicy: cached.parentClosePolicy,
