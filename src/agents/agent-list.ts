@@ -1,6 +1,6 @@
 import type { ResolvedAgentDefinition } from "./definitions.ts";
 import { getEffectiveAgentDefinitions } from "./definitions.ts";
-import { buildModelRef, parseAllowedModels, renderAllowedModelChoices } from "./model-refs.ts";
+import { buildModelRef, parseAllowedModels } from "./model-refs.ts";
 
 type SubagentSessionMode = "standalone" | "lineage-only" | "fork";
 
@@ -64,21 +64,23 @@ function getCompletion(
 }
 
 function renderDefaultModelLine(entry: AgentListEntry): string | undefined {
-	if (parseAllowedModels(entry.allowedModels).length === 0) return undefined;
 	const ref = buildModelRef(entry.model, entry.thinking);
 	return ref ? `  default_model: ${ref}` : undefined;
 }
 
 function renderModelsLine(entry: AgentListEntry): string | undefined {
 	if (entry.allowModelOverride === false) return undefined;
-	const choices = renderAllowedModelChoices(entry.allowedModels);
-	return choices ? `  models: ${choices}` : undefined;
+	const allowed = parseAllowedModels(entry.allowedModels);
+	if (allowed.length === 0) return "  models: any model ref";
+	const defaultModel = buildModelRef(entry.model, entry.thinking);
+	const choices = [...new Set([defaultModel, ...allowed].filter((ref): ref is string => !!ref))];
+	return `  models: ${choices.join(" | ")}`;
 }
 
 export function renderAgentListReminder(
 	entries: AgentListEntry[],
 ): string {
-	const hasModelChoices = entries.some((entry) => entry.allowModelOverride !== false && parseAllowedModels(entry.allowedModels).length > 0);
+	const hasModelInfo = entries.some((entry) => buildModelRef(entry.model, entry.thinking) || entry.allowModelOverride !== false);
 	const agentLines = entries.map((entry) => {
 		return [
 			`- \`${entry.name}\`: ${entry.description}`,
@@ -103,8 +105,8 @@ export function renderAgentListReminder(
 		"- context=fresh_chat_needs_full_brief means write a self-contained task with objective, files, constraints, and expected output.",
 		"- context=copy_of_this_chat means the helper starts from this conversation; give scope, boundary, and expected output without repeating all background.",
 		"- completion=exits_automatically means the helper should finish and close itself. completion=human_or_agent_must_finish means the session stays open until the human or helper explicitly completes it.",
-		...(hasModelChoices
-			? ["- `default_model:` is what runs when model/thinking are omitted. `models:` lists this agent's selectable model refs. To pick one, copy it exactly; split `provider/model:thinking` into model=`provider/model`, thinking=`thinking`. Never use a model not listed for that agent."]
+		...(hasModelInfo
+			? ["- `default_model:` runs when model/thinking are omitted. `models:` lists accepted overrides; `models: any model ref` accepts any available model. An agent with no `models:` line ignores model and thinking overrides. For a listed ref, copy it exactly and split `provider/model:thinking` into model=`provider/model`, thinking=`thinking`. Never use an unlisted model when an explicit list is present."]
 			: []),
 		"- If the user names an agent that is not listed, say it was not found and stop; do not suggest a different listed agent.",
 		"</subagent-rules>",

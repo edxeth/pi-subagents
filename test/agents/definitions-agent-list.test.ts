@@ -377,9 +377,9 @@ describe("agent definitions and catalog", () => {
 		const entries = getAgentListEntriesForTest(dir);
 		const reminder = renderAgentListReminderForTest(entries);
 		assert.match(reminder, /default_model: zai-messages\/glm-5\.1:high/);
-		assert.match(reminder, /models: openai-ws\/gpt-5\.5:low \| nahcrof\/glm-5\.1:off/);
-		assert.doesNotMatch(reminder, /- `scout`: Inspect files\n(?:  .+\n){4,5}  models:/);
-		assert.match(reminder, /`models:` lists this agent's selectable model refs/);
+		assert.match(reminder, /models: zai-messages\/glm-5\.1:high \| openai-ws\/gpt-5\.5:low \| nahcrof\/glm-5\.1:off/);
+		assert.match(reminder, /- `scout`: Inspect files\n(?:  .+\n){4,5}  models: any model ref/);
+		assert.match(reminder, /`models:` lists accepted overrides/);
 
 		const firstSignature = getAgentListSignatureForTest(entries);
 		writeFileSync(
@@ -387,6 +387,24 @@ describe("agent definitions and catalog", () => {
 			`---\nname: reviewer\ndescription: Review changes\nmode: background\nmodel: zai-messages/glm-5.1:high\nallow-model-override: true\nallowed-models: anthropic-kiro/claude-opus-4-8-thinking:xhigh\n---\n\nReviewer body.`,
 		);
 		assert.notEqual(firstSignature, getAgentListSignatureForTest(getAgentListEntriesForTest(dir)));
+	});
+
+	it("renders open model overrides when allow-model-override is true without allowed-models", () => {
+		const dir = createTestDir();
+		const configDir = join(dir, "agent-root");
+		const agentsDir = join(configDir, "agents");
+		mkdirSync(agentsDir, { recursive: true });
+		process.env.PI_CODING_AGENT_DIR = configDir;
+
+		writeFileSync(
+			join(agentsDir, "debugger.md"),
+			`---\nname: debugger\ndescription: Diagnose failures\nmodel: openai-cpa/gpt-5.6-sol\nthinking: max\nallow-model-override: true\n---\n\nDebugger body.`,
+		);
+
+		const reminder = renderAgentListReminderForTest(getAgentListEntriesForTest(dir));
+		assert.match(reminder, /default_model: openai-cpa\/gpt-5\.6-sol:max/);
+		assert.match(reminder, /models: any model ref/);
+		assert.match(reminder, /`models: any model ref` accepts any available model/);
 	});
 
 	it("hides selectable models when allow-model-override is false", () => {
@@ -402,8 +420,8 @@ describe("agent definitions and catalog", () => {
 		);
 
 		const reminder = renderAgentListReminderForTest(getAgentListEntriesForTest(dir));
-		assert.doesNotMatch(reminder, /models:/);
-		assert.doesNotMatch(reminder, /selectable model refs/);
+		assert.doesNotMatch(reminder, /\n  models:/);
+		assert.match(reminder, /no `models:` line ignores model and thinking overrides/);
 	});
 
 	it("defaults spawning to false for named agent definitions", () => {
