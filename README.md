@@ -182,7 +182,7 @@ env: |
   SOME_VALUE=value,with,commas
 ```
 
-Pi splits `env` by line. It does not split values by comma. When you set `PI_CODING_AGENT_DIR`, the child uses that directory for its Pi config and sessions.
+Pi splits `env` by line. It does not split values by comma. When you set `PI_CODING_AGENT_DIR`, the child uses that directory for its Pi config and sessions. For per-agent Zellij placement, set `PI_SUBAGENT_ZELLIJ_PLACEMENT` here; the parent reads that value at launch before the child pane exists. See [Zellij placement](#zellij-placement).
 
 `trust-project` controls Pi's project-local trust boundary. The default `false` passes `--no-approve`, so child sessions ignore project-local settings and project-local context files such as `AGENTS.md`/`CLAUDE.md` even when the parent project was previously approved. Set `trust-project: true` only for interactive children that should inherit those project-local resources. Background children still generate `--no-approve`; `flags` is the explicit advanced escape hatch if you need to override that safety default.
 
@@ -626,7 +626,15 @@ Zellij groups children by their immediate parent session. The first child splits
 - `floating`: each child opens as a pinned floating pane.
 - `tab-stack`: first child opens a dedicated tab, siblings stack in that tab.
 
-`right-stack`, `down-stack`, and `auto` fall back to a dedicated tab when a split would fall below `PI_SUBAGENT_ZELLIJ_MIN_COLUMNS` or `PI_SUBAGENT_ZELLIJ_MIN_ROWS`. The policy applies to all interactive subagents launched under Zellij and is not agent frontmatter.
+`right-stack`, `down-stack`, and `auto` fall back to a dedicated tab when a split would fall below `PI_SUBAGENT_ZELLIJ_MIN_COLUMNS` or `PI_SUBAGENT_ZELLIJ_MIN_ROWS`.
+
+The parent environment sets the default for all interactive subagents. An agent can override it for its own launches through the existing [`env`](#agent-definitions) frontmatter:
+
+```yaml
+env: PI_SUBAGENT_ZELLIJ_PLACEMENT=down-stack
+```
+
+This is a parent-read exception to the usual child-environment contract because placement must be resolved before the child pane exists. The agent value overrides the parent default. Placement groups are scoped by immediate parent and resolved policy, so agents with different policies do not overwrite each other's stack anchors. On resume, a persisted per-agent `env` value still wins; without one, the current parent default wins, then the originally persisted policy is the fallback.
 
 Zellij 0.44.x needs a short focus transaction for directional and stacked placement, and stacked insertion changes client focus. Those policies require exactly one attached Zellij client. With more clients, use `floating` or detach the extras.
 

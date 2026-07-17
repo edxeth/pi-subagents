@@ -145,6 +145,35 @@ fi
 		assert.doesNotMatch(log, /--stacked.*\| pane=20/);
 	});
 
+	it("keeps same-parent anchors separate when effective policies alternate", () => {
+		writePanes(panesFile, [terminalPane(10)]);
+		const right: ZellijPlacementContext = {
+			groupKey: "parent-session-mixed",
+			parentPaneId: 10,
+			policy: "right-stack",
+		};
+		const down: ZellijPlacementContext = {
+			...right,
+			policy: "down-stack",
+		};
+
+		assert.equal(createZellijSurface("right-first", right), "pane:30");
+		writePanes(panesFile, [terminalPane(10), terminalPane(30)]);
+		assert.equal(createZellijSurface("down-first", down), "pane:31");
+		writePanes(panesFile, [
+			terminalPane(10),
+			terminalPane(30),
+			terminalPane(31),
+		]);
+		assert.equal(createZellijSurface("right-second", right), "pane:32");
+
+		const log = readFileSync(logFile, "utf8");
+		assert.match(log, /new-pane --direction right/);
+		assert.match(log, /new-pane --direction down/);
+		assert.match(log, /new-pane --stacked --near-current-pane.*\| pane=30/);
+		assert.doesNotMatch(log, /--stacked.*\| pane=31/);
+	});
+
 	it("recreates a missing owned anchor instead of stacking onto a foreign pane", () => {
 		writePanes(panesFile, [terminalPane(10), terminalPane(20)]);
 		const context: ZellijPlacementContext = {

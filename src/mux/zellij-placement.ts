@@ -327,7 +327,7 @@ function createZellijSurfaceUnlocked(
 	}
 
 	const state = readZellijPlacementState();
-	const groupId = zellijPlacementGroupId(context.groupKey, parentPaneId);
+	const groupId = zellijPlacementGroupId(context.groupKey, parentPaneId, policy);
 	const previous = state.groups[groupId];
 	const liveOwnedPaneIds = previous?.paneIds.filter((paneId) =>
 		panes.some((pane) => pane.id === paneId && !pane.exited),

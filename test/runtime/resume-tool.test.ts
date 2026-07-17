@@ -20,7 +20,10 @@ import {
 	existsSync,
 } from "../support/index.ts";
 import { resolve } from "node:path";
-import { resumeSubagentSession } from "../../src/runtime/resume-service.ts";
+import {
+	resolveResumeZellijPlacementPolicy,
+	resumeSubagentSession,
+} from "../../src/runtime/resume-service.ts";
 
 async function readNonEmptyFileEventually(path: string): Promise<string> {
 	let lastText = "";
@@ -33,6 +36,65 @@ async function readNonEmptyFileEventually(path: string): Promise<string> {
 	}
 	throw new Error(`Timed out waiting for ${path}; last content: ${lastText}`);
 }
+
+describe("subagent_resume Zellij placement", () => {
+	it("keeps the persisted per-agent policy over the current parent default", () => {
+		assert.equal(
+			resolveResumeZellijPlacementPolicy(
+				{
+					env: "PI_SUBAGENT_ZELLIJ_PLACEMENT=down-stack",
+					zellijPlacementPolicy: "down-stack",
+				} as Parameters<typeof resolveResumeZellijPlacementPolicy>[0],
+				"floating",
+			),
+			"down-stack",
+		);
+	});
+
+	it("lets the current parent default override a persisted operator policy", () => {
+		assert.equal(
+			resolveResumeZellijPlacementPolicy(
+				{ zellijPlacementPolicy: "down-stack" } as Parameters<
+					typeof resolveResumeZellijPlacementPolicy
+				>[0],
+				"floating",
+			),
+			"floating",
+		);
+	});
+
+	it("treats an empty persisted agent value as an explicit auto override", () => {
+		assert.equal(
+			resolveResumeZellijPlacementPolicy(
+				{
+					env: "PI_SUBAGENT_ZELLIJ_PLACEMENT=",
+					zellijPlacementPolicy: "down-stack",
+				} as Parameters<typeof resolveResumeZellijPlacementPolicy>[0],
+				"floating",
+			),
+			"auto",
+		);
+	});
+
+	it("uses the current parent default when old metadata has no persisted policy", () => {
+		assert.equal(
+			resolveResumeZellijPlacementPolicy(undefined, "right-stack"),
+			"right-stack",
+		);
+	});
+
+	it("treats an empty current parent value as an explicit auto override", () => {
+		assert.equal(
+			resolveResumeZellijPlacementPolicy(
+				{ zellijPlacementPolicy: "down-stack" } as Parameters<
+					typeof resolveResumeZellijPlacementPolicy
+				>[0],
+				"",
+			),
+			"auto",
+		);
+	});
+});
 
 describe("subagent_resume name identity", () => {
 	it("resolves canonical name from persisted launch metadata", async () => {

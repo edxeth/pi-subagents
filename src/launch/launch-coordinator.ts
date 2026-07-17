@@ -6,6 +6,7 @@ import {
 	type PreparedSubagentLaunch,
 	type SubagentLaunchContext,
 } from "./prep.ts";
+import { parseEnvString } from "./env.ts";
 import { resolveSubagentNoSession } from "./policy.ts";
 import { getNoSessionSeedMode, seedPreparedSubagentSession } from "./seed-child-session.ts";
 import type { SubagentParamsInput } from "../types.ts";
@@ -55,16 +56,21 @@ export async function coordinateSubagentLaunch(
 		noSession,
 	);
 	const systemPrompt = getCoordinatedSystemPrompt(prepared);
-	const zellijPlacement =
+	const agentEnv = parseEnvString(prepared.agentDefs?.env);
+	const zellijPlacementPolicy =
 		options.mode === "interactive" && process.env.ZELLIJ_PANE_ID
-			? {
-					zellijPlacementPolicy: resolveZellijPlacementPolicy(
+			? resolveZellijPlacementPolicy(
+					agentEnv.PI_SUBAGENT_ZELLIJ_PLACEMENT ??
 						process.env.PI_SUBAGENT_ZELLIJ_PLACEMENT,
-					),
-					zellijPlacementGroupKey:
-						prepared.sessionFile ?? `session:${ctx.sessionManager.getSessionId()}`,
-				}
+				)
 			: undefined;
+	const zellijPlacement = zellijPlacementPolicy
+		? {
+				zellijPlacementPolicy,
+				zellijPlacementGroupKey:
+					prepared.sessionFile ?? `session:${ctx.sessionManager.getSessionId()}`,
+			}
+		: undefined;
 	const launchMetadata = buildPersistedSubagentLaunchMetadata(
 		prepared,
 		params,

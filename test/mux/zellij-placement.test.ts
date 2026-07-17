@@ -25,8 +25,15 @@ describe("zellij placement", () => {
 
 	it("scopes owned anchor ids to one parent runtime", () => {
 		assert.notEqual(
-			zellijPlacementGroupId("parent", 7, "runtime-a"),
-			zellijPlacementGroupId("parent", 7, "runtime-b"),
+			zellijPlacementGroupId("parent", 7, "right-stack", "runtime-a"),
+			zellijPlacementGroupId("parent", 7, "right-stack", "runtime-b"),
+		);
+	});
+
+	it("scopes owned anchor ids by effective placement policy", () => {
+		assert.notEqual(
+			zellijPlacementGroupId("parent", 7, "right-stack", "runtime-a"),
+			zellijPlacementGroupId("parent", 7, "down-stack", "runtime-a"),
 		);
 	});
 

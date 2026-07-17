@@ -37,10 +37,13 @@ function zellijPlacementStatePath(): string {
 export function zellijPlacementGroupId(
 	groupKey: string,
 	parentPaneId: number,
+	policy: ZellijPlacementPolicy,
 	runtimeId = ZELLIJ_PLACEMENT_RUNTIME_ID,
 ): string {
 	return createHash("sha256")
-		.update(`${zellijSessionSlug()}\0${runtimeId}\0${groupKey}\0${parentPaneId}`)
+		.update(
+			`${zellijSessionSlug()}\0${runtimeId}\0${groupKey}\0${parentPaneId}\0${policy}`,
+		)
 		.digest("hex")
 		.slice(0, 24);
 }

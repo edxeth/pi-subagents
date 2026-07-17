@@ -92,6 +92,17 @@ function splitResumeModelRef(
 	return { model: model.slice(0, idx), thinking: suffix, explicitThinking: true };
 }
 
+export function resolveResumeZellijPlacementPolicy(
+	launchMetadata: PersistedSubagentLaunchMetadata | undefined,
+	parentPolicy: string | undefined,
+): ReturnType<typeof resolveZellijPlacementPolicy> | undefined {
+	const agentPolicy = parseEnvString(launchMetadata?.env)
+		.PI_SUBAGENT_ZELLIJ_PLACEMENT;
+	if (agentPolicy !== undefined) return resolveZellijPlacementPolicy(agentPolicy);
+	if (parentPolicy !== undefined) return resolveZellijPlacementPolicy(parentPolicy);
+	return launchMetadata?.zellijPlacementPolicy;
+}
+
 export function resolveResumeLaunchMetadataForInvocation(
 	launchMetadata: PersistedSubagentLaunchMetadata | undefined,
 	requestedModel: string | undefined,
@@ -311,9 +322,10 @@ export async function resumeSubagentSession(
 	} else {
 		const surfaceName = invocationMetadata?.sessionTitle ?? displayName;
 		const parentPaneId = Number(process.env.ZELLIJ_PANE_ID);
-		const configuredZellijPolicy = process.env.PI_SUBAGENT_ZELLIJ_PLACEMENT
-			? resolveZellijPlacementPolicy(process.env.PI_SUBAGENT_ZELLIJ_PLACEMENT)
-			: invocationMetadata?.zellijPlacementPolicy;
+		const configuredZellijPolicy = resolveResumeZellijPlacementPolicy(
+			invocationMetadata,
+			process.env.PI_SUBAGENT_ZELLIJ_PLACEMENT,
+		);
 		const surface = createSurface(surfaceName, {
 			...(invocationMetadata?.zellijPlacementGroupKey &&
 			Number.isInteger(parentPaneId)
