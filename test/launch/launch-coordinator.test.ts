@@ -89,6 +89,40 @@ describe("launch coordinator", () => {
 		assert.equal(launch.launchEntryCount, entries.length);
 	});
 
+	it("persists the operator Zellij placement policy and immediate parent group", async () => {
+		const cwd = createTestDir();
+		mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "agents", "scout.md"),
+			"---\nname: scout\nmode: interactive\n---\nScout.",
+		);
+		const parentSession = join(cwd, "parent-zellij.jsonl");
+		writeFileSync(parentSession, `${JSON.stringify(SESSION_HEADER)}\n`);
+		process.env.ZELLIJ_PANE_ID = "7";
+		process.env.PI_SUBAGENT_ZELLIJ_PLACEMENT = "down-stack";
+
+		const launch = await coordinateSubagentLaunch(
+			{
+				name: "zellij-scout",
+				title: "Zellij scout",
+				task: "Scout",
+				agent: "scout",
+			},
+			{
+				cwd,
+				sessionManager: {
+					getSessionFile: () => parentSession,
+					getSessionId: () => "parent-session-id",
+					getLeafId: () => null,
+				},
+			},
+			{ mode: "interactive" },
+		);
+
+		assert.equal(launch.launchMetadata.zellijPlacementPolicy, "down-stack");
+		assert.equal(launch.launchMetadata.zellijPlacementGroupKey, parentSession);
+	});
+
 	it("persists identity system prompt without changing the child session path", async () => {
 		const cwd = createTestDir();
 		mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });

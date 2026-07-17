@@ -17,6 +17,7 @@ import {
 } from "../session/session-files.ts";
 import { ChildSessionStorage } from "../session/child-session-storage.ts";
 import { getEntryCount } from "../session/session.ts";
+import { resolveZellijPlacementPolicy } from "../mux.ts";
 
 interface CoordinatedSystemPrompt {
 	flag: "--system-prompt" | "--append-system-prompt";
@@ -54,6 +55,16 @@ export async function coordinateSubagentLaunch(
 		noSession,
 	);
 	const systemPrompt = getCoordinatedSystemPrompt(prepared);
+	const zellijPlacement =
+		options.mode === "interactive" && process.env.ZELLIJ_PANE_ID
+			? {
+					zellijPlacementPolicy: resolveZellijPlacementPolicy(
+						process.env.PI_SUBAGENT_ZELLIJ_PLACEMENT,
+					),
+					zellijPlacementGroupKey:
+						prepared.sessionFile ?? `session:${ctx.sessionManager.getSessionId()}`,
+				}
+			: undefined;
 	const launchMetadata = buildPersistedSubagentLaunchMetadata(
 		prepared,
 		params,
@@ -61,6 +72,7 @@ export async function coordinateSubagentLaunch(
 		sessionMode,
 		boundarySystemPrompt,
 		systemPrompt?.text ?? options.systemPrompt,
+		zellijPlacement,
 	);
 	const storage = new ChildSessionStorage(prepared.subagentSessionFile);
 	if (existsSync(prepared.subagentSessionFile)) {

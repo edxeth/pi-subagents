@@ -16,6 +16,7 @@ export {
 	renameCurrentTab,
 	renameWorkspace,
 } from "./mux/surfaces.ts";
+export { resolveZellijPlacementPolicy } from "./mux/zellij-placement.ts";
 export {
 	closeSurface,
 	readScreen,

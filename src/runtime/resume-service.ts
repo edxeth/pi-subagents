@@ -22,7 +22,13 @@ import {
 	getResumeCwd,
 	resolveResumeLaunchMetadata,
 } from "../launch/resume.ts";
-import { createSurface, muxSetupHint, sendShellCommand, shellEscape } from "../mux.ts";
+import {
+	createSurface,
+	muxSetupHint,
+	resolveZellijPlacementPolicy,
+	sendShellCommand,
+	shellEscape,
+} from "../mux.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import { getEntryCount } from "../session/session.ts";
 import {
@@ -304,7 +310,22 @@ export async function resumeSubagentSession(
 		});
 	} else {
 		const surfaceName = invocationMetadata?.sessionTitle ?? displayName;
-		const surface = createSurface(surfaceName);
+		const parentPaneId = Number(process.env.ZELLIJ_PANE_ID);
+		const configuredZellijPolicy = process.env.PI_SUBAGENT_ZELLIJ_PLACEMENT
+			? resolveZellijPlacementPolicy(process.env.PI_SUBAGENT_ZELLIJ_PLACEMENT)
+			: invocationMetadata?.zellijPlacementPolicy;
+		const surface = createSurface(surfaceName, {
+			...(invocationMetadata?.zellijPlacementGroupKey &&
+			Number.isInteger(parentPaneId)
+				? {
+						zellij: {
+							groupKey: invocationMetadata.zellijPlacementGroupKey,
+							parentPaneId,
+							policy: configuredZellijPolicy,
+						},
+					}
+				: {}),
+		});
 		await new Promise<void>((resolve) =>
 			setTimeout(resolve, runtime.getShellReadyDelayMs()),
 		);

@@ -71,7 +71,21 @@ export async function launchInteractiveSubagent(
 	});
 	const surfacePreCreated = !!options?.surface;
 	const surfaceName = prepared.sessionTitle ?? params.name;
-	const surface = options?.surface ?? createSurface(surfaceName);
+	const parentPaneId = Number(process.env.ZELLIJ_PANE_ID);
+	const surface =
+		options?.surface ??
+		createSurface(surfaceName, {
+			...(launch.launchMetadata.zellijPlacementGroupKey &&
+			Number.isInteger(parentPaneId)
+				? {
+						zellij: {
+							groupKey: launch.launchMetadata.zellijPlacementGroupKey,
+							parentPaneId,
+							policy: launch.launchMetadata.zellijPlacementPolicy,
+						},
+					}
+				: {}),
+		});
 	traceSubagentLaunch("interactive.surface", {
 		id,
 		name: params.name,

@@ -12,7 +12,10 @@ import {
 	renameHerdrCurrentTab,
 	renameHerdrCurrentWorkspace,
 } from "./herdr-surfaces.ts";
-import { createZellijSurface } from "./zellij-placement.ts";
+import {
+	createZellijSurface,
+	type ZellijPlacementContext,
+} from "./zellij-placement.ts";
 
 const DEFAULT_INTERACTIVE_MIN_COLUMNS = 50;
 const DEFAULT_INTERACTIVE_MIN_ROWS = 10;
@@ -24,7 +27,14 @@ function positiveNumber(value: unknown): number | undefined {
 
 // ── Surface creation ───────────────────────────────────────────────────────
 
-export function createSurface(name: string): string {
+export interface SurfaceCreationOptions {
+	zellij?: ZellijPlacementContext;
+}
+
+export function createSurface(
+	name: string,
+	options?: SurfaceCreationOptions,
+): string {
 	const backend = getMuxBackend();
 
 	if (backend === "cmux") {
@@ -40,7 +50,7 @@ export function createSurface(name: string): string {
 	}
 
 	if (backend === "zellij") {
-		return createZellijSurface(name);
+		return createZellijSurface(name, options?.zellij);
 	}
 
 	if (backend === "herdr") {

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { zellijPlacementGroupId } from "../../src/mux/zellij-anchor-state.ts";
 import {
-	canSplitZellijPane,
-	predictZellijSplitDirection,
-	selectZellijPlacement,
-	selectZellijStackPlacement,
+	canSplitZellijPaneInDirection,
+	resolveZellijPlacementPolicy,
+	selectLiveOwnedZellijAnchor,
+	selectZellijFirstPlacement,
 	type ZellijPaneSnapshot,
 } from "../../src/mux/zellij-placement.ts";
 
@@ -16,225 +17,148 @@ describe("zellij placement", () => {
 		is_floating: false,
 		is_selectable: true,
 		exited: false,
-		pane_rows: 20,
-		pane_columns: 80,
+		pane_rows: 30,
+		pane_columns: 120,
 		tab_id: 1,
 		...overrides,
 	});
 
-	it("matches Zellij direction and minimum split rules", () => {
-		assert.equal(
-			predictZellijSplitDirection(pane({ pane_rows: 5, pane_columns: 11 })),
-			"right",
-		);
-		assert.equal(
-			predictZellijSplitDirection(pane({ pane_rows: 11, pane_columns: 5 })),
-			"down",
-		);
-		assert.equal(
-			predictZellijSplitDirection(pane({ pane_rows: 5, pane_columns: 10 })),
-			null,
-		);
-		assert.equal(
-			predictZellijSplitDirection(pane({ pane_rows: 4, pane_columns: 80 })),
-			null,
-		);
-
-		assert.equal(
-			canSplitZellijPane(pane({ pane_rows: 5, pane_columns: 11 })),
-			true,
-		);
-		assert.equal(
-			canSplitZellijPane(pane({ pane_rows: 11, pane_columns: 5 })),
-			true,
-		);
-		assert.equal(
-			canSplitZellijPane(pane({ pane_rows: 5, pane_columns: 10 })),
-			false,
-		);
-		assert.equal(
-			canSplitZellijPane(pane({ pane_rows: 4, pane_columns: 80 })),
-			false,
-		);
-
-		assert.equal(
-			canSplitZellijPane(pane({ pane_rows: 30, pane_columns: 100 }), 80, 20),
-			false,
-		);
-		assert.equal(
-			canSplitZellijPane(pane({ pane_rows: 45, pane_columns: 100 }), 80, 20),
-			true,
-		);
-		assert.equal(
-			canSplitZellijPane(pane({ pane_rows: 30, pane_columns: 170 }), 80, 20),
-			true,
-		);
-		assert.equal(
-			canSplitZellijPane(pane({ pane_rows: 31, pane_columns: 47 }), 50, 10),
-			false,
-		);
-		assert.equal(
-			canSplitZellijPane(pane({ pane_rows: 31, pane_columns: 77 }), 50, 10),
-			true,
+	it("scopes owned anchor ids to one parent runtime", () => {
+		assert.notEqual(
+			zellijPlacementGroupId("parent", 7, "runtime-a"),
+			zellijPlacementGroupId("parent", 7, "runtime-b"),
 		);
 	});
 
-	it("uses tab-scoped split only when all Zellij split candidates are safe", () => {
-		const plan = selectZellijPlacement(
-			[
-				pane({ id: 10, tab_id: 1, pane_rows: 40, pane_columns: 120 }),
-				pane({ id: 11, tab_id: 1, pane_rows: 120, pane_columns: 100 }),
-				pane({ id: 12, tab_id: 2, pane_rows: 60, pane_columns: 200 }),
-			],
-			10,
+	it("resolves supported operator policies and rejects invalid values", () => {
+		assert.equal(resolveZellijPlacementPolicy(undefined), "auto");
+		assert.equal(resolveZellijPlacementPolicy("right-stack"), "right-stack");
+		assert.equal(resolveZellijPlacementPolicy("down-stack"), "down-stack");
+		assert.equal(resolveZellijPlacementPolicy("floating"), "floating");
+		assert.equal(resolveZellijPlacementPolicy("tab-stack"), "tab-stack");
+		assert.throws(
+			() => resolveZellijPlacementPolicy("largest-pane"),
+			/PI_SUBAGENT_ZELLIJ_PLACEMENT.*largest-pane/,
 		);
+	});
 
-		assert.deepEqual(plan, {
+	it("checks explicit split directions against Pi's usable minimum", () => {
+		assert.equal(
+			canSplitZellijPaneInDirection(
+				pane({ pane_rows: 20, pane_columns: 100 }),
+				"right",
+				50,
+				10,
+			),
+			true,
+		);
+		assert.equal(
+			canSplitZellijPaneInDirection(
+				pane({ pane_rows: 20, pane_columns: 99 }),
+				"right",
+				50,
+				10,
+			),
+			false,
+		);
+		assert.equal(
+			canSplitZellijPaneInDirection(
+				pane({ pane_rows: 20, pane_columns: 50 }),
+				"down",
+				50,
+				10,
+			),
+			true,
+		);
+		assert.equal(
+			canSplitZellijPaneInDirection(
+				pane({ pane_rows: 19, pane_columns: 50 }),
+				"down",
+				50,
+				10,
+			),
+			false,
+		);
+	});
+
+	it("places the first right-stack child beside the parent, never a foreign pane", () => {
+		const panes = [
+			pane({ id: 10, pane_rows: 40, pane_columns: 120 }),
+			pane({ id: 11, pane_rows: 100, pane_columns: 300 }),
+		];
+
+		assert.deepEqual(selectZellijFirstPlacement(panes, 10, "right-stack"), {
 			mode: "split",
-			anchorPaneId: 11,
-			targetPaneId: 11,
+			parentPaneId: 10,
 			tabId: 1,
-			splitDirection: "down",
+			direction: "right",
 		});
 	});
 
-	it("stacks when any Zellij split candidate would fall below Pi's configured minimum", () => {
-		const plan = selectZellijPlacement(
-			[
-				pane({ id: 10, tab_id: 1, pane_rows: 100, pane_columns: 47 }),
-				pane({ id: 11, tab_id: 1, pane_rows: 31, pane_columns: 77 }),
-			],
-			10,
-			50,
-			10,
+	it("supports down-stack and automatic parent-only direction selection", () => {
+		const tallParent = pane({ id: 10, pane_rows: 60, pane_columns: 100 });
+		assert.deepEqual(
+			selectZellijFirstPlacement([tallParent], 10, "down-stack"),
+			{
+				mode: "split",
+				parentPaneId: 10,
+				tabId: 1,
+				direction: "down",
+			},
 		);
-
-		assert.deepEqual(plan, {
-			mode: "stack",
-			anchorPaneId: 11,
-			targetPaneId: 11,
+		assert.deepEqual(selectZellijFirstPlacement([tallParent], 10, "auto"), {
+			mode: "split",
+			parentPaneId: 10,
 			tabId: 1,
+			direction: "down",
 		});
 	});
 
-	it("stacks when Zellij would split a pane below Pi's usable minimum", () => {
-		const plan = selectZellijPlacement(
-			[
-				pane({ id: 10, tab_id: 1, pane_rows: 20, pane_columns: 20 }),
-				pane({ id: 11, tab_id: 1, pane_rows: 18, pane_columns: 60 }),
-				pane({ id: 12, tab_id: 1, pane_rows: 10, pane_columns: 70 }),
-			],
-			10,
+	it("falls back to a dedicated tab when the requested split is too small", () => {
+		const smallParent = pane({ id: 10, pane_rows: 18, pane_columns: 90 });
+		assert.deepEqual(
+			selectZellijFirstPlacement([smallParent], 10, "right-stack"),
+			{ mode: "tab" },
 		);
-
-		assert.deepEqual(plan, {
-			mode: "stack",
-			anchorPaneId: 11,
-			targetPaneId: 11,
-			tabId: 1,
+		assert.deepEqual(
+			selectZellijFirstPlacement([smallParent], 10, "down-stack"),
+			{ mode: "tab" },
+		);
+		assert.deepEqual(selectZellijFirstPlacement([smallParent], 10, "auto"), {
+			mode: "tab",
 		});
 	});
 
-	it("does not split narrow Zellij panes when actual split direction may differ from prediction", () => {
-		const plan = selectZellijPlacement(
-			[pane({ id: 10, tab_id: 1, pane_rows: 22, pane_columns: 80 })],
-			10,
-			50,
-			10,
-		);
-
-		assert.equal(plan, null);
-	});
-
-	it("never chooses the parent pane as the stack target", () => {
-		const plan = selectZellijStackPlacement(
-			[
-				pane({ id: 10, tab_id: 1, pane_rows: 60, pane_columns: 200 }),
-				pane({ id: 11, tab_id: 1, pane_rows: 10, pane_columns: 20 }),
-				pane({ id: 12, tab_id: 1, pane_rows: 8, pane_columns: 30 }),
-			],
-			10,
-		);
-
-		assert.deepEqual(plan, {
-			mode: "stack",
-			anchorPaneId: 12,
-			targetPaneId: 12,
+	it("plans floating and tab-stack without inspecting unrelated panes", () => {
+		const parent = pane({ id: 10 });
+		assert.deepEqual(selectZellijFirstPlacement([parent], 10, "floating"), {
+			mode: "floating",
+			parentPaneId: 10,
 			tabId: 1,
+		});
+		assert.deepEqual(selectZellijFirstPlacement([], 10, "tab-stack"), {
+			mode: "tab",
 		});
 	});
 
-	it("does not stack when the only usable pane is the parent", () => {
-		const plan = selectZellijStackPlacement(
-			[pane({ id: 10, tab_id: 1, pane_rows: 60, pane_columns: 200 })],
-			10,
-		);
+	it("reuses only live panes recorded as owned by the parent group", () => {
+		const panes = [
+			pane({ id: 10, pane_columns: 60 }),
+			pane({ id: 20, pane_columns: 300 }),
+			pane({ id: 31, pane_columns: 60 }),
+			pane({ id: 32, pane_columns: 60, exited: true }),
+		];
 
-		assert.equal(plan, null);
+		assert.deepEqual(selectLiveOwnedZellijAnchor(panes, [32, 31]), panes[2]);
+		assert.equal(selectLiveOwnedZellijAnchor(panes, [32, 99]), null);
 	});
 
-	it("stacks on the largest usable non-parent pane when none can split", () => {
-		const plan = selectZellijPlacement(
-			[
-				pane({ id: 10, tab_id: 1, pane_rows: 5, pane_columns: 10 }),
-				pane({ id: 11, tab_id: 1, pane_rows: 6, pane_columns: 8 }),
-				pane({ id: 12, tab_id: 2, pane_rows: 60, pane_columns: 200 }),
-			],
-			10,
-		);
-
-		assert.deepEqual(plan, {
-			mode: "stack",
-			anchorPaneId: 11,
-			targetPaneId: 11,
-			tabId: 1,
-		});
-	});
-
-	it("ignores floating, plugin, exited, unselectable, and other-tab panes", () => {
-		const plan = selectZellijPlacement(
-			[
-				pane({ id: 10, tab_id: 1, pane_rows: 5, pane_columns: 10 }),
-				pane({
-					id: 11,
-					tab_id: 1,
-					pane_rows: 60,
-					pane_columns: 200,
-					is_floating: true,
-				}),
-				pane({
-					id: 12,
-					tab_id: 1,
-					pane_rows: 60,
-					pane_columns: 200,
-					is_plugin: true,
-				}),
-				pane({
-					id: 13,
-					tab_id: 1,
-					pane_rows: 60,
-					pane_columns: 200,
-					exited: true,
-				}),
-				pane({
-					id: 14,
-					tab_id: 1,
-					pane_rows: 60,
-					pane_columns: 200,
-					is_selectable: false,
-				}),
-				pane({ id: 15, tab_id: 2, pane_rows: 60, pane_columns: 200 }),
-			],
-			10,
-		);
-
-		assert.equal(plan, null);
-	});
-
-	it("returns null when the parent pane cannot be found", () => {
-		assert.equal(
-			selectZellijPlacement([pane({ id: 10 })], 99),
-			null,
-		);
+	it("does not reuse floating, plugin, or unselectable panes as stack anchors", () => {
+		const panes = [
+			pane({ id: 31, is_floating: true }),
+			pane({ id: 32, is_plugin: true }),
+			pane({ id: 33, is_selectable: false }),
+		];
+		assert.equal(selectLiveOwnedZellijAnchor(panes, [31, 32, 33]), null);
 	});
 });

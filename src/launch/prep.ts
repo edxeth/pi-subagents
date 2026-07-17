@@ -301,6 +301,10 @@ export function buildPersistedSubagentLaunchMetadata(
 	sessionMode: SubagentSessionMode,
 	boundarySystemPrompt: boolean,
 	systemPrompt?: string,
+	zellijPlacement?: Pick<
+		PersistedSubagentLaunchMetadata,
+		"zellijPlacementPolicy" | "zellijPlacementGroupKey"
+	>,
 ): PersistedSubagentLaunchMetadata {
 	const allowModelOverride = prepared.agentDefs?.allowModelOverride !== false;
 	const modelSource = params.model || params.thinking
@@ -360,6 +364,12 @@ export function buildPersistedSubagentLaunchMetadata(
 		boundarySystemPrompt,
 		...(prepared.agentDefs?.taskExpansion
 			? { taskExpansion: prepared.agentDefs.taskExpansion }
+			: {}),
+		...(zellijPlacement?.zellijPlacementPolicy
+			? { zellijPlacementPolicy: zellijPlacement.zellijPlacementPolicy }
+			: {}),
+		...(zellijPlacement?.zellijPlacementGroupKey
+			? { zellijPlacementGroupKey: zellijPlacement.zellijPlacementGroupKey }
 			: {}),
 
 		...(prepared.agentDefs?.flags ? { flags: prepared.agentDefs.flags } : {}),

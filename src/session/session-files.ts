@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentDefaults } from "../agents/definitions.ts";
 import type { ParentClosePolicy, SubagentParamsInput } from "../types.ts";
+import type { ZellijPlacementPolicy } from "../mux/zellij-placement.ts";
 import { getEntries } from "./session.ts";
 
 
@@ -64,6 +65,8 @@ export interface PersistedSubagentLaunchMetadata {
 	systemPrompt?: string;
 	boundarySystemPrompt: boolean;
 	taskExpansion?: "shell";
+	zellijPlacementPolicy?: ZellijPlacementPolicy;
+	zellijPlacementGroupKey?: string;
 
 	flags?: string;
 	env?: string;
