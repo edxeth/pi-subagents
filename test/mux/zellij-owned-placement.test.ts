@@ -78,6 +78,8 @@ describe("owned Zellij surface placement", () => {
 			binary,
 			`#!/bin/sh
 printf '%s | pane=%s\n' "$*" "\${ZELLIJ_PANE_ID:-}" >> "$FAKE_ZELLIJ_LOG"
+# Production commands now target the discovered session explicitly. Strip that
+# prefix so this fake can keep asserting the action-level behavior below.
 if [ "$1" = "--session" ]; then shift 2; fi
 [ "$1" = "action" ] || exit 0
 action="$2"
@@ -115,6 +117,8 @@ fi
 		process.env.FAKE_ZELLIJ_COUNTER = counterFile;
 		process.env.PI_SUBAGENT_ZELLIJ_MIN_COLUMNS = "50";
 		process.env.PI_SUBAGENT_ZELLIJ_MIN_ROWS = "10";
+		// This fake exercises placement after session_start, so provide the resolved
+		// identity without requiring a real Zellij server during the test.
 		setZellijRuntimeContextForTests({
 			sessionName: process.env.ZELLIJ_SESSION_NAME!,
 			parentPaneId: 10,

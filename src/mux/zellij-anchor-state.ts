@@ -26,6 +26,8 @@ interface ZellijPlacementStateFile {
 }
 
 function zellijSessionSlug(): string {
+	// Placement groups must follow the discovered live session. Using the inherited
+	// name would mix state between the renamed session and its former name.
 	return requireZellijRuntimeContext().sessionName.replace(
 		/[^A-Za-z0-9_.-]/g,
 		"_",

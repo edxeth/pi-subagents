@@ -122,6 +122,8 @@ export function readScreen(surface: string, lines = 50): string {
 		return tailLines(raw, lines);
 	}
 	if (backend === "zellij") {
+		// Use the shared action wrapper so polling reads the resolved live session,
+		// not a stale ZELLIJ_SESSION_NAME inherited before a rename.
 		const raw = zellijActionSync(["dump-screen"], surface);
 		return tailLines(raw, lines);
 	}
@@ -156,6 +158,8 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
 		return tailLines(stdout, lines);
 	}
 	if (backend === "zellij") {
+		// Async polling must carry the same explicit session and corrected env as
+		// synchronous actions; bypassing the wrapper would split command routing.
 		const invocation = getZellijActionInvocation(["dump-screen"], surface);
 		const { stdout } = await execFileAsync(
 			"zellij",

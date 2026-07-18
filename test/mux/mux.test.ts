@@ -605,6 +605,8 @@ fi
 				"zellij",
 				`#!/bin/sh
 printf '%s | pane=%s\n' "$*" "\${ZELLIJ_PANE_ID:-}" >> "$FAKE_ZELLIJ_LOG"
+# Production commands now target the discovered session explicitly. Strip that
+# prefix so this fake can keep asserting the action-level behavior below.
 if [ "$1" = "--session" ]; then shift 2; fi
 [ "$1" = "action" ] || exit 0
 action="$2"
@@ -630,6 +632,8 @@ fi
 			process.env.FAKE_ZELLIJ_SCREEN = screenFile;
 			process.env.FAKE_ZELLIJ_PANE_ID = "7";
 			process.env.ZELLIJ_PANE_ID = "3";
+			// The fake backend starts below session_start, so seed the resolved identity
+			// that production wiring would have cached before any action is sent.
 			setZellijRuntimeContextForTests({
 				sessionName: "fake-zellij",
 				parentPaneId: 3,

@@ -8,11 +8,16 @@ export const execFileAsync = promisify(execFile);
 
 export type MuxBackend = "cmux" | "tmux" | "zellij" | "wezterm" | "herdr";
 
+// Zellij does not update an existing process environment after a session rename.
+// Keep the live session identity discovered at Pi startup instead of trusting the
+// inherited ZELLIJ_SESSION_NAME for later subagent actions.
 export interface ZellijRuntimeContext {
 	sessionName: string;
 	parentPaneId: number;
 }
 
+// Pane IDs repeat between Zellij sessions, so discovery needs pane state, cwd,
+// and attached-client information to identify the session without guessing.
 export interface ZellijSessionSnapshot {
 	name: string;
 	panes: Array<{
@@ -27,6 +32,8 @@ export interface ZellijSessionSnapshot {
 let zellijRuntimeContext: ZellijRuntimeContext | null = null;
 let zellijRuntimeError: string | null = null;
 
+// Client focus is only a tie-breaker: an interactive child Pi often runs in a
+// non-focused pane while the single attached client remains on the parent pane.
 function parseZellijClientPaneIds(output: string): number[] {
 	return output
 		.split("\n")
@@ -48,6 +55,13 @@ function samePath(left: string | undefined, right: string): boolean {
 	}
 }
 
+/**
+ * Resolves the current Zellij session from live pane snapshots.
+ *
+ * A unique pane ID is sufficient. Reused pane IDs are narrowed by cwd, then by
+ * attached-client focus. Remaining ambiguity fails closed so commands cannot be
+ * routed into an unrelated session.
+ */
 export function resolveZellijRuntimeContextFromSnapshots(
 	parentPaneId: number,
 	cwd: string,
@@ -63,6 +77,8 @@ export function resolveZellijRuntimeContextFromSnapshots(
 		return { sessionName: candidates[0].name, parentPaneId };
 	}
 
+	// Session renames leave the old name in process.env, but the pane cwd remains
+	// tied to the actual session and disambiguates common same-ID collisions.
 	const cwdMatches = candidates.filter((snapshot) =>
 		snapshot.panes.some(
 			(pane) =>
@@ -76,6 +92,8 @@ export function resolveZellijRuntimeContextFromSnapshots(
 		return { sessionName: cwdMatches[0].name, parentPaneId };
 	}
 
+	// The focused client identifies the parent Pi pane when cwd alone is not
+	// unique. Child panes do not depend on this fallback.
 	const clientMatches = candidates.filter((snapshot) =>
 		snapshot.clientPaneIds.includes(parentPaneId),
 	);
@@ -111,6 +129,8 @@ function discoverZellijRuntimeContext(cwd: string): ZellijRuntimeContext {
 	const snapshots: ZellijSessionSnapshot[] = [];
 	for (const name of sessions) {
 		try {
+			// Every probe names its target explicitly. Using an implicit action here
+			// would reproduce the stale-environment bug discovery is meant to fix.
 			const panes = JSON.parse(
 				execFileSync(
 					"zellij",
@@ -135,6 +155,9 @@ function discoverZellijRuntimeContext(cwd: string): ZellijRuntimeContext {
 	return resolveZellijRuntimeContextFromSnapshots(parentPaneId, cwd, snapshots);
 }
 
+// session_start performs discovery once per Pi session. Cache failures as well
+// as successes so later launches return the original diagnostic without falling
+// back to the stale inherited session name.
 export function initializeZellijRuntimeContext(
 	cwd: string,
 ): ZellijRuntimeContext | null {
@@ -154,6 +177,8 @@ export function resetZellijRuntimeContext(): void {
 	zellijRuntimeError = null;
 }
 
+// Fake Zellij tests do not have a real session server to discover. Seeding the
+// same runtime contract keeps those tests focused on placement and I/O behavior.
 export function setZellijRuntimeContextForTests(
 	context: ZellijRuntimeContext,
 ): void {
@@ -167,6 +192,8 @@ export function getZellijRuntimeError(): string | null {
 
 export function requireZellijRuntimeContext(): ZellijRuntimeContext {
 	if (zellijRuntimeContext) return zellijRuntimeContext;
+	// Failing here is safer than silently sending pane operations to whichever
+	// session the inherited environment happens to name.
 	throw new Error(
 		zellijRuntimeError ??
 			"Zellij runtime was not initialized during Pi session startup.",
@@ -301,6 +328,8 @@ function zellijEnv(
 	sessionName: string,
 	surface?: string,
 ): NodeJS.ProcessEnv {
+	// Child commands may inspect ZELLIJ_SESSION_NAME themselves. Override the stale
+	// inherited value so command arguments and environment describe one session.
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		ZELLIJ_SESSION_NAME: sessionName,
@@ -331,6 +360,8 @@ export function getZellijActionInvocation(
 ): { args: string[]; env: NodeJS.ProcessEnv } {
 	const runtime = requireZellijRuntimeContext();
 	return {
+		// Explicit targeting avoids Zellij's implicit lookup through the immutable
+		// environment inherited before a session was renamed.
 		args: [
 			"--session",
 			runtime.sessionName,

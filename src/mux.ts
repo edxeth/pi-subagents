@@ -1,3 +1,5 @@
+// Re-export Zellij discovery lifecycle hooks here so extension wiring does not
+// depend on the private module layout of the mux implementation.
 export {
 	exitStatusVar,
 	getMuxBackend,

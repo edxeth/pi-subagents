@@ -166,6 +166,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (event, ctx) => {
 		latestContext = ctx;
 		resetSubagentBatchStopRequest();
+		// Resolve Zellij identity before any tool can create a pane. Existing shells
+		// can retain an old session name after rename, so launch-time env is not safe.
 		if (getMuxBackend() === "zellij") {
 			const runtime = initializeZellijRuntimeContext(ctx.cwd);
 			traceSubagentLaunch("zellij.runtime", {
@@ -174,6 +176,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				error: runtime ? undefined : getZellijRuntimeError(),
 			});
 		} else {
+			// Module state survives extension reloads; clear Zellij data when another
+			// backend owns this Pi session so it cannot leak into later actions.
 			resetZellijRuntimeContext();
 		}
 		applySubagentLineage(ctx);

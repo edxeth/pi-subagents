@@ -17,6 +17,8 @@ import {
 
 describe("zellij placement", () => {
 	beforeEach(() => {
+		// Pure placement tests do not start Pi or a Zellij server, so seed the
+		// session_start result they would normally receive from extension wiring.
 		setZellijRuntimeContextForTests({
 			sessionName: "Foo",
 			parentPaneId: 1,
@@ -186,6 +188,8 @@ describe("zellij placement", () => {
 	});
 
 	it("resolves a renamed session from pane cwd instead of stale environment", () => {
+		// Reproduces a renamed session where the process still names Bar while its
+		// pane and working directory belong to Foo.
 		const runtime = resolveZellijRuntimeContextFromSnapshots(
 			1,
 			"/workspace/Foo",
@@ -207,6 +211,8 @@ describe("zellij placement", () => {
 	});
 
 	it("resolves a non-focused child pane from live pane state", () => {
+		// Child agents are commonly not focused, so discovery must not require the
+		// attached client's pane ID to equal the child pane ID.
 		const runtime = resolveZellijRuntimeContextFromSnapshots(
 			10,
 			"/workspace/project",
@@ -226,6 +232,8 @@ describe("zellij placement", () => {
 	});
 
 	it("rejects unresolved pane collisions", () => {
+		// Guessing here could send keystrokes to an unrelated session. Ambiguous
+		// identity must remain an explicit launch error.
 		assert.throws(
 			() =>
 				resolveZellijRuntimeContextFromSnapshots(1, "/workspace/project", [

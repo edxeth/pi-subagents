@@ -258,6 +258,8 @@ function sleepSync(milliseconds: number): void {
 }
 
 function zellijSessionSlug(): string {
+	// Serialize pane creation per live session. A stale environment-derived slug
+	// would lock the wrong session and allow concurrent placement races.
 	return requireZellijRuntimeContext().sessionName.replace(
 		/[^A-Za-z0-9_.-]/g,
 		"_",
@@ -298,6 +300,8 @@ function withZellijSurfaceLock<T>(callback: () => T): T {
 }
 
 function defaultPlacementContext(): ZellijPlacementContext {
+	// The startup resolver owns pane identity as well as session identity, keeping
+	// placement inputs from two different Zellij sessions from being combined.
 	const parentPaneId = requireZellijRuntimeContext().parentPaneId;
 	return {
 		groupKey:
@@ -316,6 +320,8 @@ function createZellijSurfaceUnlocked(
 	providedContext?: ZellijPlacementContext,
 ): string {
 	const context = providedContext ?? defaultPlacementContext();
+	// Explicit callers may provide an anchor, but the discovered parent remains the
+	// only safe fallback when inherited Zellij environment has gone stale.
 	const parentPaneId =
 		context.parentPaneId ?? requireZellijRuntimeContext().parentPaneId;
 	const policy =
