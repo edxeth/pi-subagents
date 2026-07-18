@@ -7,7 +7,10 @@ import {
 	writeZellijPlacementState,
 	zellijPlacementGroupId,
 } from "./zellij-anchor-state.ts";
-import { zellijActionSync } from "./core.ts";
+import {
+	requireZellijRuntimeContext,
+	zellijActionSync,
+} from "./core.ts";
 
 import {
 	DEFAULT_ZELLIJ_SUBAGENT_MIN_COLUMNS,
@@ -255,9 +258,10 @@ function sleepSync(milliseconds: number): void {
 }
 
 function zellijSessionSlug(): string {
-	return (
-		process.env.ZELLIJ_SESSION_NAME ?? process.env.ZELLIJ ?? "default"
-	).replace(/[^A-Za-z0-9_.-]/g, "_");
+	return requireZellijRuntimeContext().sessionName.replace(
+		/[^A-Za-z0-9_.-]/g,
+		"_",
+	);
 }
 
 function zellijSurfaceLockPath(): string {
@@ -294,7 +298,7 @@ function withZellijSurfaceLock<T>(callback: () => T): T {
 }
 
 function defaultPlacementContext(): ZellijPlacementContext {
-	const parentPaneId = Number(process.env.ZELLIJ_PANE_ID);
+	const parentPaneId = requireZellijRuntimeContext().parentPaneId;
 	return {
 		groupKey:
 			process.env.PI_SUBAGENT_SESSION ??
@@ -313,7 +317,7 @@ function createZellijSurfaceUnlocked(
 ): string {
 	const context = providedContext ?? defaultPlacementContext();
 	const parentPaneId =
-		context.parentPaneId ?? Number(process.env.ZELLIJ_PANE_ID);
+		context.parentPaneId ?? requireZellijRuntimeContext().parentPaneId;
 	const policy =
 		context.policy ??
 		resolveZellijPlacementPolicy(process.env.PI_SUBAGENT_ZELLIJ_PLACEMENT);

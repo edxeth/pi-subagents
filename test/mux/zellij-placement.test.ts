@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { zellijPlacementGroupId } from "../../src/mux/zellij-anchor-state.ts";
+import {
+	resetZellijRuntimeContext,
+	resolveZellijRuntimeContextFromSnapshots,
+	setZellijRuntimeContextForTests,
+} from "../../src/mux/core.ts";
 import {
 	canSplitZellijPaneInDirection,
 	resolveZellijPlacementPolicy,
@@ -11,6 +16,17 @@ import {
 } from "../../src/mux/zellij-placement.ts";
 
 describe("zellij placement", () => {
+	beforeEach(() => {
+		setZellijRuntimeContextForTests({
+			sessionName: "Foo",
+			parentPaneId: 1,
+		});
+	});
+
+	afterEach(() => {
+		resetZellijRuntimeContext();
+	});
+
 	const pane = (overrides: Partial<ZellijPaneSnapshot>): ZellijPaneSnapshot => ({
 		id: 1,
 		is_plugin: false,
@@ -167,5 +183,64 @@ describe("zellij placement", () => {
 			pane({ id: 33, is_selectable: false }),
 		];
 		assert.equal(selectLiveOwnedZellijAnchor(panes, [31, 32, 33]), null);
+	});
+
+	it("resolves a renamed session from pane cwd instead of stale environment", () => {
+		const runtime = resolveZellijRuntimeContextFromSnapshots(
+			1,
+			"/workspace/Foo",
+			[
+				{
+					name: "Bar",
+					panes: [{ id: 1, pane_cwd: "/workspace/other" }],
+					clientPaneIds: [],
+				},
+				{
+					name: "Foo",
+					panes: [{ id: 1, pane_cwd: "/workspace/Foo" }],
+					clientPaneIds: [1],
+				},
+			],
+		);
+
+		assert.deepEqual(runtime, { sessionName: "Foo", parentPaneId: 1 });
+	});
+
+	it("resolves a non-focused child pane from live pane state", () => {
+		const runtime = resolveZellijRuntimeContextFromSnapshots(
+			10,
+			"/workspace/project",
+			[
+				{
+					name: "Foo",
+					panes: [
+						{ id: 12, pane_cwd: "/workspace/project" },
+						{ id: 10, pane_cwd: "/workspace/project" },
+					],
+					clientPaneIds: [12],
+				},
+			],
+		);
+
+		assert.equal(runtime.sessionName, "Foo");
+	});
+
+	it("rejects unresolved pane collisions", () => {
+		assert.throws(
+			() =>
+				resolveZellijRuntimeContextFromSnapshots(1, "/workspace/project", [
+					{
+						name: "Foo",
+						panes: [{ id: 1, pane_cwd: "/other/foo" }],
+						clientPaneIds: [],
+					},
+					{
+						name: "Bar",
+						panes: [{ id: 1, pane_cwd: "/other/bar" }],
+						clientPaneIds: [],
+					},
+				]),
+			/matches multiple sessions: Foo, Bar/,
+		);
 	});
 });

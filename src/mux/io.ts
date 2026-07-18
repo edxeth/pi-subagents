@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	execFileAsync,
+	getZellijActionInvocation,
 	isFishShell,
 	requireMuxBackend,
 	shellEscape,
 	tailLines,
 	zellijActionSync,
-	zellijPaneId,
 } from "./core.ts";
 import {
 	closeHerdrPane,
@@ -122,11 +122,7 @@ export function readScreen(surface: string, lines = 50): string {
 		return tailLines(raw, lines);
 	}
 	if (backend === "zellij") {
-		const raw = execFileSync(
-			"zellij",
-			["action", "dump-screen", "--pane-id", zellijPaneId(surface)],
-			{ encoding: "utf8" },
-		);
+		const raw = zellijActionSync(["dump-screen"], surface);
 		return tailLines(raw, lines);
 	}
 	if (backend === "herdr") return readHerdrPaneScreen(surface, lines);
@@ -160,10 +156,11 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
 		return tailLines(stdout, lines);
 	}
 	if (backend === "zellij") {
+		const invocation = getZellijActionInvocation(["dump-screen"], surface);
 		const { stdout } = await execFileAsync(
 			"zellij",
-			["action", "dump-screen", "--pane-id", zellijPaneId(surface)],
-			{ encoding: "utf8" },
+			invocation.args,
+			{ encoding: "utf8", env: invocation.env },
 		);
 		return tailLines(stdout, lines);
 	}

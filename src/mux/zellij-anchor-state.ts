@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { requireZellijRuntimeContext } from "./core.ts";
 import type { ZellijPlacementPolicy } from "./zellij-policy.ts";
 
 interface ZellijPlacementGroupState {
@@ -25,9 +26,10 @@ interface ZellijPlacementStateFile {
 }
 
 function zellijSessionSlug(): string {
-	return (
-		process.env.ZELLIJ_SESSION_NAME ?? process.env.ZELLIJ ?? "default"
-	).replace(/[^A-Za-z0-9_.-]/g, "_");
+	return requireZellijRuntimeContext().sessionName.replace(
+		/[^A-Za-z0-9_.-]/g,
+		"_",
+	);
 }
 
 function zellijPlacementStatePath(): string {

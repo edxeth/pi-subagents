@@ -32,6 +32,10 @@ import {
 	writeExecutable,
 	ORIGINAL_ENV,
 } from "../support/index.ts";
+import {
+	resetZellijRuntimeContext,
+	setZellijRuntimeContextForTests,
+} from "../../src/mux/core.ts";
 
 describe("mux.ts", () => {
 	describe("shellEscape", () => {
@@ -601,6 +605,7 @@ fi
 				"zellij",
 				`#!/bin/sh
 printf '%s | pane=%s\n' "$*" "\${ZELLIJ_PANE_ID:-}" >> "$FAKE_ZELLIJ_LOG"
+if [ "$1" = "--session" ]; then shift 2; fi
 [ "$1" = "action" ] || exit 0
 action="$2"
 if [ "$action" = "new-pane" ]; then
@@ -625,6 +630,10 @@ fi
 			process.env.FAKE_ZELLIJ_SCREEN = screenFile;
 			process.env.FAKE_ZELLIJ_PANE_ID = "7";
 			process.env.ZELLIJ_PANE_ID = "3";
+			setZellijRuntimeContextForTests({
+				sessionName: "fake-zellij",
+				parentPaneId: 3,
+			});
 
 			assert.equal(isZellijAvailable(), true);
 			const surface = createSurfaceSplit("Fake Zellij", "up", "pane:3");
@@ -646,6 +655,7 @@ fi
 			assert.doesNotMatch(log, /rename-tab/);
 			assert.match(log, /dump-screen --pane-id 7/);
 			assert.match(log, /close-pane --pane-id 7/);
+			resetZellijRuntimeContext();
 		});
 	});
 });

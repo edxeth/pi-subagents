@@ -27,7 +27,14 @@ import {
 	resolveTaskSessionMode as resolveTaskSessionModeFromSessionFiles,
 	type SubagentSessionMode,
 } from "./session/session-files.ts";
-import { isMuxAvailable, muxSetupHint } from "./mux.ts";
+import {
+	getMuxBackend,
+	getZellijRuntimeError,
+	initializeZellijRuntimeContext,
+	isMuxAvailable,
+	muxSetupHint,
+	resetZellijRuntimeContext,
+} from "./mux.ts";
 import type { SubagentParamsInput } from "./types.ts";
 import {
 	formatElapsed,
@@ -159,6 +166,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (event, ctx) => {
 		latestContext = ctx;
 		resetSubagentBatchStopRequest();
+		if (getMuxBackend() === "zellij") {
+			const runtime = initializeZellijRuntimeContext(ctx.cwd);
+			traceSubagentLaunch("zellij.runtime", {
+				sessionName: runtime?.sessionName,
+				parentPaneId: runtime?.parentPaneId,
+				error: runtime ? undefined : getZellijRuntimeError(),
+			});
+		} else {
+			resetZellijRuntimeContext();
+		}
 		applySubagentLineage(ctx);
 		attachWidgetContext(ctx);
 

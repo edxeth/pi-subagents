@@ -1,6 +1,8 @@
 export {
 	exitStatusVar,
 	getMuxBackend,
+	getZellijRuntimeError,
+	initializeZellijRuntimeContext,
 	isCmuxAvailable,
 	isFishShell,
 	isHerdrAvailable,
@@ -8,6 +10,7 @@ export {
 	isTmuxAvailable,
 	isZellijAvailable,
 	muxSetupHint,
+	resetZellijRuntimeContext,
 	shellEscape,
 } from "./mux/core.ts";
 export {

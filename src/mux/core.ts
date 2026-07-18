@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { basename } from "node:path";
+import { basename, resolve as resolvePath } from "node:path";
 import { promisify } from "node:util";
 import { isHerdrRuntimeAvailable } from "./herdr.ts";
 import { defaultMuxRuntimeProbe } from "./runtime-probe.ts";
@@ -7,6 +7,171 @@ import { defaultMuxRuntimeProbe } from "./runtime-probe.ts";
 export const execFileAsync = promisify(execFile);
 
 export type MuxBackend = "cmux" | "tmux" | "zellij" | "wezterm" | "herdr";
+
+export interface ZellijRuntimeContext {
+	sessionName: string;
+	parentPaneId: number;
+}
+
+export interface ZellijSessionSnapshot {
+	name: string;
+	panes: Array<{
+		id: number;
+		is_plugin?: boolean;
+		exited?: boolean;
+		pane_cwd?: string;
+	}>;
+	clientPaneIds: number[];
+}
+
+let zellijRuntimeContext: ZellijRuntimeContext | null = null;
+let zellijRuntimeError: string | null = null;
+
+function parseZellijClientPaneIds(output: string): number[] {
+	return output
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.slice(1)
+		.map((line) => line.split(/\s+/)[1])
+		.map((pane) => pane?.match(/(?:terminal_)?(\d+)/)?.[1])
+		.filter((paneId): paneId is string => !!paneId)
+		.map(Number);
+}
+
+function samePath(left: string | undefined, right: string): boolean {
+	if (!left) return false;
+	try {
+		return resolvePath(left) === resolvePath(right);
+	} catch {
+		return left === right;
+	}
+}
+
+export function resolveZellijRuntimeContextFromSnapshots(
+	parentPaneId: number,
+	cwd: string,
+	snapshots: ZellijSessionSnapshot[],
+): ZellijRuntimeContext {
+	const candidates = snapshots.filter((snapshot) =>
+		snapshot.panes.some(
+			(pane) =>
+				pane.id === parentPaneId && !pane.is_plugin && !pane.exited,
+		),
+	);
+	if (candidates.length === 1) {
+		return { sessionName: candidates[0].name, parentPaneId };
+	}
+
+	const cwdMatches = candidates.filter((snapshot) =>
+		snapshot.panes.some(
+			(pane) =>
+				pane.id === parentPaneId &&
+				!pane.is_plugin &&
+				!pane.exited &&
+				samePath(pane.pane_cwd, cwd),
+		),
+	);
+	if (cwdMatches.length === 1) {
+		return { sessionName: cwdMatches[0].name, parentPaneId };
+	}
+
+	const clientMatches = candidates.filter((snapshot) =>
+		snapshot.clientPaneIds.includes(parentPaneId),
+	);
+	if (clientMatches.length === 1) {
+		return { sessionName: clientMatches[0].name, parentPaneId };
+	}
+
+	if (candidates.length === 0) {
+		throw new Error(
+			`Could not discover the Zellij session containing pane ${parentPaneId}.`,
+		);
+	}
+	throw new Error(
+		`Zellij pane ${parentPaneId} matches multiple sessions: ${candidates
+			.map((candidate) => candidate.name)
+			.join(", ")}.`,
+	);
+}
+
+function discoverZellijRuntimeContext(cwd: string): ZellijRuntimeContext {
+	const parentPaneId = Number(process.env.ZELLIJ_PANE_ID);
+	if (!Number.isInteger(parentPaneId)) {
+		throw new Error("ZELLIJ_PANE_ID is missing or invalid.");
+	}
+	const sessions = execFileSync(
+		"zellij",
+		["list-sessions", "--short", "--no-formatting"],
+		{ encoding: "utf8" },
+	)
+		.split("\n")
+		.map((session) => session.trim())
+		.filter(Boolean);
+	const snapshots: ZellijSessionSnapshot[] = [];
+	for (const name of sessions) {
+		try {
+			const panes = JSON.parse(
+				execFileSync(
+					"zellij",
+					["--session", name, "action", "list-panes", "--json", "--state"],
+					{ encoding: "utf8" },
+				),
+			);
+			if (!Array.isArray(panes)) continue;
+			let clientPaneIds: number[] = [];
+			try {
+				clientPaneIds = parseZellijClientPaneIds(
+					execFileSync(
+						"zellij",
+						["--session", name, "action", "list-clients"],
+						{ encoding: "utf8" },
+					),
+				);
+			} catch {}
+			snapshots.push({ name, panes, clientPaneIds });
+		} catch {}
+	}
+	return resolveZellijRuntimeContextFromSnapshots(parentPaneId, cwd, snapshots);
+}
+
+export function initializeZellijRuntimeContext(
+	cwd: string,
+): ZellijRuntimeContext | null {
+	try {
+		zellijRuntimeContext = discoverZellijRuntimeContext(cwd);
+		zellijRuntimeError = null;
+		return zellijRuntimeContext;
+	} catch (error) {
+		zellijRuntimeContext = null;
+		zellijRuntimeError = error instanceof Error ? error.message : String(error);
+		return null;
+	}
+}
+
+export function resetZellijRuntimeContext(): void {
+	zellijRuntimeContext = null;
+	zellijRuntimeError = null;
+}
+
+export function setZellijRuntimeContextForTests(
+	context: ZellijRuntimeContext,
+): void {
+	zellijRuntimeContext = context;
+	zellijRuntimeError = null;
+}
+
+export function getZellijRuntimeError(): string | null {
+	return zellijRuntimeError;
+}
+
+export function requireZellijRuntimeContext(): ZellijRuntimeContext {
+	if (zellijRuntimeContext) return zellijRuntimeContext;
+	throw new Error(
+		zellijRuntimeError ??
+			"Zellij runtime was not initialized during Pi session startup.",
+	);
+}
 
 function hasCommand(command: string): boolean {
 	return defaultMuxRuntimeProbe.hasCommand(command);
@@ -132,8 +297,14 @@ export function zellijPaneId(surface: string): string {
 	return surface.startsWith("pane:") ? surface.slice("pane:".length) : surface;
 }
 
-function zellijEnv(surface?: string): NodeJS.ProcessEnv {
-	const env: NodeJS.ProcessEnv = { ...process.env };
+function zellijEnv(
+	sessionName: string,
+	surface?: string,
+): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {
+		...process.env,
+		ZELLIJ_SESSION_NAME: sessionName,
+	};
 	if (surface) env.ZELLIJ_PANE_ID = zellijPaneId(surface);
 	return env;
 }
@@ -154,13 +325,30 @@ function zellijActionArgs(args: string[], surface?: string): string[] {
 	return [action, "--pane-id", zellijPaneId(surface), ...args.slice(1)];
 }
 
+export function getZellijActionInvocation(
+	args: string[],
+	surface?: string,
+): { args: string[]; env: NodeJS.ProcessEnv } {
+	const runtime = requireZellijRuntimeContext();
+	return {
+		args: [
+			"--session",
+			runtime.sessionName,
+			"action",
+			...zellijActionArgs(args, surface),
+		],
+		env: zellijEnv(runtime.sessionName, surface),
+	};
+}
+
 export function zellijActionSync(args: string[], surface?: string): string {
+	const invocation = getZellijActionInvocation(args, surface);
 	return execFileSync(
 		"zellij",
-		["action", ...zellijActionArgs(args, surface)],
+		invocation.args,
 		{
 			encoding: "utf8",
-			env: zellijEnv(surface),
+			env: invocation.env,
 		},
 	);
 }

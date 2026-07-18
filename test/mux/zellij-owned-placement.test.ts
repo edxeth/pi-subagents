@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
+	resetZellijRuntimeContext,
+	setZellijRuntimeContextForTests,
+} from "../../src/mux/core.ts";
+import {
 	createZellijSurface,
 	resetZellijPlacementStateForTests,
 	type ZellijPlacementContext,
@@ -74,6 +78,7 @@ describe("owned Zellij surface placement", () => {
 			binary,
 			`#!/bin/sh
 printf '%s | pane=%s\n' "$*" "\${ZELLIJ_PANE_ID:-}" >> "$FAKE_ZELLIJ_LOG"
+if [ "$1" = "--session" ]; then shift 2; fi
 [ "$1" = "action" ] || exit 0
 action="$2"
 if [ "$action" = "list-panes" ]; then
@@ -110,10 +115,15 @@ fi
 		process.env.FAKE_ZELLIJ_COUNTER = counterFile;
 		process.env.PI_SUBAGENT_ZELLIJ_MIN_COLUMNS = "50";
 		process.env.PI_SUBAGENT_ZELLIJ_MIN_ROWS = "10";
+		setZellijRuntimeContextForTests({
+			sessionName: process.env.ZELLIJ_SESSION_NAME!,
+			parentPaneId: 10,
+		});
 	});
 
 	afterEach(() => {
 		resetZellijPlacementStateForTests();
+		resetZellijRuntimeContext();
 		for (const key of trackedEnv) {
 			const value = originalEnv[key];
 			if (value === undefined) delete process.env[key];
