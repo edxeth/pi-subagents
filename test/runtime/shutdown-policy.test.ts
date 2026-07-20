@@ -1,3 +1,4 @@
+import { shutdownSubagentsForParentExit } from "../../src/runtime/shutdown.ts";
 import {
 	assert,
 	existsSync,
@@ -17,6 +18,44 @@ import {
 describe("subagent shutdown policy", () => {
 	afterEach(() => {
 		resetSubagentStateForTest();
+	});
+
+	it("awaits interactive surface closure during session shutdown", async () => {
+		let closed = 0;
+		const running = {
+			id: "interactive-close",
+			name: "Interactive child",
+			task: "Close with parent",
+			mode: "interactive" as const,
+			executionState: "running" as const,
+			deliveryState: "detached" as const,
+			parentClosePolicy: "terminate" as const,
+			startTime: Date.now(),
+			sessionFile: "/tmp/interactive-close.jsonl",
+			abortController: new AbortController(),
+			surfaceId: "pane:9",
+		};
+
+		const actions = await shutdownSubagentsForParentExit({
+			runningSubagents: new Map([[running.id, running]]),
+			completedSubagentResults: new Map(),
+			parentCloseEscalationMs: 10,
+			updateWidget() {},
+			async closeRunningSurface(subagent) {
+				assert.equal(subagent, running);
+				await Promise.resolve();
+				closed++;
+			},
+		});
+
+		assert.deepEqual(actions, [
+			{
+				id: running.id,
+				policy: "terminate",
+				action: "terminate",
+			},
+		]);
+		assert.equal(closed, 1);
 	});
 
 	it("honors parent close policies during session shutdown", async () => {
@@ -61,7 +100,7 @@ describe("subagent shutdown policy", () => {
 			setRunningSubagentForTest(running);
 		}
 
-		const actions = shutdownSubagentsForTest({
+		const actions = await shutdownSubagentsForTest({
 			escalationMs: 10,
 		});
 

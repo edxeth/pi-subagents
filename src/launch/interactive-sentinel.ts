@@ -21,13 +21,13 @@ export function buildInteractiveSentinelShellCommands(
 	const sentinelPath = shellEscape(doneSentinelFile);
 	if (isFishShell()) {
 		return {
-			exitTrap: `set pi_subagent_status $status; if not test -f ${sentinelPath}; printf "__SUBAGENT_DONE_%s__\\n" "$pi_subagent_status" | tee ${sentinelPath}; end`,
-			direct: `set pi_subagent_status $status; trap - EXIT; printf "__SUBAGENT_DONE_%s__\\n" "$pi_subagent_status" | tee ${sentinelPath} > /dev/null 2>&1`,
+			exitTrap: `set pi_subagent_status $status; if not test -f ${sentinelPath}; printf "__SUBAGENT_DONE_%s__\\n" "$pi_subagent_status" > ${sentinelPath}; end`,
+			direct: `set pi_subagent_status $status; trap - EXIT; printf "__SUBAGENT_DONE_%s__\\n" "$pi_subagent_status" > ${sentinelPath}`,
 		};
 	}
 
 	return {
-		exitTrap: `pi_subagent_status=$?; if [ ! -f ${sentinelPath} ]; then printf "__SUBAGENT_DONE_%s__\\n" "$pi_subagent_status" | tee ${sentinelPath}; fi`,
-		direct: `pi_subagent_status=$?; trap - EXIT; printf "__SUBAGENT_DONE_%s__\\n" "$pi_subagent_status" | tee ${sentinelPath} > /dev/null 2>&1`,
+		exitTrap: `pi_subagent_status=$?; if [ ! -f ${sentinelPath} ]; then printf "__SUBAGENT_DONE_%s__\\n" "$pi_subagent_status" > ${sentinelPath}; fi`,
+		direct: `pi_subagent_status=$?; trap - EXIT; printf "__SUBAGENT_DONE_%s__\\n" "$pi_subagent_status" > ${sentinelPath}`,
 	};
 }

@@ -32,22 +32,23 @@ import {
 	writeExecutable,
 	ORIGINAL_ENV,
 } from "../support/index.ts";
+import { closeSurfaceAsync } from "../../src/mux/io.ts";
 
-describe("mux.ts", () => {
-	describe("shellEscape", () => {
-		it("wraps in single quotes", () => {
+describe("mux.ts", async () => {
+	describe("shellEscape", async () => {
+		it("wraps in single quotes", async () => {
 			assert.equal(shellEscape("hello"), "'hello'");
 		});
 
-		it("escapes single quotes", () => {
+		it("escapes single quotes", async () => {
 			assert.equal(shellEscape("it's"), "'it'\\''s'");
 		});
 
-		it("handles empty string", () => {
+		it("handles empty string", async () => {
 			assert.equal(shellEscape(""), "''");
 		});
 
-		it("handles special characters", () => {
+		it("handles special characters", async () => {
 			const input = 'echo "hello $world" && rm -rf /';
 			const escaped = shellEscape(input);
 			assert.ok(escaped.startsWith("'"));
@@ -56,8 +57,8 @@ describe("mux.ts", () => {
 		});
 	});
 
-	describe("environment helpers", () => {
-		it("detects fish shell and the correct exit status variable", () => {
+	describe("environment helpers", async () => {
+		it("detects fish shell and the correct exit status variable", async () => {
 			process.env.SHELL = "/usr/bin/fish";
 			assert.equal(isFishShell(), true);
 			assert.equal(exitStatusVar(), "$status");
@@ -67,7 +68,7 @@ describe("mux.ts", () => {
 			assert.equal(exitStatusVar(), "$?");
 		});
 
-		it("selects tmux when it is the available runtime", () => {
+		it("selects tmux when it is the available runtime", async () => {
 			const dir = createTestDir();
 			writeExecutable(dir, "tmux", "#!/usr/bin/env bash\nexit 0\n");
 			process.env.PATH = `${dir}:${process.env.PATH ?? ""}`;
@@ -82,7 +83,7 @@ describe("mux.ts", () => {
 			assert.equal(isMuxAvailable(), true);
 		});
 
-		it("returns null when the preferred backend is unavailable", () => {
+		it("returns null when the preferred backend is unavailable", async () => {
 			process.env.PI_SUBAGENT_MUX = "cmux";
 			delete process.env.CMUX_SOCKET_PATH;
 			delete process.env.TMUX;
@@ -94,7 +95,7 @@ describe("mux.ts", () => {
 			assert.equal(isMuxAvailable(), false);
 		});
 
-		it("returns a setup hint for the selected preference", () => {
+		it("returns a setup hint for the selected preference", async () => {
 			process.env.PI_SUBAGENT_MUX = "tmux";
 			assert.match(muxSetupHint(), /tmux new -A -s pi 'pi'/);
 
@@ -105,13 +106,13 @@ describe("mux.ts", () => {
 			assert.match(muxSetupHint(), /WezTerm/);
 		});
 
-		it("reports cmux availability as a boolean", () => {
+		it("reports cmux availability as a boolean", async () => {
 			const result = isCmuxAvailable();
 			assert.equal(typeof result, "boolean");
 		});
 	});
 
-	describe("exit sidecar polling", () => {
+	describe("exit sidecar polling", async () => {
 		it("returns a done result from the session exit sidecar", async () => {
 			const dir = createTestDir();
 			const sessionFile = join(dir, "child.jsonl");
@@ -173,7 +174,7 @@ describe("mux.ts", () => {
 	const canRunTmuxIntegration =
 		!!ORIGINAL_ENV.TMUX && !!ORIGINAL_ENV.TMUX_PANE && isTmuxAvailable();
 
-	describe("tmux integration", () => {
+	describe("tmux integration", async () => {
 		const maybeIt = canRunTmuxIntegration ? it : it.skip;
 
 		maybeIt(
@@ -184,7 +185,7 @@ describe("mux.ts", () => {
 				const marker = `pane-output-${Date.now()}`;
 
 				try {
-					baseSurface = createSurface("Pi Test Base");
+					baseSurface = await createSurface("Pi Test Base");
 					splitSurface = createSurfaceSplit(
 						"Pi Test Split",
 						"down",
@@ -229,7 +230,7 @@ describe("mux.ts", () => {
 			},
 		);
 
-		maybeIt("renames the current tmux window and session", () => {
+		maybeIt("renames the current tmux window and session", async () => {
 			const paneId = ORIGINAL_ENV.TMUX_PANE!;
 			const windowId = execFileSync(
 				"tmux",
@@ -303,7 +304,7 @@ describe("mux.ts", () => {
 		maybeIt(
 			"polls until the subagent completion sentinel appears",
 			async () => {
-				const surface = createSurface("Pi Test Poll");
+				const surface = await createSurface("Pi Test Poll");
 
 				try {
 					sendCommand(surface, "sleep 0.1; printf '__SUBAGENT_DONE_7__'");
@@ -330,7 +331,7 @@ describe("mux.ts", () => {
 		);
 
 		maybeIt("aborts polling when the caller aborts", async () => {
-			const surface = createSurface("Pi Test Abort");
+			const surface = await createSurface("Pi Test Abort");
 			const controller = new AbortController();
 
 			try {
@@ -347,8 +348,8 @@ describe("mux.ts", () => {
 		});
 	});
 
-	describe("fake backend integration", () => {
-		it("gates tmux window renaming behind PI_SUBAGENT_RENAME_TMUX_WINDOW", () => {
+	describe("fake backend integration", async () => {
+		it("gates tmux window renaming behind PI_SUBAGENT_RENAME_TMUX_WINDOW", async () => {
 			const dir = createTestDir();
 			const logFile = join(dir, "tmux.log");
 			writeFileSync(logFile, "");
@@ -381,7 +382,7 @@ fi
 			assert.match(log, /rename-window/);
 		});
 
-		it("splits tmux surfaces only when measured geometry is safe", () => {
+		it("splits tmux surfaces only when measured geometry is safe", async () => {
 			const dir = createTestDir();
 			const logFile = join(dir, "tmux-surface.log");
 			writeFileSync(logFile, "");
@@ -411,7 +412,7 @@ fi
 			process.env.FAKE_TMUX_LOG = logFile;
 
 			process.env.FAKE_TMUX_GEOMETRY = "wide";
-			assert.equal(createSurface("Wide Tmux"), "%split");
+			assert.equal(await createSurface("Wide Tmux"), "%split");
 			let log = readFileSync(logFile, "utf8");
 			assert.match(log, /split-window -d -h -t %1 -P -F #\{pane_id\}/);
 			assert.match(log, /select-layout -t %1 even-horizontal/);
@@ -419,7 +420,7 @@ fi
 
 			writeFileSync(logFile, "");
 			process.env.FAKE_TMUX_GEOMETRY = "three-fit";
-			assert.equal(createSurface("Third Tmux"), "%split");
+			assert.equal(await createSurface("Third Tmux"), "%split");
 			log = readFileSync(logFile, "utf8");
 			assert.match(log, /split-window -d -h -t %1 -P -F #\{pane_id\}/);
 			assert.match(log, /select-layout -t %1 tiled/);
@@ -427,7 +428,7 @@ fi
 
 			writeFileSync(logFile, "");
 			process.env.FAKE_TMUX_GEOMETRY = "narrow";
-			assert.equal(createSurface("Narrow Tmux"), "%window");
+			assert.equal(await createSurface("Narrow Tmux"), "%window");
 			log = readFileSync(logFile, "utf8");
 			assert.doesNotMatch(log, /split-window/);
 			assert.match(log, /new-window -d -P -F #\{pane_id\}/);
@@ -477,8 +478,8 @@ esac
 			process.env.FAKE_CMUX_LOG = logFile;
 			process.env.FAKE_CMUX_SCREEN = screenFile;
 
-			const surface = createSurface("Fake Cmux");
-			const secondSurface = createSurface("Fake Cmux 2");
+			const surface = await createSurface("Fake Cmux");
+			const secondSurface = await createSurface("Fake Cmux 2");
 			assert.equal(surface, "surface:42");
 			assert.equal(secondSurface, "surface:42");
 			renameCurrentTab("Cmux Tab");
@@ -500,7 +501,7 @@ esac
 			assert.match(log, /close-surface/);
 		});
 
-		it("stages long cmux shell commands through a temp script", () => {
+		it("stages long cmux shell commands through a temp script", async () => {
 			const dir = createTestDir();
 			const logFile = join(dir, "cmux-stage.log");
 			writeExecutable(
@@ -601,8 +602,17 @@ fi
 				"zellij",
 				`#!/bin/sh
 printf '%s | pane=%s\n' "$*" "\${ZELLIJ_PANE_ID:-}" >> "$FAKE_ZELLIJ_LOG"
+if [ "$1" = "list-sessions" ]; then
+  printf 'fake-zellij\n'
+  exit 0
+fi
+if [ "$1" = "--session" ]; then shift 2; fi
 [ "$1" = "action" ] || exit 0
 action="$2"
+if [ "$action" = "list-panes" ]; then
+  printf '[{"id":3,"is_plugin":false,"exited":false,"pane_command":"pi"}]\n'
+  exit 0
+fi
 if [ "$action" = "new-pane" ]; then
   printf 'terminal_%s\n' "\${FAKE_ZELLIJ_PANE_ID:-7}"
 elif [ "$action" = "write-chars" ]; then
@@ -634,7 +644,7 @@ fi
 			sendCommand(surface, "echo zellij");
 			assert.match(readScreen(surface, 1), /echo zellij/);
 			assert.match(await readScreenAsync(surface, 1), /echo zellij/);
-			closeSurface(surface);
+			await closeSurfaceAsync(surface);
 
 			const log = readFileSync(logFile, "utf8");
 			assert.match(log, /new-pane/);

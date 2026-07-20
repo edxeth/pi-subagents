@@ -75,7 +75,7 @@ export interface SubagentToolRuntime {
 	wireSubagentSteerBack(pi: ExtensionAPI, running: RunningSubagent, promise: Promise<SubagentResult>): void;
 	startWidgetRefresh(): void;
 	getLaunchedSubagentResult(running: RunningSubagent, signal?: AbortSignal): Promise<ToolResult>;
-	stopRunningSubagent(running: RunningSubagent): void;
+	stopRunningSubagent(running: RunningSubagent): Promise<void>;
 	muxUnavailableResult(action: string): unknown;
 }
 
@@ -386,7 +386,7 @@ export function registerSubagentCoreTools(
 		execute: async (_toolCallId, params) => {
 			const match = findRunningSubagent(params.id);
 			if (!match.running) return asSubagentToolResult({ content: [{ type: "text" as const, text: match.error ?? "Subagent not found." }], details: { error: match.error ?? "not found" } });
-			runtime.stopRunningSubagent(match.running);
+			await runtime.stopRunningSubagent(match.running);
 			return asSubagentToolResult({ content: [{ type: "text" as const, text: `Stopping subagent "${match.running.name}" (${match.running.id}).` }], details: { id: match.running.id, name: match.running.name, status: "stopping" } });
 		},
 	});

@@ -13,6 +13,7 @@ export interface ZellijPaneSnapshot {
 	pane_rows?: number;
 	pane_columns?: number;
 	tab_id?: number;
+	tab_position?: number;
 	is_focused?: boolean;
 }
 

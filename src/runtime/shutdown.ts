@@ -1,4 +1,3 @@
-import { closeSurface } from "../mux.ts";
 import type {
 	CompletedSubagentResult,
 	ParentClosePolicy,
@@ -16,6 +15,7 @@ export interface ShutdownRuntime {
 	completedSubagentResults: Map<string, CompletedSubagentResult>;
 	parentCloseEscalationMs: number;
 	updateWidget(): void;
+	closeRunningSurface(running: RunningSubagent): Promise<void>;
 }
 
 export function terminateBackgroundChildProcess(
@@ -49,22 +49,24 @@ function abortBackgroundSubagent(
 	running.shutdownTimer.unref?.();
 }
 
-function terminateInteractiveSubagent(running: RunningSubagent): void {
+async function terminateInteractiveSubagent(
+	running: RunningSubagent,
+	runtime: ShutdownRuntime,
+): Promise<void> {
 	running.abortController?.abort();
-	if (running.abortController || !running.surface) return;
 	try {
-		closeSurface(running.surface);
+		await runtime.closeRunningSurface(running);
 	} catch {}
 }
 
-export function shutdownSubagentsForParentExit(
+export async function shutdownSubagentsForParentExit(
 	runtime: ShutdownRuntime,
 	options: ShutdownSubagentsOptions = {},
-): Array<{
+): Promise<Array<{
 	id: string;
 	policy: ParentClosePolicy;
 	action: ParentShutdownAction;
-}> {
+}>> {
 	const escalationMs = options.escalationMs ?? runtime.parentCloseEscalationMs;
 	const actions: Array<{
 		id: string;
@@ -92,8 +94,11 @@ export function shutdownSubagentsForParentExit(
 			policy: agent.parentClosePolicy,
 			action: "terminate",
 		});
-		if (agent.mode === "interactive") terminateInteractiveSubagent(agent);
-		else abortBackgroundSubagent(agent, escalationMs);
+		if (agent.mode === "interactive") {
+			await terminateInteractiveSubagent(agent, runtime);
+		} else {
+			abortBackgroundSubagent(agent, escalationMs);
+		}
 	}
 
 	runtime.runningSubagents.clear();

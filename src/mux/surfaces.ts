@@ -31,10 +31,10 @@ export interface SurfaceCreationOptions {
 	zellij?: ZellijPlacementContext;
 }
 
-export function createSurface(
+export async function createSurface(
 	name: string,
 	options?: SurfaceCreationOptions,
-): string {
+): Promise<string> {
 	const backend = getMuxBackend();
 
 	if (backend === "cmux") {

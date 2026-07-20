@@ -4,6 +4,7 @@ import { cleanupNoSessionSessionFile } from "../launch/prep.ts";
 import { watchBackgroundSubagent as watchBackgroundSubagentWithRuntime, type BackgroundWatchRuntime } from "./background-watch.ts";
 import { getPiInvocation, getPiShellParts, getSubagentChildProcessEnv } from "../launch/child-command.ts";
 import { closeSurface } from "../mux.ts";
+import { closeSurfaceAsync } from "../mux/io.ts";
 import { launchInteractiveSubagent, type InteractiveLaunchRuntime } from "../launch/interactive.ts";
 import { watchSubagent as watchSubagentWithRuntime, type InteractiveWatchRuntime } from "./interactive-watch.ts";
 import { shutdownSubagentsForParentExit as shutdownSubagentsForParentExitWithRuntime, terminateBackgroundChildProcess, type ShutdownRuntime, type ShutdownSubagentsOptions } from "./shutdown.ts";
@@ -66,8 +67,17 @@ export function renderSubagentWidgetForTest() {
 	return widgetManager.renderForTest();
 }
 
-export function stopRunningSubagent(running: RunningSubagent): void {
-	stopRunningSubagentWithDeps(running, closeSurface);
+async function closeRunningSurface(running: RunningSubagent): Promise<void> {
+	if (running.surfaceClosePromise) return running.surfaceClosePromise;
+	if (!running.surface) return;
+	const surface = running.surface;
+	running.surface = undefined;
+	running.surfaceClosePromise = closeSurfaceAsync(surface, running.zellijTarget);
+	return running.surfaceClosePromise;
+}
+
+export async function stopRunningSubagent(running: RunningSubagent): Promise<void> {
+	await stopRunningSubagentWithDeps(running, closeRunningSurface);
 	updateWidget();
 }
 
@@ -132,7 +142,7 @@ function getWaitRuntime(): WaitRuntime {
 		cacheCompletedSubagentResult,
 		updateWidget,
 		deliverCompletedSubagentResultViaSteer,
-		stopRunningSubagent: (running) => stopRunningSubagentWithDeps(running, closeSurface),
+		stopRunningSubagent: (running) => stopRunningSubagentWithDeps(running, closeRunningSurface),
 		closeSurface,
 	};
 }
@@ -185,7 +195,7 @@ export async function launchSubagent(
 }
 
 function getInteractiveWatchRuntime(): InteractiveWatchRuntime {
-	return { cleanupNoSessionSessionFile };
+	return { cleanupNoSessionSessionFile, closeRunningSurface };
 }
 
 export async function watchSubagent(running: RunningSubagent, signal?: AbortSignal) {
@@ -193,7 +203,13 @@ export async function watchSubagent(running: RunningSubagent, signal?: AbortSign
 }
 
 function getShutdownRuntime(): ShutdownRuntime {
-	return { runningSubagents, completedSubagentResults, parentCloseEscalationMs: 5000, updateWidget };
+	return {
+		runningSubagents,
+		completedSubagentResults,
+		parentCloseEscalationMs: 5000,
+		updateWidget,
+		closeRunningSurface,
+	};
 }
 
 export function shutdownSubagentsForParentExit(options?: ShutdownSubagentsOptions) {

@@ -223,9 +223,9 @@ function writeFakeCommand(dir: string, command: string): void {
 	writeExecutable(dir, command, "#!/bin/sh\nexit 0\n");
 }
 
-describe("Herdr mux backend", () => {
-	describe("backend selection", () => {
-		it("selects Herdr when a compatible server and current pane are available", () => {
+describe("Herdr mux backend", async () => {
+	describe("backend selection", async () => {
+		it("selects Herdr when a compatible server and current pane are available", async () => {
 			useFakeHerdr();
 
 			assert.equal(isHerdrAvailable(), true);
@@ -233,7 +233,7 @@ describe("Herdr mux backend", () => {
 			assert.equal(getMuxBackend(), "herdr");
 		});
 
-		it("does not select Herdr when the herdr command is missing", () => {
+		it("does not select Herdr when the herdr command is missing", async () => {
 			const dir = createTestDir();
 			clearMuxRuntimeEnv();
 			process.env.PATH = dir;
@@ -247,7 +247,7 @@ describe("Herdr mux backend", () => {
 			["stopped", "stopped server"],
 			["incompatible", "incompatible protocol"],
 		] as const) {
-			it(`does not select Herdr with ${expected}`, () => {
+			it(`does not select Herdr with ${expected}`, async () => {
 				useFakeHerdr(mode);
 
 				assert.equal(isHerdrAvailable(), false);
@@ -255,7 +255,7 @@ describe("Herdr mux backend", () => {
 			});
 		}
 
-		it("prefers Herdr over an outer tmux when no forced preference is set", () => {
+		it("prefers Herdr over an outer tmux when no forced preference is set", async () => {
 			const { dir } = useFakeHerdr();
 			writeFakeCommand(dir, "tmux");
 			process.env.TMUX = "fake-tmux-socket";
@@ -264,7 +264,7 @@ describe("Herdr mux backend", () => {
 			assert.equal(getMuxBackend(), "herdr");
 		});
 
-		it("uses forced Herdr only when Herdr is actually available", () => {
+		it("uses forced Herdr only when Herdr is actually available", async () => {
 			useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
 			assert.equal(getMuxBackend(), "herdr");
@@ -300,7 +300,7 @@ describe("Herdr mux backend", () => {
 				envValue: "fake-wezterm-socket",
 			},
 		] as const) {
-			it(`respects forced ${backend} preference over available Herdr`, () => {
+			it(`respects forced ${backend} preference over available Herdr`, async () => {
 				const { dir } = useFakeHerdr();
 				writeFakeCommand(dir, command);
 				process.env.PI_SUBAGENT_MUX = backend;
@@ -310,19 +310,19 @@ describe("Herdr mux backend", () => {
 			});
 		}
 
-		it("returns a Herdr-specific setup hint", () => {
+		it("returns a Herdr-specific setup hint", async () => {
 			process.env.PI_SUBAGENT_MUX = "herdr";
 
 			assert.match(muxSetupHint(), /Herdr/);
 		});
 	});
 
-	describe("surface creation", () => {
-		it("creates normal surfaces as numbered Herdr tabs in the parent workspace", () => {
+	describe("surface creation", async () => {
+		it("creates normal surfaces as numbered Herdr tabs in the parent workspace", async () => {
 			const { logFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
 
-			assert.equal(createSurface("Herdr Child"), "w1:p2");
+			assert.equal(await createSurface("Herdr Child"), "w1:p2");
 
 			const log = readFileSync(logFile, "utf8");
 			assert.match(
@@ -333,11 +333,11 @@ describe("Herdr mux backend", () => {
 			assert.doesNotMatch(log, /pane split/);
 		});
 
-		it("creates child agent Herdr tab labels without positional numbering", () => {
+		it("creates child agent Herdr tab labels without positional numbering", async () => {
 			const { logFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
 
-			assert.equal(createSurface("[scout] Explore auth implementation"), "w1:p2");
+			assert.equal(await createSurface("[scout] Explore auth implementation"), "w1:p2");
 
 			const log = readFileSync(logFile, "utf8");
 			assert.match(
@@ -348,11 +348,11 @@ describe("Herdr mux backend", () => {
 			assert.match(log, /tab rename w1:t2 \[scout\] Explore auth implementation/);
 		});
 
-		it("closes the created Herdr tab when tab creation returns no root pane", () => {
+		it("closes the created Herdr tab when tab creation returns no root pane", async () => {
 			const { logFile } = useFakeHerdr("tab-created-without-pane");
 			process.env.PI_SUBAGENT_MUX = "herdr";
 
-			assert.throws(
+			await assert.rejects(
 				() => createSurface("Herdr Child"),
 				/Herdr tab create returned malformed pane record/,
 			);
@@ -363,7 +363,7 @@ describe("Herdr mux backend", () => {
 		});
 
 		for (const direction of ["right", "down"] as const) {
-			it(`creates explicit ${direction} Herdr splits with cwd and no-focus`, () => {
+			it(`creates explicit ${direction} Herdr splits with cwd and no-focus`, async () => {
 				const { logFile } = useFakeHerdr();
 				process.env.PI_SUBAGENT_MUX = "herdr";
 
@@ -384,7 +384,7 @@ describe("Herdr mux backend", () => {
 		}
 
 		for (const direction of ["left", "up"] as const) {
-			it(`rejects unsupported ${direction} Herdr splits honestly`, () => {
+			it(`rejects unsupported ${direction} Herdr splits honestly`, async () => {
 				const { logFile } = useFakeHerdr();
 				process.env.PI_SUBAGENT_MUX = "herdr";
 
@@ -401,7 +401,7 @@ describe("Herdr mux backend", () => {
 		}
 	});
 
-	describe("I/O, titles, and cleanup", () => {
+	describe("I/O, titles, and cleanup", async () => {
 		it("sends commands, empty Enter, shell commands, reads recent output, and closes panes", async () => {
 			const { logFile, screenFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
@@ -442,7 +442,7 @@ describe("Herdr mux backend", () => {
 				/Herdr pane run failed with exit code 1: \(empty\)/,
 			],
 		] as const) {
-			it(`reports ${mode} Herdr command failures`, () => {
+			it(`reports ${mode} Herdr command failures`, async () => {
 				const { logFile } = useFakeHerdr(mode);
 				process.env.PI_SUBAGENT_MUX = "herdr";
 
@@ -454,7 +454,7 @@ describe("Herdr mux backend", () => {
 			});
 		}
 
-		it("renames Herdr tab and workspace labels from environment or current pane metadata", () => {
+		it("renames Herdr tab and workspace labels from environment or current pane metadata", async () => {
 			const { logFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
 			process.env.HERDR_TAB_ID = "w1:t-env";
@@ -474,7 +474,7 @@ describe("Herdr mux backend", () => {
 			assert.match(log, /workspace rename w1 Current Workspace/);
 		});
 
-		it("does not prefix Herdr child agent tab labels with the positional tab index", () => {
+		it("does not prefix Herdr child agent tab labels with the positional tab index", async () => {
 			const { logFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
 			process.env.PI_SUBAGENT_NAME = "scout-child";
@@ -487,7 +487,7 @@ describe("Herdr mux backend", () => {
 			assert.match(log, /tab rename w1:t1 \[scout\] Exploring auth implementation/);
 		});
 
-		it("ignores already-closed Herdr panes but propagates cleanup failures", () => {
+		it("ignores already-closed Herdr panes but propagates cleanup failures", async () => {
 			const { logFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
 
@@ -503,8 +503,8 @@ describe("Herdr mux backend", () => {
 		});
 	});
 
-	describe("structured CLI adapter", () => {
-		it("extracts typed status, pane, tab, and workspace records", () => {
+	describe("structured CLI adapter", async () => {
+		it("extracts typed status, pane, tab, and workspace records", async () => {
 			useFakeHerdr();
 
 			assert.deepEqual(getHerdrServerStatus(), {
@@ -547,7 +547,7 @@ describe("Herdr mux backend", () => {
 			assert.match(log, /workspace get w1/);
 		});
 
-		it("reports Herdr API errors with the failing operation name", () => {
+		it("reports Herdr API errors with the failing operation name", async () => {
 			useFakeHerdr("api-error");
 
 			assert.throws(
@@ -556,7 +556,7 @@ describe("Herdr mux backend", () => {
 			);
 		});
 
-		it("reports malformed JSON with the failing operation name", () => {
+		it("reports malformed JSON with the failing operation name", async () => {
 			useFakeHerdr("malformed-current");
 
 			assert.throws(
@@ -565,7 +565,7 @@ describe("Herdr mux backend", () => {
 			);
 		});
 
-		it("reports malformed server status JSON with the status operation name", () => {
+		it("reports malformed server status JSON with the status operation name", async () => {
 			useFakeHerdr("malformed-status");
 
 			assert.throws(

@@ -84,8 +84,8 @@ function readLog(log: string): string[][] {
 		.map((line) => JSON.parse(line));
 }
 
-describe("cmux surface creation", () => {
-	it("creates cmux splits without stealing focus", () => {
+describe("cmux surface creation", async () => {
+	it("creates cmux splits without stealing focus", async () => {
 		const { dir, log } = installFakeCmux();
 		try {
 			assert.equal(createSurfaceSplit("Focus-Free Split", "right"), "surface:101");
@@ -109,11 +109,11 @@ describe("cmux surface creation", () => {
 		}
 	});
 
-	it("falls back to cmux surfaces when geometry is unavailable", () => {
+	it("falls back to cmux surfaces when geometry is unavailable", async () => {
 		const { dir, log } = installFakeCmux();
 		try {
-			assert.equal(createSurface("First"), "surface:102");
-			assert.equal(createSurface("Second"), "surface:102");
+			assert.equal(await createSurface("First"), "surface:102");
+			assert.equal(await createSurface("Second"), "surface:102");
 			const calls = readLog(log);
 			const surfaceCalls = calls.filter((args) => args[0] === "new-surface");
 			assert.equal(surfaceCalls.length, 2);
@@ -129,11 +129,11 @@ describe("cmux surface creation", () => {
 		}
 	});
 
-	it("splits cmux surfaces when measured geometry leaves a usable child pane", () => {
+	it("splits cmux surfaces when measured geometry leaves a usable child pane", async () => {
 		const { dir, log } = installFakeCmux();
 		try {
 			process.env.FAKE_CMUX_GEOMETRY = "wide";
-			assert.equal(createSurface("Wide"), "surface:101");
+			assert.equal(await createSurface("Wide"), "surface:101");
 			const calls = readLog(log);
 			const splitCalls = calls.filter((args) => args[0] === "new-split");
 			assert.equal(splitCalls.length, 1);
@@ -147,11 +147,11 @@ describe("cmux surface creation", () => {
 		}
 	});
 
-	it("uses cmux surfaces when a split would leave a too-small child pane", () => {
+	it("uses cmux surfaces when a split would leave a too-small child pane", async () => {
 		const { dir, log } = installFakeCmux();
 		try {
 			process.env.FAKE_CMUX_GEOMETRY = "narrow";
-			assert.equal(createSurface("Narrow"), "surface:102");
+			assert.equal(await createSurface("Narrow"), "surface:102");
 			const calls = readLog(log);
 			assert.equal(
 				calls.some((args) => args[0] === "new-split"),

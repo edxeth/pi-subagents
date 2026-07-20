@@ -352,18 +352,21 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 	// Clean up on real session shutdown. Pi also emits this event for the
 	// coordinator-only turn stop after async launches; that must not kill the
 	// children that the stop was created to leave running.
-	pi.on("session_shutdown", (event, ctx) => {
+	pi.on("session_shutdown", async (event, ctx) => {
 		traceSubagentLaunch("session.shutdown", {
 			coordinatorOnlyTurnStop: stopAfterCurrentSubagentBatch,
 			eventKeys: Object.keys((event ?? {}) as unknown as Record<string, unknown>),
 			running: runningSubagents.size,
 		});
-		if (stopAfterCurrentSubagentBatch) return;
+		if (stopAfterCurrentSubagentBatch) {
+			resetSubagentBatchStopRequest();
+			return;
+		}
 
 		moduleAbortController.abort();
 		widgetManager.reset();
 		resetSubagentBatchStopRequest();
-		shutdownSubagentsForParentExit();
+		await shutdownSubagentsForParentExit();
 		if (ctx.hasUI) {
 			ctx.ui.setWidget("subagent-status", undefined);
 		}

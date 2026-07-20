@@ -188,7 +188,7 @@ export async function waitForSubagentResult(
 
 		if (signal) {
 			if (signal.aborted) {
-				runtime.stopRunningSubagent(running);
+				await runtime.stopRunningSubagent(running);
 				runtime.runningSubagents.delete(running.id);
 				runtime.updateWidget();
 				return getSubagentWaitErrorResult(
@@ -232,7 +232,7 @@ export async function waitForSubagentResult(
 
 		releaseSubagentWaitOwnership(runtime, running, ownerId);
 		if (outcome.kind === "interrupted") {
-			runtime.stopRunningSubagent(running);
+			await runtime.stopRunningSubagent(running);
 			runtime.runningSubagents.delete(running.id);
 			runtime.updateWidget();
 			return getSubagentWaitErrorResult(

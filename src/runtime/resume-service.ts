@@ -24,11 +24,14 @@ import {
 } from "../launch/resume.ts";
 import {
 	createSurface,
+	getMuxBackend,
 	muxSetupHint,
 	resolveZellijPlacementPolicy,
 	sendShellCommand,
 	shellEscape,
 } from "../mux.ts";
+import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
+import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import { getEntryCount } from "../session/session.ts";
 import {
@@ -326,25 +329,21 @@ export async function resumeSubagentSession(
 			invocationMetadata,
 			process.env.PI_SUBAGENT_ZELLIJ_PLACEMENT,
 		);
-		const surface = createSurface(surfaceName, {
-			...(invocationMetadata?.zellijPlacementGroupKey &&
-			Number.isInteger(parentPaneId)
+		const zellijContext =
+			invocationMetadata?.zellijPlacementGroupKey && Number.isInteger(parentPaneId)
 				? {
-						zellij: {
-							groupKey: invocationMetadata.zellijPlacementGroupKey,
-							parentPaneId,
-							policy: configuredZellijPolicy,
-						},
+						groupKey: invocationMetadata.zellijPlacementGroupKey,
+						parentPaneId,
+						policy: configuredZellijPolicy,
 					}
-				: {}),
-		});
-		await new Promise<void>((resolve) =>
-			setTimeout(resolve, runtime.getShellReadyDelayMs()),
-		);
+				: undefined;
+		const zellijTarget =
+			getMuxBackend() === "zellij" ? await resolveZellijTarget() : undefined;
+		const ordinarySurface = zellijTarget
+			? undefined
+			: await createSurface(surfaceName, { zellij: zellijContext });
 		const doneSentinelFile = getDoneSentinelFile(sessionFile, id);
-		const parts = getPiShellParts(
-			buildResumePiArgs(sessionFile, "interactive"),
-		);
+		const parts = getPiShellParts(buildResumePiArgs(sessionFile, "interactive"));
 		for (const arg of [...extensionArgs, ...parityArgs]) {
 			parts.push(shellEscape(arg));
 		}
@@ -357,15 +356,33 @@ export async function resumeSubagentSession(
 			);
 			parts.push(shellEscape(`@${taskPath}`));
 		}
-		resumeEnvVars.PI_SUBAGENT_SURFACE = surface;
+		if (zellijTarget) resumeEnvVars.ZELLIJ_SESSION_NAME = zellijTarget.sessionName;
+		if (ordinarySurface) resumeEnvVars.PI_SUBAGENT_SURFACE = ordinarySurface;
 		const resumeEnvPrefix = `${Object.entries(resumeEnvVars)
 			.map(([key, value]) => `${key}=${shellEscape(value)}`)
 			.join(" ")} `;
 		const sentinel = buildInteractiveSentinelShellCommands(doneSentinelFile);
-		const command = `trap ${shellEscape(sentinel.exitTrap)} EXIT; ${buildShellChangeDirectoryPrefix(resumeCwd)}${resumeEnvPrefix}${parts.join(" ")}; ${sentinel.direct}`;
-		sendShellCommand(surface, command);
+		const surfacePrefix = zellijTarget
+			? "PI_SUBAGENT_SURFACE=pane:$ZELLIJ_PANE_ID "
+			: "";
+		const command = `trap ${shellEscape(sentinel.exitTrap)} EXIT; ${buildShellChangeDirectoryPrefix(resumeCwd)}${resumeEnvPrefix}${surfacePrefix}${parts.join(" ")}; ${sentinel.direct}`;
+		const surface =
+			ordinarySurface ??
+			(await createZellijCommandSurface(
+				surfaceName,
+				zellijTarget!,
+				getZellijShellCommand(command),
+				zellijContext,
+			));
+		if (!zellijTarget) {
+			await new Promise<void>((resolve) =>
+				setTimeout(resolve, runtime.getShellReadyDelayMs()),
+			);
+			sendShellCommand(surface, command);
+		}
 		running.surface = surface;
 		running.doneSentinelFile = doneSentinelFile;
+		running.zellijTarget = zellijTarget;
 	}
 
 	if (shouldPersistInvocationMetadata) {

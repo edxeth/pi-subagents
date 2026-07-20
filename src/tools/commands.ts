@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { RunningSubagent } from "../types.ts";
 
 export interface SubagentCommandRuntime {
-	stopRunningSubagent(running: RunningSubagent): void;
+	stopRunningSubagent(running: RunningSubagent): Promise<void>;
 }
 
 export function registerSubagentCommands(

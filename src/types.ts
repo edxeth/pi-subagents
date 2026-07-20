@@ -105,6 +105,8 @@ export interface RunningSubagent {
 	allowSteerDelivery?: boolean;
 	shutdownTimer?: ReturnType<typeof setTimeout>;
 	doneSentinelFile?: string;
+	zellijTarget?: { sessionName: string; parentPaneId: number };
+	surfaceClosePromise?: Promise<void>;
 }
 
 export interface StartedSubagentToolDetails {

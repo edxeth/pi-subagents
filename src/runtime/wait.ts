@@ -25,7 +25,7 @@ export interface WaitRuntime {
 		pi: Pick<ExtensionAPI, "sendMessage">,
 		cached: CompletedSubagentResult,
 	): CompletedSubagentResult;
-	stopRunningSubagent(running: RunningSubagent): void;
+	stopRunningSubagent(running: RunningSubagent): Promise<void>;
 	closeSurface(surface: string): void;
 }
 

@@ -116,10 +116,10 @@ export function findTrackedSubagent(query: string): {
 	return { error: `No subagent matches "${query}".` };
 }
 
-export function stopRunningSubagent(
+export async function stopRunningSubagent(
 	running: RunningSubagent,
-	closeSurface: (surface: string) => void,
-): void {
+	closeSurface: (running: RunningSubagent) => Promise<void>,
+): Promise<void> {
 	clearSubagentShutdownTimer(running);
 	running.abortController?.abort();
 
@@ -133,11 +133,9 @@ export function stopRunningSubagent(
 			running.childProcess.kill("SIGTERM");
 		}
 	}
-	if (running.surface) {
-		try {
-			closeSurface(running.surface);
-		} catch {}
-	}
+	try {
+		await closeSurface(running);
+	} catch {}
 }
 
 export function getStartedSubagentDetails(

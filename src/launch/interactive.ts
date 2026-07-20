@@ -22,9 +22,12 @@ import {
 } from "./policy.ts";
 import {
 	createSurface,
+	getMuxBackend,
 	sendShellCommand,
 	shellEscape,
 } from "../mux.ts";
+import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
+import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
 import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import {
@@ -72,32 +75,15 @@ export async function launchInteractiveSubagent(
 	const surfacePreCreated = !!options?.surface;
 	const surfaceName = prepared.sessionTitle ?? params.name;
 	const parentPaneId = Number(process.env.ZELLIJ_PANE_ID);
-	const surface =
-		options?.surface ??
-		createSurface(surfaceName, {
-			...(launch.launchMetadata.zellijPlacementGroupKey &&
-			Number.isInteger(parentPaneId)
-				? {
-						zellij: {
-							groupKey: launch.launchMetadata.zellijPlacementGroupKey,
-							parentPaneId,
-							policy: launch.launchMetadata.zellijPlacementPolicy,
-						},
-					}
-				: {}),
-		});
-	traceSubagentLaunch("interactive.surface", {
-		id,
-		name: params.name,
-		surface,
-		surfacePreCreated,
-	});
+	const zellijContext =
+		launch.launchMetadata.zellijPlacementGroupKey && Number.isInteger(parentPaneId)
+			? {
+					groupKey: launch.launchMetadata.zellijPlacementGroupKey,
+					parentPaneId,
+					policy: launch.launchMetadata.zellijPlacementPolicy,
+				}
+			: undefined;
 	const doneSentinelFile = getDoneSentinelFile(prepared.subagentSessionFile, id);
-	if (!surfacePreCreated) {
-		await new Promise<void>((resolve) =>
-			setTimeout(resolve, runtime.getShellReadyDelayMs()),
-		);
-	}
 	const modeHint = prepared.agentDefs?.autoExit
 		? "Complete your task autonomously."
 		: "Manual lifecycle: the operator must close this foreground pane when done. Stay in this pane and wait for the operator to interact with you. Do not exit on your own. The operator can interact with you at any time.";
@@ -154,7 +140,18 @@ export async function launchInteractiveSubagent(
 		parts.push(shellEscape(flag));
 	}
 
-	const envVars = { ...launch.envVars, PI_SUBAGENT_SURFACE: surface };
+	const zellijTarget =
+		!surfacePreCreated && getMuxBackend() === "zellij"
+			? await resolveZellijTarget()
+			: undefined;
+	const ordinarySurface = zellijTarget
+		? undefined
+		: (options?.surface ?? await createSurface(surfaceName, { zellij: zellijContext }));
+	const envVars = {
+		...launch.envVars,
+		...(zellijTarget ? { ZELLIJ_SESSION_NAME: zellijTarget.sessionName } : {}),
+		...(ordinarySurface ? { PI_SUBAGENT_SURFACE: ordinarySurface } : {}),
+	};
 	const envPrefix = `${Object.entries(envVars)
 		.map(([key, value]) => `${key}=${shellEscape(value)}`)
 		.join(" ")} `;
@@ -180,7 +177,29 @@ export async function launchInteractiveSubagent(
 	const { launchEntryCount } = launch;
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
 	const sentinel = buildInteractiveSentinelShellCommands(doneSentinelFile);
-	const command = `trap ${shellEscape(sentinel.exitTrap)} EXIT; ${cdPrefix}${envPrefix}${parts.join(" ")}; ${sentinel.direct}`;
+	const surfacePrefix = zellijTarget
+		? "PI_SUBAGENT_SURFACE=pane:$ZELLIJ_PANE_ID "
+		: "";
+	const command = `trap ${shellEscape(sentinel.exitTrap)} EXIT; ${cdPrefix}${envPrefix}${surfacePrefix}${parts.join(" ")}; ${sentinel.direct}`;
+	const surface =
+		ordinarySurface ??
+		(await createZellijCommandSurface(
+			surfaceName,
+			zellijTarget!,
+			getZellijShellCommand(command),
+			zellijContext,
+		));
+	traceSubagentLaunch("interactive.surface", {
+		id,
+		name: params.name,
+		surface,
+		surfacePreCreated,
+	});
+	if (!surfacePreCreated && !zellijTarget) {
+		await new Promise<void>((resolve) =>
+			setTimeout(resolve, runtime.getShellReadyDelayMs()),
+		);
+	}
 	traceSubagentLaunch("interactive.send", {
 		id,
 		name: params.name,
@@ -190,7 +209,7 @@ export async function launchInteractiveSubagent(
 		commandParts: parts,
 		envKeys: Object.keys(envVars).sort(),
 	});
-	sendShellCommand(surface, command);
+	if (!zellijTarget) sendShellCommand(surface, command);
 	return {
 		id,
 		name: params.name,
@@ -212,5 +231,6 @@ export async function launchInteractiveSubagent(
 		modelContextWindow: runtime.getContextWindow(prepared.effectiveModelRef),
 		modelRef: prepared.effectiveModelRef,
 		doneSentinelFile,
+		zellijTarget,
 	};
 }

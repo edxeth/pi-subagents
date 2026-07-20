@@ -24,14 +24,12 @@ interface ZellijPlacementStateFile {
 	groups: Record<string, ZellijPlacementGroupState>;
 }
 
-function zellijSessionSlug(): string {
-	return (
-		process.env.ZELLIJ_SESSION_NAME ?? process.env.ZELLIJ ?? "default"
-	).replace(/[^A-Za-z0-9_.-]/g, "_");
+function zellijSessionSlug(sessionName: string): string {
+	return sessionName.replace(/[^A-Za-z0-9_.-]/g, "_");
 }
 
-function zellijPlacementStatePath(): string {
-	return join(tmpdir(), `pi-zellij-placement-${zellijSessionSlug()}.json`);
+function zellijPlacementStatePath(sessionName: string): string {
+	return join(tmpdir(), `pi-zellij-placement-${zellijSessionSlug(sessionName)}.json`);
 }
 
 export function zellijPlacementGroupId(
@@ -39,18 +37,21 @@ export function zellijPlacementGroupId(
 	parentPaneId: number,
 	policy: ZellijPlacementPolicy,
 	runtimeId = ZELLIJ_PLACEMENT_RUNTIME_ID,
+	sessionName = process.env.ZELLIJ_SESSION_NAME ?? "default",
 ): string {
 	return createHash("sha256")
 		.update(
-			`${zellijSessionSlug()}\0${runtimeId}\0${groupKey}\0${parentPaneId}\0${policy}`,
+			`${zellijSessionSlug(sessionName)}\0${runtimeId}\0${groupKey}\0${parentPaneId}\0${policy}`,
 		)
 		.digest("hex")
 		.slice(0, 24);
 }
 
-export function readZellijPlacementState(): ZellijPlacementStateFile {
+export function readZellijPlacementState(
+	sessionName = process.env.ZELLIJ_SESSION_NAME ?? "default",
+): ZellijPlacementStateFile {
 	try {
-		const parsed = JSON.parse(readFileSync(zellijPlacementStatePath(), "utf8"));
+		const parsed = JSON.parse(readFileSync(zellijPlacementStatePath(sessionName), "utf8"));
 		if (parsed?.version === 1 && parsed.groups && typeof parsed.groups === "object") {
 			return parsed as ZellijPlacementStateFile;
 		}
@@ -60,14 +61,17 @@ export function readZellijPlacementState(): ZellijPlacementStateFile {
 
 export function writeZellijPlacementState(
 	state: ZellijPlacementStateFile,
+	sessionName = process.env.ZELLIJ_SESSION_NAME ?? "default",
 ): void {
-	const path = zellijPlacementStatePath();
+	const path = zellijPlacementStatePath(sessionName);
 	const temporaryPath = `${path}.${process.pid}.tmp`;
 	writeFileSync(temporaryPath, `${JSON.stringify(state)}\n`, "utf8");
 	renameSync(temporaryPath, path);
 }
 
-export function resetZellijPlacementState(): void {
-	const path = zellijPlacementStatePath();
+export function resetZellijPlacementState(
+	sessionName = process.env.ZELLIJ_SESSION_NAME ?? "default",
+): void {
+	const path = zellijPlacementStatePath(sessionName);
 	if (existsSync(path)) rmSync(path, { force: true });
 }

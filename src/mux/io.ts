@@ -11,6 +11,7 @@ import {
 	zellijActionSync,
 	zellijPaneId,
 } from "./core.ts";
+import { closeZellijSurface } from "./zellij-runtime.ts";
 import {
 	closeHerdrPane,
 	readHerdrPaneScreen,
@@ -171,6 +172,17 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
 	throw new Error("Unsupported mux backend");
 }
 
+export async function closeSurfaceAsync(
+	surface: string,
+	zellijTarget?: { sessionName: string; parentPaneId: number },
+): Promise<void> {
+	if (requireMuxBackend() === "zellij") {
+		await closeZellijSurface(surface, zellijTarget);
+		return;
+	}
+	closeSurface(surface);
+}
+
 export function closeSurface(surface: string): void {
 	const backend = requireMuxBackend();
 	if (backend === "cmux") {
@@ -190,7 +202,7 @@ export function closeSurface(surface: string): void {
 		return;
 	}
 	if (backend === "zellij") {
-		zellijActionSync(["close-pane"], surface);
+		void closeZellijSurface(surface).catch(() => {});
 		return;
 	}
 	if (backend === "herdr") {
