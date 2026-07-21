@@ -321,6 +321,54 @@ describe("child launch plan", () => {
 		assert.deepEqual(plan.capability.extensions, ["npm:pi-fancy-footer@1.3.2"]);
 	});
 
+	it("accepts Pi thinking levels without maintaining a local level list", async () => {
+		const cwd = createTestDir();
+		const plan = await buildChildLaunchPlan({
+			params: {
+				name: "code-review",
+				task: "review the diff",
+				title: "Code review",
+				agent: "reviewer",
+				model: "zai-messages/glm-5.2:max",
+			},
+			agentDefs: {
+				allowedModels: "zai-messages/glm-5.2:max",
+			},
+			parentCwd: cwd,
+			parentSessionDir: join(cwd, "parent-sessions"),
+			modelRegistry: {
+				getAvailable: () => [
+					{ provider: "zai-messages", id: "glm-5.2", thinkingLevelMap: { max: "max" } },
+				],
+			},
+		});
+
+		assert.equal(plan.effectiveModel, "zai-messages/glm-5.2");
+		assert.equal(plan.effectiveThinking, "max");
+		assert.equal(plan.effectiveModelRef, "zai-messages/glm-5.2:max");
+
+		await assert.rejects(
+			() => buildChildLaunchPlan({
+				params: {
+					name: "code-review",
+					task: "review the diff",
+					title: "Code review",
+					agent: "reviewer",
+					model: "zai-messages/glm-5.2:ultra",
+				},
+				agentDefs: null,
+				parentCwd: cwd,
+				parentSessionDir: join(cwd, "parent-sessions"),
+				modelRegistry: {
+					getAvailable: () => [
+						{ provider: "zai-messages", id: "glm-5.2", reasoning: true, thinkingLevelMap: { max: "max" } },
+					],
+				},
+			}),
+			/does not support thinking level 'ultra'.*Supported levels: off, minimal, low, medium, high, max/,
+		);
+	});
+
 	it("enforces allowed models after resolving bare model ids", async () => {
 		const cwd = createTestDir();
 		const parentSessionDir = join(cwd, "parent-sessions");

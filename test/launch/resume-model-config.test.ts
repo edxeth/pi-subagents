@@ -135,9 +135,38 @@ describe("resume model launch configuration", () => {
 		const defaultAllowed = resolveResumeLaunchMetadataForInvocationForTest(
 			base,
 			"openai-cpa/gpt-5.5:xhigh",
-			{ getAvailable: () => [{ provider: "openai-cpa", id: "gpt-5.5" }] },
+			{ getAvailable: () => [{ provider: "openai-cpa", id: "gpt-5.5", reasoning: true, thinkingLevelMap: { xhigh: "xhigh" } }] },
 		);
 		assert.equal(defaultAllowed?.modelRef, "openai-cpa/gpt-5.5:xhigh");
+	});
+
+	it("accepts newly supported Pi thinking levels on resume", () => {
+		const overridden = resolveResumeLaunchMetadataForInvocationForTest(
+			{
+				version: 1,
+				timestamp: "2026-05-08T00:00:00.000Z",
+				name: "reviewer",
+				mode: "background",
+				sessionMode: "lineage-only",
+				parentClosePolicy: "terminate",
+				async: true,
+				model: "zai-messages/glm-5.2",
+				modelRef: "zai-messages/glm-5.2:high",
+				allowModelOverride: true,
+				denyTools: [],
+				noContextFiles: false,
+				noSession: false,
+				agentConfigDir: "/tmp",
+				cwd: "/tmp",
+				boundarySystemPrompt: true,
+			},
+			"zai-messages/glm-5.2:max",
+			{ getAvailable: () => [{ provider: "zai-messages", id: "glm-5.2", thinkingLevelMap: { max: "max" } }] },
+		);
+
+		assert.equal(overridden?.model, "zai-messages/glm-5.2");
+		assert.equal(overridden?.thinking, "max");
+		assert.equal(overridden?.modelRef, "zai-messages/glm-5.2:max");
 	});
 
 	it("clears stale thinking when resume override drops unsupported inherited thinking", async () => {

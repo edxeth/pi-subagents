@@ -1,7 +1,8 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { AgentDefaults } from "../agents/definitions.ts";
-import { assertModelAllowed } from "../agents/model-refs.ts";
+import { assertModelAllowed, splitModelRef } from "../agents/model-refs.ts";
 import { buildSubagentSessionTitle } from "../agents/titles.ts";
 import {
 	generateSubagentSessionFile,
@@ -30,6 +31,7 @@ export interface ModelRegistryLike {
 	getAvailable(): Array<{
 		provider: string;
 		id: string;
+		reasoning?: boolean;
 		thinkingLevelMap?: Record<string, string | null | undefined>;
 	}>;
 }
@@ -65,18 +67,15 @@ export interface ChildLaunchPlanOptions {
 	mode?: ResumeMode;
 }
 
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
-
 export function splitModelRefThinking(
 	model: string | undefined,
 	fallbackThinking: string | undefined,
 ): { model: string | undefined; thinking: string | undefined; explicitThinking: boolean } {
 	if (!model) return { model, thinking: fallbackThinking, explicitThinking: false };
-	const idx = model.lastIndexOf(":");
-	if (idx === -1) return { model, thinking: fallbackThinking, explicitThinking: false };
-	const suffix = model.slice(idx + 1);
-	if (!THINKING_LEVELS.has(suffix)) return { model, thinking: fallbackThinking, explicitThinking: false };
-	return { model: model.slice(0, idx), thinking: suffix, explicitThinking: true };
+	const split = splitModelRef(model);
+	return split.thinking === undefined
+		? { model, thinking: fallbackThinking, explicitThinking: false }
+		: { model: split.model, thinking: split.thinking, explicitThinking: true };
 }
 
 /**
@@ -95,13 +94,7 @@ export function normalizeModelRef(
 		return { effectiveModel: undefined, effectiveThinking: undefined, effectiveModelRef: undefined };
 	}
 	let baseModel = model;
-	if (thinking) {
-		const idx = model.lastIndexOf(":");
-		if (idx !== -1) {
-			const suffix = model.slice(idx + 1);
-			if (THINKING_LEVELS.has(suffix)) baseModel = model.slice(0, idx);
-		}
-	}
+	if (thinking) baseModel = splitModelRef(model).model;
 	const ref = thinking ? `${baseModel}:${thinking}` : baseModel;
 	return { effectiveModel: baseModel, effectiveThinking: thinking, effectiveModelRef: ref };
 }
@@ -147,9 +140,18 @@ export function resolveAvailableModelRef(
 		if (!match) throw new Error(`Unknown model override '${model}'.`);
 	}
 	const match = available.find((candidate) => `${candidate.provider}/${candidate.id}` === resolved);
-	if (thinking && match?.thinkingLevelMap?.[thinking] === null) {
-		if (!explicitThinking) return { model: resolved, thinking: undefined };
-		throw new Error(`Model '${resolved}' does not support thinking level '${thinking}'.`);
+	if (thinking && match) {
+		const supported = getSupportedThinkingLevels({
+			...match,
+			reasoning: match.reasoning !== false,
+		} as Parameters<typeof getSupportedThinkingLevels>[0]) as string[];
+		if (!supported.includes(thinking)) {
+			if (!explicitThinking) return { model: resolved, thinking: undefined };
+			throw new Error(
+				`Model '${resolved}' does not support thinking level '${thinking}'. ` +
+				`Supported levels: ${supported.join(", ")}.`,
+			);
+		}
 	}
 	return { model: resolved, thinking };
 }

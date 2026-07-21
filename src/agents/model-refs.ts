@@ -1,5 +1,3 @@
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
-
 export function parseAllowedModels(raw: string | undefined): string[] {
 	if (!raw?.trim()) return [];
 	return raw
@@ -8,12 +6,11 @@ export function parseAllowedModels(raw: string | undefined): string[] {
 		.filter(Boolean);
 }
 
-function splitModelRef(ref: string): { model: string; thinking?: string } {
+/** Split Pi's provider/model[:thinking] syntax without duplicating Pi's level list. */
+export function splitModelRef(ref: string): { model: string; thinking?: string } {
 	const idx = ref.lastIndexOf(":");
 	if (idx === -1) return { model: ref };
-	const suffix = ref.slice(idx + 1);
-	if (!THINKING_LEVELS.has(suffix)) return { model: ref };
-	return { model: ref.slice(0, idx), thinking: suffix };
+	return { model: ref.slice(0, idx), thinking: ref.slice(idx + 1) };
 }
 
 /**

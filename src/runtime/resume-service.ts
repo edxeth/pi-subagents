@@ -8,7 +8,7 @@ import { writeResumeTaskArtifact } from "../launch/prompt-artifacts.ts";
 import { expandSubagentTask } from "../launch/task-expansion.ts";
 import { buildInteractiveSentinelShellCommands } from "../launch/interactive-sentinel.ts";
 import { parseEnvString } from "../launch/env.ts";
-import { assertModelAllowed, buildModelRef } from "../agents/model-refs.ts";
+import { assertModelAllowed, buildModelRef, splitModelRef } from "../agents/model-refs.ts";
 import {
 	getExtensionLaunchArgs,
 	getPersistedPromptLaunchArgs,
@@ -67,6 +67,7 @@ export interface ResumeServiceRuntime {
 		getAvailable(): Array<{
 			provider: string;
 			id: string;
+			reasoning?: boolean;
 			thinkingLevelMap?: Record<string, string | null | undefined>;
 		}>;
 	};
@@ -82,17 +83,14 @@ export interface ResumeSessionInput {
 	thinking?: string;
 }
 
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
-
 function splitResumeModelRef(
 	model: string,
 	fallbackThinking: string | undefined,
 ): { model: string; thinking: string | undefined; explicitThinking: boolean } {
-	const idx = model.lastIndexOf(":");
-	if (idx === -1) return { model, thinking: fallbackThinking, explicitThinking: false };
-	const suffix = model.slice(idx + 1);
-	if (!THINKING_LEVELS.has(suffix)) return { model, thinking: fallbackThinking, explicitThinking: false };
-	return { model: model.slice(0, idx), thinking: suffix, explicitThinking: true };
+	const split = splitModelRef(model);
+	return split.thinking === undefined
+		? { model, thinking: fallbackThinking, explicitThinking: false }
+		: { model: split.model, thinking: split.thinking, explicitThinking: true };
 }
 
 export function resolveResumeZellijPlacementPolicy(
