@@ -26,6 +26,7 @@ import {
 	createSurface,
 	getMuxBackend,
 	muxSetupHint,
+	resolveHerdrPlacementPolicy,
 	resolveZellijPlacementPolicy,
 	sendShellCommand,
 	shellEscape,
@@ -91,6 +92,17 @@ function splitResumeModelRef(
 	return split.thinking === undefined
 		? { model, thinking: fallbackThinking, explicitThinking: false }
 		: { model: split.model, thinking: split.thinking, explicitThinking: true };
+}
+
+export function resolveResumeHerdrPlacementPolicy(
+	launchMetadata: PersistedSubagentLaunchMetadata | undefined,
+	parentPolicy: string | undefined,
+): ReturnType<typeof resolveHerdrPlacementPolicy> | undefined {
+	const agentPolicy = parseEnvString(launchMetadata?.env)
+		.PI_SUBAGENT_HERDR_PLACEMENT;
+	if (agentPolicy !== undefined) return resolveHerdrPlacementPolicy(agentPolicy);
+	if (parentPolicy !== undefined) return resolveHerdrPlacementPolicy(parentPolicy);
+	return launchMetadata?.herdrPlacementPolicy;
 }
 
 export function resolveResumeZellijPlacementPolicy(
@@ -322,6 +334,16 @@ export async function resumeSubagentSession(
 		});
 	} else {
 		const surfaceName = invocationMetadata?.sessionTitle ?? displayName;
+		const backend = getMuxBackend();
+		const herdrContext =
+			backend === "herdr"
+				? {
+						policy: resolveResumeHerdrPlacementPolicy(
+							invocationMetadata,
+							process.env.PI_SUBAGENT_HERDR_PLACEMENT,
+						),
+					}
+				: undefined;
 		const parentPaneId = Number(process.env.ZELLIJ_PANE_ID);
 		const configuredZellijPolicy = resolveResumeZellijPlacementPolicy(
 			invocationMetadata,
@@ -336,10 +358,13 @@ export async function resumeSubagentSession(
 					}
 				: undefined;
 		const zellijTarget =
-			getMuxBackend() === "zellij" ? await resolveZellijTarget() : undefined;
+			backend === "zellij" ? await resolveZellijTarget() : undefined;
 		const ordinarySurface = zellijTarget
 			? undefined
-			: await createSurface(surfaceName, { zellij: zellijContext });
+			: await createSurface(surfaceName, {
+					herdr: herdrContext,
+					zellij: zellijContext,
+				});
 		const doneSentinelFile = getDoneSentinelFile(sessionFile, id);
 		const parts = getPiShellParts(buildResumePiArgs(sessionFile, "interactive"));
 		for (const arg of [...extensionArgs, ...parityArgs]) {

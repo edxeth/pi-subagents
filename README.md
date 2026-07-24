@@ -182,7 +182,7 @@ env: |
   SOME_VALUE=value,with,commas
 ```
 
-Pi splits `env` by line. It does not split values by comma. When you set `PI_CODING_AGENT_DIR`, the child uses that directory for its Pi config and sessions. For per-agent Zellij placement, set `PI_SUBAGENT_ZELLIJ_PLACEMENT` here; the parent reads that value at launch before the child pane exists. See [Zellij placement](#zellij-placement).
+Pi splits `env` by line. It does not split values by comma. When you set `PI_CODING_AGENT_DIR`, the child uses that directory for its Pi config and sessions. For per-agent Herdr or Zellij placement, set `PI_SUBAGENT_HERDR_PLACEMENT` or `PI_SUBAGENT_ZELLIJ_PLACEMENT` here. The parent reads placement before the child pane exists. See [Herdr placement](#herdr-placement) and [Zellij placement](#zellij-placement).
 
 `trust-project` controls Pi's project-local trust boundary. The default `false` passes `--no-approve`, so child sessions ignore project-local settings and project-local context files such as `AGENTS.md`/`CLAUDE.md` even when the parent project was previously approved. Set `trust-project: true` only for interactive children that should inherit those project-local resources. Background children still generate `--no-approve`; `flags` is the explicit advanced escape hatch if you need to override that safety default.
 
@@ -636,6 +636,14 @@ Set `PI_SUBAGENT_HERDR_PLACEMENT` to change the policy:
 Every pane-backed Herdr child receives its session title as the pane label. When a child uses the optional `set_tab_title` tool, Herdr updates that child pane without renaming the shared parent tab or workspace. Dedicated overflow tabs keep the original child session title.
 
 Placement ownership stays inside the parent Pi process. Separate Pi parents cannot overwrite each other's placement state, even when they share one Herdr socket. A failed split or pane rename must leave at most one child surface before tab fallback begins.
+
+The parent environment sets the default for all interactive subagents. An agent can override the placement policy for its own launches through the existing [`env`](#agent-definitions) frontmatter:
+
+```yaml
+env: PI_SUBAGENT_HERDR_PLACEMENT=tab
+```
+
+The parent reads this value before it creates the child surface. The agent value overrides the parent default. `PI_SUBAGENT_HERDR_MIN_COLUMNS` and `PI_SUBAGENT_HERDR_MIN_ROWS` remain parent-wide settings. On resume, a persisted per-agent `env` value wins; without one, the current parent default wins, then the originally persisted policy is the fallback.
 
 ## Zellij placement
 

@@ -221,6 +221,22 @@ describe("Herdr owned placement", () => {
 		assert.match(log, /tab rename w1:t2 \[reviewer\] Tab child/);
 	});
 
+	it("prefers an explicit Herdr placement context over the parent environment", async () => {
+		const logFile = useFakeHerdr();
+		process.env.PI_SUBAGENT_HERDR_PLACEMENT = "auto";
+
+		assert.equal(
+			await createSurface("[reviewer] Agent tab child", {
+				herdr: { policy: "tab" },
+			}),
+			"w1:p9",
+		);
+
+		const log = readFileSync(logFile, "utf8");
+		assert.doesNotMatch(log, /pane layout|pane split/);
+		assert.match(log, /tab create --workspace w1/);
+	});
+
 	it("rejects invalid placement before creating a Herdr surface", async () => {
 		const logFile = useFakeHerdr();
 		process.env.PI_SUBAGENT_HERDR_PLACEMENT = "sideways";

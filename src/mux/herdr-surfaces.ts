@@ -14,13 +14,17 @@ import {
 
 type SurfaceSplitDirection = "left" | "right" | "up" | "down";
 type HerdrSplitDirection = "right" | "down";
-type HerdrPlacementPolicy =
+export type HerdrPlacementPolicy =
 	| "auto"
 	| "right-stack"
 	| "down-stack"
 	| "right"
 	| "down"
 	| "tab";
+
+export interface HerdrPlacementContext {
+	policy?: HerdrPlacementPolicy;
+}
 
 type HerdrSplitPlan = {
 	paneId: string;
@@ -84,7 +88,7 @@ function herdrMinimums(): { columns: number; rows: number } {
 	};
 }
 
-function resolveHerdrPlacementPolicy(
+export function resolveHerdrPlacementPolicy(
 	value = process.env.PI_SUBAGENT_HERDR_PLACEMENT,
 ): HerdrPlacementPolicy {
 	const policy = value?.trim().toLowerCase() || "auto";
@@ -222,8 +226,13 @@ function createHerdrTabSurfaceForAgent(name: string): string {
 	}
 }
 
-export function createHerdrSurface(name: string): string {
-	const policy = resolveHerdrPlacementPolicy();
+export function createHerdrSurface(
+	name: string,
+	context?: HerdrPlacementContext,
+): string {
+	const policy = resolveHerdrPlacementPolicy(
+		context?.policy ?? process.env.PI_SUBAGENT_HERDR_PLACEMENT,
+	);
 	if (policy === "tab") return createHerdrTabSurfaceForAgent(name);
 
 	const parentPane = getHerdrCurrentPane();

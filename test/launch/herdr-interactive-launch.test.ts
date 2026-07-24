@@ -329,6 +329,56 @@ describe("Herdr interactive launch parity", () => {
 		assert.match(launchScript, /'--alpha' 'two words'/);
 	});
 
+	it("uses an agent env Herdr placement policy before creating the child surface", async () => {
+		const { logFile } = useFakeHerdr();
+		process.env.PI_SUBAGENT_HERDR_PLACEMENT = "auto";
+		const cwd = createTestDir();
+		process.env.PI_ARTIFACT_PROJECT_ROOT = join(cwd, "artifacts");
+		mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "agents", "tab-child.md"),
+			[
+				"---",
+				"name: tab-child",
+				"auto-exit: true",
+				"env: PI_SUBAGENT_HERDR_PLACEMENT=tab",
+				"---",
+				"Use a dedicated Herdr tab.",
+			].join("\n"),
+		);
+		const parentSession = writeParentSession(cwd);
+
+		const running = await launchInteractiveSubagent(
+			{
+				name: "tab-placement-child",
+				title: "Tab placement child",
+				task: "Check per-agent placement.",
+				agent: "tab-child",
+			},
+			{
+				cwd,
+				sessionManager: {
+					getSessionFile: () => parentSession,
+					getSessionId: () => "parent-session-id",
+					getLeafId: () => "asst-001",
+				},
+			},
+			{
+				getContextWindow: () => undefined,
+				getShellReadyDelayMs: () => 0,
+			},
+		);
+
+		assert.equal(running.surface, "w1:p2");
+		assert.equal(
+			readSubagentLaunchMetadataForTest(running.sessionFile)?.herdrPlacementPolicy,
+			"tab",
+		);
+		const log = readFileSync(logFile, "utf8");
+		assert.doesNotMatch(log, /pane layout|pane split/);
+		assert.match(log, /tab create --workspace w1/);
+	});
+
 	it("honors an explicit Herdr mux preference at the launch seam", async () => {
 		const { logFile } = useFakeHerdr();
 		process.env.PI_SUBAGENT_MUX = "herdr";

@@ -18,7 +18,11 @@ import {
 } from "../session/session-files.ts";
 import { ChildSessionStorage } from "../session/child-session-storage.ts";
 import { getEntryCount } from "../session/session.ts";
-import { resolveZellijPlacementPolicy } from "../mux.ts";
+import {
+	getMuxBackend,
+	resolveHerdrPlacementPolicy,
+	resolveZellijPlacementPolicy,
+} from "../mux.ts";
 
 interface CoordinatedSystemPrompt {
 	flag: "--system-prompt" | "--append-system-prompt";
@@ -57,6 +61,13 @@ export async function coordinateSubagentLaunch(
 	);
 	const systemPrompt = getCoordinatedSystemPrompt(prepared);
 	const agentEnv = parseEnvString(prepared.agentDefs?.env);
+	const herdrPlacementPolicy =
+		options.mode === "interactive" && getMuxBackend() === "herdr"
+			? resolveHerdrPlacementPolicy(
+					agentEnv.PI_SUBAGENT_HERDR_PLACEMENT ??
+						process.env.PI_SUBAGENT_HERDR_PLACEMENT,
+				)
+			: undefined;
 	const zellijPlacementPolicy =
 		options.mode === "interactive" && process.env.ZELLIJ_PANE_ID
 			? resolveZellijPlacementPolicy(
@@ -78,7 +89,10 @@ export async function coordinateSubagentLaunch(
 		sessionMode,
 		boundarySystemPrompt,
 		systemPrompt?.text ?? options.systemPrompt,
-		zellijPlacement,
+		{
+			...(herdrPlacementPolicy ? { herdrPlacementPolicy } : {}),
+			...zellijPlacement,
+		},
 	);
 	const storage = new ChildSessionStorage(prepared.subagentSessionFile);
 	if (existsSync(prepared.subagentSessionFile)) {

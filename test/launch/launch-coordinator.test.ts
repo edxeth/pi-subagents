@@ -10,6 +10,7 @@ import {
 	it,
 	join,
 	mkdirSync,
+	writeExecutable,
 	writeFileSync,
 } from "../support/index.ts";
 import { coordinateSubagentLaunch } from "../../src/launch/launch-coordinator.ts";
@@ -251,6 +252,124 @@ describe("launch coordinator", () => {
 		assert.equal(reviewer.launchMetadata.zellijPlacementGroupKey, parentSession);
 		assert.equal(scout.launchMetadata.zellijPlacementPolicy, "right-stack");
 		assert.equal(reviewer.launchMetadata.zellijPlacementPolicy, "down-stack");
+	});
+
+	it("lets an agent env Herdr placement policy override the parent default", async () => {
+		const cwd = createTestDir();
+		mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "agents", "reviewer.md"),
+			[
+				"---",
+				"name: reviewer",
+				"mode: interactive",
+				"env: PI_SUBAGENT_HERDR_PLACEMENT=tab",
+				"---",
+				"Review.",
+			].join("\n"),
+		);
+		const binDir = join(cwd, "bin");
+		mkdirSync(binDir, { recursive: true });
+		writeExecutable(
+			binDir,
+			"herdr",
+			`#!/bin/sh
+if [ "$*" = "status server --json" ]; then
+  printf '%s\\n' '{"status":"running","running":true,"compatible":true,"protocol":17,"version":"0.7.5"}'
+  exit 0
+fi
+if [ "$*" = "pane current --current" ]; then
+  printf '%s\\n' '{"result":{"pane":{"pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1","focused":true}}}'
+  exit 0
+fi
+exit 1
+`,
+		);
+		const parentSession = join(cwd, "parent-agent-herdr.jsonl");
+		writeFileSync(parentSession, `${JSON.stringify(SESSION_HEADER)}\n`);
+		const originalPath = process.env.PATH;
+		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+		process.env.PI_SUBAGENT_MUX = "herdr";
+		process.env.PI_SUBAGENT_HERDR_PLACEMENT = "auto";
+		try {
+			const launch = await coordinateSubagentLaunch(
+				{
+					name: "agent-herdr-reviewer",
+					title: "Agent Herdr reviewer",
+					task: "Review",
+					agent: "reviewer",
+				},
+				{
+					cwd,
+					sessionManager: {
+						getSessionFile: () => parentSession,
+						getSessionId: () => "parent-session-id",
+						getLeafId: () => null,
+					},
+				},
+				{ mode: "interactive" },
+			);
+
+			assert.equal(launch.launchMetadata.herdrPlacementPolicy, "tab");
+		} finally {
+			if (originalPath === undefined) delete process.env.PATH;
+			else process.env.PATH = originalPath;
+			delete process.env.PI_SUBAGENT_MUX;
+			delete process.env.PI_SUBAGENT_HERDR_PLACEMENT;
+		}
+	});
+
+	it("does not parse Herdr placement when tmux is forced inside Herdr", async () => {
+		const cwd = createTestDir();
+		const binDir = join(cwd, "bin");
+		mkdirSync(binDir, { recursive: true });
+		mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+		writeExecutable(binDir, "tmux", "#!/bin/sh\nexit 0\n");
+		writeFileSync(
+			join(cwd, ".pi", "agents", "reviewer.md"),
+			[
+				"---",
+				"name: reviewer",
+				"mode: interactive",
+				"env: PI_SUBAGENT_HERDR_PLACEMENT=bogus",
+				"---",
+				"Review.",
+			].join("\n"),
+		);
+		const parentSession = join(cwd, "parent-forced-tmux.jsonl");
+		writeFileSync(parentSession, `${JSON.stringify(SESSION_HEADER)}\n`);
+		const originalPath = process.env.PATH;
+		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+		process.env.PI_SUBAGENT_MUX = "tmux";
+		process.env.TMUX = "fake-tmux-socket";
+		process.env.HERDR_PANE_ID = "w1:p1";
+		try {
+			const launch = await coordinateSubagentLaunch(
+				{
+					name: "forced-tmux-reviewer",
+					title: "Forced tmux reviewer",
+					task: "Review",
+					agent: "reviewer",
+				},
+				{
+					cwd,
+					sessionManager: {
+						getSessionFile: () => parentSession,
+						getSessionId: () => "parent-session-id",
+						getLeafId: () => null,
+					},
+				},
+				{ mode: "interactive" },
+			);
+
+			assert.equal(launch.launchMetadata.herdrPlacementPolicy, undefined);
+		} finally {
+			if (originalPath === undefined) delete process.env.PATH;
+			else process.env.PATH = originalPath;
+			delete process.env.PI_SUBAGENT_MUX;
+			delete process.env.TMUX;
+			delete process.env.HERDR_PANE_ID;
+		}
 	});
 
 	it("persists identity system prompt without changing the child session path", async () => {

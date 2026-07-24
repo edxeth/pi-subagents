@@ -11,6 +11,7 @@ import {
 	createHerdrSurface,
 	renameHerdrCurrentTab,
 	renameHerdrCurrentWorkspace,
+	type HerdrPlacementContext,
 } from "./herdr-surfaces.ts";
 import {
 	createZellijSurface,
@@ -28,6 +29,7 @@ function positiveNumber(value: unknown): number | undefined {
 // ── Surface creation ───────────────────────────────────────────────────────
 
 export interface SurfaceCreationOptions {
+	herdr?: HerdrPlacementContext;
 	zellij?: ZellijPlacementContext;
 }
 
@@ -54,7 +56,7 @@ export async function createSurface(
 	}
 
 	if (backend === "herdr") {
-		return createHerdrSurface(name);
+		return createHerdrSurface(name, options?.herdr);
 	}
 
 	return createSurfaceSplit(name, "right");

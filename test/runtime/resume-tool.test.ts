@@ -21,6 +21,7 @@ import {
 } from "../support/index.ts";
 import { resolve } from "node:path";
 import {
+	resolveResumeHerdrPlacementPolicy,
 	resolveResumeZellijPlacementPolicy,
 	resumeSubagentSession,
 } from "../../src/runtime/resume-service.ts";
@@ -36,6 +37,65 @@ async function readNonEmptyFileEventually(path: string): Promise<string> {
 	}
 	throw new Error(`Timed out waiting for ${path}; last content: ${lastText}`);
 }
+
+describe("subagent_resume Herdr placement", () => {
+	it("keeps the persisted per-agent policy over the current parent default", () => {
+		assert.equal(
+			resolveResumeHerdrPlacementPolicy(
+				{
+					env: "PI_SUBAGENT_HERDR_PLACEMENT=tab",
+					herdrPlacementPolicy: "tab",
+				} as Parameters<typeof resolveResumeHerdrPlacementPolicy>[0],
+				"auto",
+			),
+			"tab",
+		);
+	});
+
+	it("lets the current parent default override a persisted operator policy", () => {
+		assert.equal(
+			resolveResumeHerdrPlacementPolicy(
+				{ herdrPlacementPolicy: "down-stack" } as Parameters<
+					typeof resolveResumeHerdrPlacementPolicy
+				>[0],
+				"tab",
+			),
+			"tab",
+		);
+	});
+
+	it("treats an empty persisted agent value as an explicit auto override", () => {
+		assert.equal(
+			resolveResumeHerdrPlacementPolicy(
+				{
+					env: "PI_SUBAGENT_HERDR_PLACEMENT=",
+					herdrPlacementPolicy: "tab",
+				} as Parameters<typeof resolveResumeHerdrPlacementPolicy>[0],
+				"down",
+			),
+			"auto",
+		);
+	});
+
+	it("uses the current parent default when old metadata has no persisted policy", () => {
+		assert.equal(
+			resolveResumeHerdrPlacementPolicy(undefined, "right-stack"),
+			"right-stack",
+		);
+	});
+
+	it("treats an empty current parent value as an explicit auto override", () => {
+		assert.equal(
+			resolveResumeHerdrPlacementPolicy(
+				{ herdrPlacementPolicy: "tab" } as Parameters<
+					typeof resolveResumeHerdrPlacementPolicy
+				>[0],
+				"",
+			),
+			"auto",
+		);
+	});
+});
 
 describe("subagent_resume Zellij placement", () => {
 	it("keeps the persisted per-agent policy over the current parent default", () => {
@@ -374,7 +434,7 @@ describe("subagent_resume approval args", () => {
 });
 
 describe("subagent_resume prompt delivery", () => {
-	it("writes a direct sentinel after interactive resume commands", async () => {
+	it("writes a direct sentinel for tmux resumes without parsing Herdr placement", async () => {
 		const dir = createTestDir();
 		const binDir = join(dir, "bin");
 		mkdirSync(binDir, { recursive: true });
@@ -421,6 +481,7 @@ esac
 				agentConfigDir: dir,
 				cwd: dir,
 				boundarySystemPrompt: false,
+				env: "PI_SUBAGENT_HERDR_PLACEMENT=bogus",
 			});
 
 			const running = await resumeSubagentSession(

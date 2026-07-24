@@ -74,6 +74,9 @@ export async function launchInteractiveSubagent(
 	});
 	const surfacePreCreated = !!options?.surface;
 	const surfaceName = prepared.sessionTitle ?? params.name;
+	const herdrContext = {
+		policy: launch.launchMetadata.herdrPlacementPolicy,
+	};
 	const parentPaneId = Number(process.env.ZELLIJ_PANE_ID);
 	const zellijContext =
 		launch.launchMetadata.zellijPlacementGroupKey && Number.isInteger(parentPaneId)
@@ -146,7 +149,10 @@ export async function launchInteractiveSubagent(
 			: undefined;
 	const ordinarySurface = zellijTarget
 		? undefined
-		: (options?.surface ?? await createSurface(surfaceName, { zellij: zellijContext }));
+		: (options?.surface ?? await createSurface(surfaceName, {
+				herdr: herdrContext,
+				zellij: zellijContext,
+			}));
 	const envVars = {
 		...launch.envVars,
 		...(zellijTarget ? { ZELLIJ_SESSION_NAME: zellijTarget.sessionName } : {}),
