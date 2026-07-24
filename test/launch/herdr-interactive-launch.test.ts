@@ -37,9 +37,13 @@ function clearMuxRuntimeEnv(): void {
 	delete process.env.HERDR_TAB_ID;
 	delete process.env.HERDR_WORKSPACE_ID;
 	delete process.env.PI_SUBAGENT_MUX;
+	delete process.env.PI_SUBAGENT_HERDR_PLACEMENT;
+	delete process.env.PI_SUBAGENT_HERDR_MIN_COLUMNS;
+	delete process.env.PI_SUBAGENT_HERDR_MIN_ROWS;
 	delete process.env.PI_SUBAGENT_PI_COMMAND;
 	delete process.env.PI_SUBAGENT_NAME;
 	delete process.env.PI_SUBAGENT_SESSION;
+	delete process.env.PI_SUBAGENT_SURFACE;
 }
 
 function writeFakeHerdr(dir: string): string {
@@ -52,12 +56,32 @@ function writeFakeHerdr(dir: string): string {
 printf '%s\n' "$*" >> "${logFile}"
 
 if [ "$*" = "status server --json" ]; then
-  printf '%s\n' '{"status":"running","running":true,"compatible":true,"protocol":14,"version":"0.7.0"}'
+  printf '%s\n' '{"status":"running","running":true,"compatible":true,"protocol":17,"version":"0.7.5"}'
   exit 0
 fi
 
 if [ "$*" = "pane current --current" ]; then
   printf '%s\n' '{"id":"cli:pane:current","result":{"type":"pane_current","pane":{"pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1","cwd":"/parent","foreground_cwd":"/parent","focused":true}}}'
+  exit 0
+fi
+
+if [ "$1" = "pane" ] && [ "$2" = "layout" ]; then
+  printf '%s\n' '{"id":"cli:pane:layout","result":{"type":"pane_layout","layout":{"area":{"height":52,"width":120,"x":0,"y":0},"focused_pane_id":"w1:p1","panes":[{"focused":true,"pane_id":"w1:p1","rect":{"height":52,"width":120,"x":0,"y":0}}],"splits":[],"tab_id":"w1:t1","workspace_id":"w1","zoomed":false}}}'
+  exit 0
+fi
+
+if [ "$1" = "pane" ] && [ "$2" = "split" ]; then
+  printf '%s\n' '{"id":"cli:pane:split","result":{"type":"pane_split","pane":{"pane_id":"w1:p2","tab_id":"w1:t1","workspace_id":"w1","cwd":"/child","focused":false}}}'
+  exit 0
+fi
+
+if [ "$1" = "pane" ] && [ "$2" = "rename" ]; then
+  printf '%s\n' '{"id":"cli:pane:rename","result":{"type":"pane_renamed"}}'
+  exit 0
+fi
+
+if [ "$1" = "pane" ] && [ "$2" = "close" ]; then
+  printf '%s\n' '{"id":"cli:pane:close","result":{"type":"pane_closed"}}'
   exit 0
 fi
 
@@ -73,6 +97,11 @@ fi
 
 if [ "$1" = "tab" ] && [ "$2" = "rename" ]; then
   printf '%s\n' '{"id":"cli:tab:rename","result":{"type":"tab_renamed"}}'
+  exit 0
+fi
+
+if [ "$1" = "tab" ] && [ "$2" = "close" ]; then
+  printf '%s\n' '{"id":"cli:tab:close","result":{"type":"tab_closed"}}'
   exit 0
 fi
 
@@ -284,9 +313,10 @@ describe("Herdr interactive launch parity", () => {
 		const log = readFileSync(logFile, "utf8");
 		assert.match(log, /status server --json/);
 		assert.match(log, /pane current --current/);
-		assert.match(log, /tab create --workspace w1 --cwd .* --label \[path-session\] Path session child --no-focus/);
-		assert.match(log, /tab rename w1:t2 \[path-session\] Path session child/);
-		assert.doesNotMatch(log, /tab list --workspace w1/);
+		assert.match(log, /pane layout --pane w1:p1/);
+		assert.match(log, /pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/);
+		assert.match(log, /pane rename w1:p2 \[path-session\] Path session child/);
+		assert.doesNotMatch(log, /tab create|tab rename/);
 		assert.match(log, /pane run w1:p2 /);
 		assert.doesNotMatch(log, /pane send-keys w1:p2 Enter/);
 		const launchScript = readHerdrRunScript(log);
@@ -360,9 +390,9 @@ describe("Herdr interactive launch parity", () => {
 		const log = readFileSync(logFile, "utf8");
 		assert.match(log, /status server --json/);
 		assert.match(log, /pane current --current/);
-		assert.match(log, /tab create --workspace w1 --cwd .* --label \[forced-herdr\] Forced herdr child --no-focus/);
-		assert.match(log, /tab rename w1:t2 \[forced-herdr\] Forced herdr child/);
-		assert.doesNotMatch(log, /tab list --workspace w1/);
+		assert.match(log, /pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/);
+		assert.match(log, /pane rename w1:p2 \[forced-herdr\] Forced herdr child/);
+		assert.doesNotMatch(log, /tab create|tab rename/);
 		assert.match(log, /pane run w1:p2 /);
 		assert.doesNotMatch(log, /pane send-keys w1:p2 Enter/);
 		const launchScript = readHerdrRunScript(log);
@@ -474,9 +504,9 @@ describe("Herdr interactive launch parity", () => {
 		assert.equal(metadata?.noContextFiles, true);
 
 		const log = readFileSync(logFile, "utf8");
-		assert.match(log, /tab create --workspace w1 --cwd .* --label \[capability-lifecycle\] Capability child --no-focus/);
-		assert.match(log, /tab rename w1:t2 \[capability-lifecycle\] Capability child/);
-		assert.doesNotMatch(log, /tab list --workspace w1/);
+		assert.match(log, /pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/);
+		assert.match(log, /pane rename w1:p2 \[capability-lifecycle\] Capability child/);
+		assert.doesNotMatch(log, /tab create|tab rename/);
 		assert.match(log, /pane run w1:p2 /);
 		assert.doesNotMatch(log, /pane send-keys w1:p2 Enter/);
 		const launchScript = readHerdrRunScript(log);

@@ -21,6 +21,22 @@ export type HerdrPane = {
 	focused?: boolean;
 };
 
+export type HerdrPaneRect = {
+	paneId: string;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	focused?: boolean;
+};
+
+export type HerdrPaneLayout = {
+	area: Omit<HerdrPaneRect, "paneId" | "focused">;
+	panes: HerdrPaneRect[];
+	tabId?: string;
+	workspaceId?: string;
+};
+
 export type HerdrTab = {
 	tabId: string;
 	workspaceId?: string;
@@ -307,6 +323,35 @@ function parsePane(value: unknown, operation: string): HerdrPane {
 	};
 }
 
+function parsePaneLayout(value: unknown, operation: string): HerdrPaneLayout {
+	if (!isRecord(value) || !isRecord(value.area) || !Array.isArray(value.panes)) {
+		throw new Error(`Herdr ${operation} returned malformed pane layout`);
+	}
+	const rect = (record: Record<string, unknown>, context: string) => {
+		const x = numberField(record, "x");
+		const y = numberField(record, "y");
+		const width = numberField(record, "width");
+		const height = numberField(record, "height");
+		if (x === undefined || y === undefined || width === undefined || height === undefined) {
+			throw new Error(`Herdr ${operation} returned malformed ${context} rectangle`);
+		}
+		return { x, y, width, height };
+	};
+	return {
+		area: rect(value.area, "layout"),
+		panes: value.panes.map((pane) => {
+			if (!isRecord(pane) || !isRecord(pane.rect)) {
+				throw new Error(`Herdr ${operation} returned malformed pane layout record`);
+			}
+			const paneId = stringField(pane, "pane_id");
+			if (!paneId) throw new Error(`Herdr ${operation} returned layout pane without pane_id`);
+			return { paneId, ...rect(pane.rect, "pane"), focused: booleanField(pane, "focused") };
+		}),
+		tabId: stringField(value, "tab_id"),
+		workspaceId: stringField(value, "workspace_id"),
+	};
+}
+
 function parseTab(value: unknown, operation: string): HerdrTab {
 	if (!isRecord(value)) {
 		throw new Error(`Herdr ${operation} returned malformed tab record`);
@@ -346,7 +391,7 @@ function parseWorkspace(value: unknown, operation: string): HerdrWorkspace {
 
 function closeHerdrTabQuiet(tabId: string): void {
 	try {
-		runHerdrApi("tab close", ["tab", "close", tabId]);
+		closeHerdrTab(tabId);
 	} catch {}
 }
 
@@ -393,6 +438,13 @@ export function getHerdrCurrentPane(): HerdrPane {
 	return parsePane(result.pane, "pane current");
 }
 
+export function getHerdrPaneLayout(paneId?: string): HerdrPaneLayout {
+	const args = ["pane", "layout", paneId ? "--pane" : "--current"];
+	if (paneId) args.push(paneId);
+	const result = runHerdrApi("pane layout", args);
+	return parsePaneLayout(result.layout, "pane layout");
+}
+
 export function getHerdrTab(tabId: string): HerdrTab {
 	const result = runHerdrApi("tab get", ["tab", "get", tabId]);
 	return parseTab(result.tab, "tab get");
@@ -428,13 +480,16 @@ export function createHerdrTabSurface(options: {
 export function splitHerdrPane(options: {
 	paneId?: string;
 	direction: "right" | "down";
+	ratio?: number;
 	cwd: string;
 	focus?: boolean;
 }): HerdrPane {
 	const args = ["pane", "split"];
 	if (options.paneId) args.push(options.paneId);
 	else args.push("--current");
-	args.push("--direction", options.direction, "--cwd", options.cwd);
+	args.push("--direction", options.direction);
+	if (options.ratio !== undefined) args.push("--ratio", String(options.ratio));
+	args.push("--cwd", options.cwd);
 	args.push(options.focus ? "--focus" : "--no-focus");
 	const result = runHerdrApi("pane split", args);
 	return parseCreatedPane(result, "pane split");
@@ -495,6 +550,14 @@ export function closeHerdrPane(paneId: string): void {
 		if (isAlreadyClosedHerdrPane(error)) return;
 		throw error;
 	}
+}
+
+export function closeHerdrTab(tabId: string): void {
+	runHerdrApi("tab close", ["tab", "close", tabId]);
+}
+
+export function renameHerdrPane(paneId: string, title: string): void {
+	runHerdrApi("pane rename", ["pane", "rename", paneId, title]);
 }
 
 export function renameHerdrTab(tabId: string, title: string): void {

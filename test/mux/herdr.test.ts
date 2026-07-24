@@ -41,8 +41,12 @@ function clearMuxRuntimeEnv(): void {
 	delete process.env.HERDR_TAB_ID;
 	delete process.env.HERDR_WORKSPACE_ID;
 	delete process.env.PI_SUBAGENT_MUX;
+	delete process.env.PI_SUBAGENT_HERDR_PLACEMENT;
+	delete process.env.PI_SUBAGENT_HERDR_MIN_COLUMNS;
+	delete process.env.PI_SUBAGENT_HERDR_MIN_ROWS;
 	delete process.env.PI_SUBAGENT_NAME;
 	delete process.env.PI_SUBAGENT_SESSION;
+	delete process.env.PI_SUBAGENT_SURFACE;
 }
 
 function writeFakeHerdr(dir: string): string {
@@ -95,6 +99,11 @@ if [ "$cmd" = "pane current --current" ]; then
   esac
 fi
 
+if [ "$1" = "pane" ] && [ "$2" = "layout" ]; then
+  printf '%s\n' '{"id":"cli:pane:layout","result":{"type":"pane_layout","layout":{"area":{"height":52,"width":120,"x":0,"y":0},"focused_pane_id":"w1:p1","panes":[{"focused":true,"pane_id":"w1:p1","rect":{"height":52,"width":120,"x":0,"y":0}}],"splits":[],"tab_id":"w1:t1","workspace_id":"w1","zoomed":false}}}'
+  exit 0
+fi
+
 if [ "$cmd" = "tab get w1:t1" ]; then
   printf '%s\n' '{"id":"cli:tab:get","result":{"type":"tab_info","tab":{"tab_id":"w1:t1","workspace_id":"w1","label":"One","focused":true,"pane_count":1}}}'
   exit 0
@@ -130,6 +139,11 @@ if [ "$1" = "pane" ] && [ "$2" = "split" ]; then
     previous="$arg"
   done
   printf '%s\n' '{"id":"cli:pane:split","result":{"type":"pane_split","pane":{"pane_id":"w1:p-split-'"$direction"'","tab_id":"w1:t1","workspace_id":"w1","cwd":"/workspace/app","focused":false}}}'
+  exit 0
+fi
+
+if [ "$1" = "pane" ] && [ "$2" = "rename" ]; then
+  printf '%s\n' '{"id":"cli:pane:rename","result":{"type":"pane_renamed"}}'
   exit 0
 fi
 
@@ -318,39 +332,43 @@ describe("Herdr mux backend", async () => {
 	});
 
 	describe("surface creation", async () => {
-		it("creates normal surfaces as numbered Herdr tabs in the parent workspace", async () => {
+		it("creates normal surfaces as safe named Herdr panes", async () => {
 			const { logFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
 
-			assert.equal(await createSurface("Herdr Child"), "w1:p2");
+			assert.equal(await createSurface("Herdr Child"), "w1:p-split-right");
 
 			const log = readFileSync(logFile, "utf8");
+			assert.match(log, /pane layout --pane w1:p1/);
 			assert.match(
 				log,
-				/tab create --workspace w1 --cwd .* --label Herdr Child --no-focus/,
+				/pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/,
 			);
-			assert.match(log, /tab rename w1:t2 2: Herdr Child/);
-			assert.doesNotMatch(log, /pane split/);
+			assert.match(log, /pane rename w1:p-split-right Herdr Child/);
+			assert.doesNotMatch(log, /tab create/);
 		});
 
-		it("creates child agent Herdr tab labels without positional numbering", async () => {
+		it("uses the child session title as the Herdr pane label", async () => {
 			const { logFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
 
-			assert.equal(await createSurface("[scout] Explore auth implementation"), "w1:p2");
+			assert.equal(
+				await createSurface("[scout] Explore auth implementation"),
+				"w1:p-split-right",
+			);
 
 			const log = readFileSync(logFile, "utf8");
 			assert.match(
 				log,
-				/tab create --workspace w1 --cwd .* --label \[scout\] Explore auth implementation --no-focus/,
+				/pane rename w1:p-split-right \[scout\] Explore auth implementation/,
 			);
-			assert.doesNotMatch(log, /tab list --workspace w1/);
-			assert.match(log, /tab rename w1:t2 \[scout\] Explore auth implementation/);
+			assert.doesNotMatch(log, /tab create|tab rename/);
 		});
 
 		it("closes the created Herdr tab when tab creation returns no root pane", async () => {
 			const { logFile } = useFakeHerdr("tab-created-without-pane");
 			process.env.PI_SUBAGENT_MUX = "herdr";
+			process.env.PI_SUBAGENT_HERDR_PLACEMENT = "tab";
 
 			await assert.rejects(
 				() => createSurface("Herdr Child"),
@@ -379,6 +397,7 @@ describe("Herdr mux backend", async () => {
 						`pane split w1:p1 --direction ${direction} --cwd .* --no-focus`,
 					),
 				);
+				assert.match(log, new RegExp(`pane rename w1:p-split-${direction} Herdr Split`));
 				assert.doesNotMatch(log, /tab create/);
 			});
 		}

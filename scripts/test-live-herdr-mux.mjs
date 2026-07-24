@@ -235,6 +235,8 @@ async function runInner() {
   let childPaneId = "";
   let childTabId = "";
   let splitPaneId = "";
+  let overflowPaneId = "";
+  let overflowTabId = "";
   let workspaceId = "";
   let originalWorkspaceLabel = "";
 
@@ -274,16 +276,20 @@ async function runInner() {
       workspaceRenameVerified = true;
     }
 
-    childPaneId = createSurface(`${marker} child`);
+    childPaneId = await createSurface(`${marker} child`);
     const childPane = paneFromResult("pane get", ["pane", "get", childPaneId]);
     childTabId = childPane.tab_id;
-    if (!childTabId || childTabId === parentPane.tabId) {
+    if (!childTabId || childTabId !== parentPane.tabId) {
       throw new Error(
-        `Expected createSurface to create a non-shrinking Herdr tab. Parent tab: ${parentPane.tabId}; child pane: ${JSON.stringify(childPane)}`,
+        `Expected default Herdr auto placement to keep the child in parent tab ${parentPane.tabId}; child pane: ${JSON.stringify(childPane)}`,
       );
     }
     if (childPane.workspace_id !== workspaceId) {
       throw new Error(`Expected child workspace ${workspaceId}, got ${childPane.workspace_id ?? "(missing)"}`);
+    }
+    const childTitle = childPane.label ?? childPane.terminal_title_stripped ?? childPane.terminal_title ?? "";
+    if (!childTitle.includes(marker)) {
+      throw new Error(`Expected child pane title to include ${marker}, got ${childTitle || "(missing)"}`);
     }
 
     splitPaneId = createSurfaceSplit(`${marker} split`, "right", childPaneId);
@@ -294,6 +300,17 @@ async function runInner() {
     if (splitPane.workspace_id !== workspaceId) {
       throw new Error(`Expected split workspace ${workspaceId}, got ${splitPane.workspace_id ?? "(missing)"}`);
     }
+
+    process.env.PI_SUBAGENT_HERDR_MIN_COLUMNS = "100000";
+    overflowPaneId = await createSurface(`${marker} overflow`);
+    delete process.env.PI_SUBAGENT_HERDR_MIN_COLUMNS;
+    const overflowPane = paneFromResult("pane get", ["pane", "get", overflowPaneId]);
+    overflowTabId = overflowPane.tab_id ?? "";
+    if (!overflowTabId || overflowTabId === parentPane.tabId) {
+      throw new Error(`Expected unsafe auto placement to use a dedicated tab: ${JSON.stringify(overflowPane)}`);
+    }
+    closeSurface(overflowPaneId);
+    overflowPaneId = "";
 
     const shortToken = marker.split("-").at(-1) ?? String(Date.now());
     const commandNeedle = `cmd-${shortToken}`;
@@ -322,7 +339,8 @@ async function runInner() {
       childPaneId,
       childTabId,
       splitPaneVerified: true,
-      nonShrinking: childTabId !== parentPane.tabId,
+      sameTabPlacementVerified: childTabId === parentPane.tabId,
+      smallWindowFallbackVerified: overflowTabId !== parentPane.tabId,
       commandReadVerified: syncScreen.includes(commandNeedle),
       asyncReadVerified: asyncScreen.includes(shellNeedle),
       titleRenameVerified: true,
@@ -331,6 +349,8 @@ async function runInner() {
     });
   } catch (error) {
     if (originalWorkspaceLabel) restoreWorkspaceQuiet(workspaceId, originalWorkspaceLabel);
+    delete process.env.PI_SUBAGENT_HERDR_MIN_COLUMNS;
+    if (overflowPaneId) closePaneQuiet(overflowPaneId);
     if (splitPaneId) closePaneQuiet(splitPaneId);
     if (childPaneId) closePaneQuiet(childPaneId);
     writeInnerResult({
@@ -390,6 +410,8 @@ async function runOuter() {
     const innerEnv = [
       `${OPT_IN_ENV}=1`,
       "PI_SUBAGENT_MUX=herdr",
+      "PI_SUBAGENT_HERDR_MIN_COLUMNS=1",
+      "PI_SUBAGENT_HERDR_MIN_ROWS=1",
       `PI_SUBAGENT_HERDR_SMOKE_MARKER=${shellQuote(marker)}`,
       `PI_SUBAGENT_HERDR_SMOKE_RESULT=${shellQuote(resultPath)}`,
     ].join(" ");
@@ -403,10 +425,10 @@ async function runOuter() {
     if (result.parentTabId !== parentTabId) {
       throw new Error(`Inner smoke ran in unexpected parent tab ${result.parentTabId}; expected ${parentTabId}`);
     }
-    if (result.nonShrinking !== true || result.childTabId === parentTabId) {
-      throw new Error(`Herdr createSurface did not prove non-shrinking tab creation: ${JSON.stringify(result, null, 2)}`);
+    if (result.sameTabPlacementVerified !== true || result.childTabId !== parentTabId) {
+      throw new Error(`Herdr createSurface did not prove same-tab auto placement: ${JSON.stringify(result, null, 2)}`);
     }
-    if (!result.commandReadVerified || !result.asyncReadVerified || !result.titleRenameVerified || !result.closeCleanupVerified || !result.splitPaneVerified) {
+    if (!result.smallWindowFallbackVerified || !result.commandReadVerified || !result.asyncReadVerified || !result.titleRenameVerified || !result.closeCleanupVerified || !result.splitPaneVerified) {
       throw new Error(`Herdr mux live smoke did not verify all required behavior: ${JSON.stringify(result, null, 2)}`);
     }
 
@@ -424,7 +446,8 @@ async function runOuter() {
           parentTabId: result.parentTabId,
           childPaneId: result.childPaneId,
           childTabId: result.childTabId,
-          nonShrinking: result.nonShrinking,
+          sameTabPlacementVerified: result.sameTabPlacementVerified,
+          smallWindowFallbackVerified: result.smallWindowFallbackVerified,
           splitPaneVerified: result.splitPaneVerified,
           commandReadVerified: result.commandReadVerified,
           asyncReadVerified: result.asyncReadVerified,
