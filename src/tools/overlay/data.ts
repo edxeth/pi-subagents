@@ -33,7 +33,7 @@ const SECTION_FIELDS = [
 	},
 	{
 		title: "Capabilities",
-		fields: ["tools", "deny-tools", "extensions", "skills", "inject-skills", "spawning", "no-context-files"],
+		fields: ["tools", "deny-tools", "extensions", "skills", "inject-skills", "spawning", "no-context-files", "inherit-append-system"],
 	},
 ];
 
@@ -88,6 +88,10 @@ function buildSections(
 	fields.push({
 		label: "no-context-files",
 		value: String(meta ? meta.noContextFiles : (defs?.noContextFiles ?? false)),
+	});
+	fields.push({
+		label: "inherit-append-system",
+		value: String(meta ? (meta.inheritAppendSystem ?? false) : (defs?.inheritAppendSystem ?? false)),
 	});
 	fields.push({ label: "async", value: String(meta ? meta.async : (defs?.async ?? true)) });
 	fields.push({ label: "auto-exit", value: String(meta ? (meta.autoExit ?? false) : (defs?.autoExit ?? false)) });

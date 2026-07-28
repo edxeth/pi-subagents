@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
+import { buildAppendSystemInheritancePlan } from "./append-system.ts";
 import {
 	getPiShellParts,
 } from "./child-command.ts";
@@ -123,12 +124,22 @@ export async function launchInteractiveSubagent(
 		parts.push("--no-context-files");
 	}
 
-	if (launch.systemPrompt) {
-		const systemPromptPath = writeSystemPromptArtifact(params.name, launch.systemPrompt.text, ctx);
-		parts.push(launch.systemPrompt.flag, shellEscape(systemPromptPath));
-	}
-	if (launch.boundarySystemPrompt) {
-		parts.push("--append-system-prompt", shellEscape(CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT));
+	const appendSystemPlan = buildAppendSystemInheritancePlan({
+		inheritAppendSystem: launch.launchMetadata.inheritAppendSystem === true,
+		systemPromptMode: launch.launchMetadata.systemPromptMode,
+		systemPrompt: launch.launchMetadata.systemPrompt,
+		boundarySystemPrompt: launch.boundarySystemPrompt
+			? CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT
+			: undefined,
+	});
+	for (let i = 0; i < appendSystemPlan.promptArgs.length; i += 2) {
+		const flag = appendSystemPlan.promptArgs[i];
+		const text = appendSystemPlan.promptArgs[i + 1] ?? "";
+		const value =
+			flag === "--system-prompt"
+				? writeSystemPromptArtifact(params.name, text, ctx)
+				: text;
+		parts.push(flag, shellEscape(value));
 	}
 	for (const arg of getApprovalLaunchArgs(prepared.agentDefs, "interactive")) {
 		parts.push(shellEscape(arg));

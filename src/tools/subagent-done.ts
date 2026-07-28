@@ -13,6 +13,7 @@ import {
 	shouldMarkUserTookOver,
 } from "../auto-exit.ts";
 import { ProviderErrorRecoveryController, resolveProviderRecoveryDelaysMs } from "./provider-error-recovery.ts";
+import { PI_SUBAGENT_APPEND_SYSTEM_PROMPT } from "../launch/append-system.ts";
 import {
 	CALLER_PING_TOOL_NAME,
 	SUBAGENT_DONE_TOOL_NAME,
@@ -313,8 +314,14 @@ export default function (pi: ExtensionAPI) {
 		);
 	});
 
-	pi.on("before_agent_start", () => {
+	pi.on("before_agent_start", (event) => {
 		enforceDeniedTools();
+		const appendSystemPrompt =
+			process.env[PI_SUBAGENT_APPEND_SYSTEM_PROMPT]?.trim();
+		if (!appendSystemPrompt) return;
+		return {
+			systemPrompt: `${event.systemPrompt}\n\n${appendSystemPrompt}`,
+		};
 	});
 
 	pi.on("message_end", (event) => {

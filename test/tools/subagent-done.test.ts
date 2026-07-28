@@ -630,6 +630,47 @@ describe("subagent-done.ts", () => {
 		});
 	});
 
+	describe("APPEND_SYSTEM inheritance", () => {
+		it("appends pi-subagents child prompt text after Pi performs native discovery", () => {
+			const original = process.env.PI_SUBAGENT_APPEND_SYSTEM_PROMPT;
+			process.env.PI_SUBAGENT_APPEND_SYSTEM_PROMPT =
+				"Reviewer identity.\n\nChild boundary instructions.";
+			try {
+				const handlers = new Map<string, any>();
+				subagentDoneExtension({
+					getAllTools: () => [],
+					getActiveTools: () => [],
+					setActiveTools() {},
+					registerTool(definition: unknown) {
+						return definition;
+					},
+					on(event: string, handler: any) {
+						handlers.set(event, handler);
+					},
+					registerShortcut() {},
+				} as any);
+
+				const result = handlers.get("before_agent_start")({
+					type: "before_agent_start",
+					prompt: "Review",
+					systemPrompt: "Pi default.\n\nNative APPEND_SYSTEM.",
+					systemPromptOptions: {
+						cwd: process.cwd(),
+						appendSystemPrompt: "Native APPEND_SYSTEM.",
+					},
+				});
+
+				assert.equal(
+					result?.systemPrompt,
+					"Pi default.\n\nNative APPEND_SYSTEM.\n\nReviewer identity.\n\nChild boundary instructions.",
+				);
+			} finally {
+				if (original == null) delete process.env.PI_SUBAGENT_APPEND_SYSTEM_PROMPT;
+				else process.env.PI_SUBAGENT_APPEND_SYSTEM_PROMPT = original;
+			}
+		});
+	});
+
 	describe("set_tab_title registration", () => {
 		function loadChildExtension() {
 			const tools = new Map<string, any>();

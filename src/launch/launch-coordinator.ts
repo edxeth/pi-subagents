@@ -7,6 +7,8 @@ import {
 	type SubagentLaunchContext,
 } from "./prep.ts";
 import { parseEnvString } from "./env.ts";
+import { buildAppendSystemInheritancePlan } from "./append-system.ts";
+import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
 import { resolveSubagentNoSession } from "./policy.ts";
 import { getNoSessionSeedMode, seedPreparedSubagentSession } from "./seed-child-session.ts";
 import type { SubagentParamsInput } from "../types.ts";
@@ -88,7 +90,8 @@ export async function coordinateSubagentLaunch(
 		options.mode,
 		sessionMode,
 		boundarySystemPrompt,
-		systemPrompt?.text ?? options.systemPrompt,
+		systemPrompt?.text ??
+			(prepared.identityInSystemPrompt ? prepared.identity : options.systemPrompt),
 		{
 			...(herdrPlacementPolicy ? { herdrPlacementPolicy } : {}),
 			...zellijPlacement,
@@ -100,6 +103,15 @@ export async function coordinateSubagentLaunch(
 		await storage.writeLaunchMetadataWhenReady(launchMetadata, 0);
 	}
 	const envVars = getBaseSubagentEnvVars(prepared, params, resolveEffectiveSessionMode);
+	const appendSystemPlan = buildAppendSystemInheritancePlan({
+		inheritAppendSystem: launchMetadata.inheritAppendSystem === true,
+		systemPromptMode: launchMetadata.systemPromptMode,
+		systemPrompt: launchMetadata.systemPrompt,
+		boundarySystemPrompt: launchMetadata.boundarySystemPrompt
+			? CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT
+			: undefined,
+	});
+	Object.assign(envVars, appendSystemPlan.env);
 	if (prepared.agentDefs?.autoExit) envVars.PI_SUBAGENT_AUTO_EXIT = "1";
 	envVars.PI_SUBAGENT_SESSION = prepared.subagentSessionFile;
 	const launchEntryCount = existsSync(prepared.subagentSessionFile)
@@ -124,6 +136,12 @@ function getCoordinatedSystemPrompt(
 	prepared: PreparedSubagentLaunch,
 ): CoordinatedSystemPrompt | undefined {
 	if (!prepared.identityInSystemPrompt || !prepared.identity) return undefined;
+	if (
+		prepared.agentDefs?.systemPromptMode === "append" &&
+		prepared.agentDefs.inheritAppendSystem
+	) {
+		return undefined;
+	}
 	return {
 		flag: prepared.agentDefs?.systemPromptMode === "replace"
 			? "--system-prompt"

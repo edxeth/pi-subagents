@@ -6,6 +6,7 @@ import type { AgentDefaults } from "../agents/definitions.ts";
 import { loadAgentDefaults as loadAgentDefaultsFromDefinitions } from "../agents/definitions.ts";
 
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
+import { buildAppendSystemInheritancePlan } from "./append-system.ts";
 import { parseCommandWords } from "./child-command.ts";
 import { parseEnvString } from "./env.ts";
 import {
@@ -239,19 +240,14 @@ export function getPreparedSessionLaunchArgs(
 export function getPersistedPromptLaunchArgs(
 	metadata: PersistedSubagentLaunchMetadata | undefined,
 ): string[] {
-	const args: string[] = [];
-	if (metadata?.systemPromptMode && metadata.systemPrompt) {
-		args.push(
-			metadata.systemPromptMode === "replace"
-				? "--system-prompt"
-				: "--append-system-prompt",
-			metadata.systemPrompt,
-		);
-	}
-	if (metadata?.boundarySystemPrompt) {
-		args.push("--append-system-prompt", CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT);
-	}
-	return args;
+	return buildAppendSystemInheritancePlan({
+		inheritAppendSystem: metadata?.inheritAppendSystem === true,
+		systemPromptMode: metadata?.systemPromptMode,
+		systemPrompt: metadata?.systemPrompt,
+		boundarySystemPrompt: metadata?.boundarySystemPrompt
+			? CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT
+			: undefined,
+	}).promptArgs;
 }
 
 export async function getPersistedSessionParityArgs(
@@ -355,6 +351,7 @@ export function buildPersistedSubagentLaunchMetadata(
 			? { extensions: prepared.effectiveExtensions }
 			: {}),
 		noContextFiles: resolveSubagentNoContextFiles(prepared.agentDefs),
+		inheritAppendSystem: prepared.agentDefs?.inheritAppendSystem === true,
 		noSession: resolveSubagentNoSession(prepared.agentDefs),
 		trustProject: prepared.agentDefs?.trustProject === true,
 		agentConfigDir: prepared.runtimePaths.effectiveAgentConfigDir,

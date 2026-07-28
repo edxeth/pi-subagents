@@ -58,6 +58,7 @@ export interface PersistedSubagentLaunchMetadata {
 	denyTools: string[];
 	extensions?: string[];
 	noContextFiles: boolean;
+	inheritAppendSystem?: boolean;
 	noSession: boolean;
 	trustProject?: boolean;
 	agentConfigDir: string;

@@ -381,6 +381,7 @@ exit 1
 				"---",
 				"name: reviewer",
 				"system-prompt: append",
+				"env: PI_SUBAGENT_APPEND_SYSTEM_PROMPT=stale-parent-prompt",
 				"---",
 				"You are the reviewer identity.",
 			].join("\n"),
@@ -411,10 +412,59 @@ exit 1
 		assert.match(launch.systemPrompt?.text ?? "", /You are the reviewer identity/);
 		assert.match(launch.systemPrompt?.text ?? "", /Focus on material findings/);
 		assert.equal(launch.launchMetadata.systemPrompt, launch.systemPrompt?.text);
+		assert.equal(launch.launchMetadata.inheritAppendSystem, false);
+		assert.equal(launch.envVars.PI_SUBAGENT_APPEND_SYSTEM_PROMPT, "");
 		assert.equal(launch.envVars.PI_SUBAGENT_SESSION, launch.prepared.subagentSessionFile);
 
 		const metadataEntries = (getEntries(launch.prepared.subagentSessionFile) as Array<Record<string, unknown>>)
 			.filter((entry) => entry.customType === "pi-subagents_launch_metadata");
 		assert.equal(metadataEntries.length, 1);
+	});
+
+	it("routes append-mode identity through the child extension when APPEND_SYSTEM inheritance is enabled", async () => {
+		const cwd = createTestDir();
+		mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "agents", "reviewer.md"),
+			[
+				"---",
+				"name: reviewer",
+				"system-prompt: append",
+				"inherit-append-system: true",
+				"---",
+				"You are the reviewer identity.",
+			].join("\n"),
+		);
+		const parentSession = join(cwd, "parent-inherited-append.jsonl");
+		writeFileSync(parentSession, `${JSON.stringify(SESSION_HEADER)}\n`);
+
+		const launch = await coordinateSubagentLaunch(
+			{
+				name: "diff-reviewer",
+				title: "Diff reviewer",
+				task: "Review the diff",
+				agent: "reviewer",
+			},
+			{
+				cwd,
+				sessionManager: {
+					getSessionFile: () => parentSession,
+					getSessionId: () => "parent-session-id",
+					getLeafId: () => null,
+				},
+			},
+			{ mode: "background" },
+		);
+
+		assert.equal(launch.systemPrompt, undefined);
+		assert.equal(launch.launchMetadata.inheritAppendSystem, true);
+		assert.equal(
+			launch.envVars.PI_SUBAGENT_APPEND_SYSTEM_PROMPT,
+			"You are the reviewer identity.",
+		);
+		assert.equal(
+			launch.launchMetadata.systemPrompt,
+			"You are the reviewer identity.",
+		);
 	});
 });

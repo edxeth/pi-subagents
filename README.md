@@ -79,11 +79,8 @@ Enable that and two things change:
    replaced with one that defines the orchestrator role: decompose, delegate,
    synthesize. The replacement preserves Pi's `APPEND_SYSTEM.md` content.
 
-Children do not inherit any of this. Each child is a separate pi process with
-its own system prompt chain — Pi default plus the child's agent body.
-`system-prompt: append` appends to Pi's default, not the orchestrator prompt.
-`system-prompt: replace` replaces Pi's default with the child's body. Neither
-sees the orchestrator identity.
+Children do not inherit the parent agent's role or system prompt. Each child
+runs as a separate Pi process with its own agent definition and prompt chain.
 
 #### Why orchestrator mode exists
 
@@ -160,10 +157,11 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `skills` | `all` | Child skill availability: `all`, `none`, or a comma-separated allowlist resolved by skill name |
 | `inject-skills` | unset | Comma-separated skills to load into the child prompt before the task |
 | `no-context-files` | `false` | Skip trusted project context-file discovery in the child. With the default `trust-project: false`, Pi already ignores project-local context files. |
+| `inherit-append-system` | `false` | Let Pi load the child's applicable global or trusted-project `APPEND_SYSTEM.md` file |
 | `no-session` | `false` | Use an ephemeral child session file and delete it after completion |
 | `trust-project` | `false` | Whether interactive child launches pass Pi's `--approve` flag and trust project-local files/settings. Background children always generate `--no-approve` for safety; use `flags` only as an explicit advanced override. |
 | `auto-exit` | `false` | Close the child after a normal completion |
-| `system-prompt` | task body | `append` uses `--append-system-prompt`; `replace` uses `--system-prompt` |
+| `system-prompt` | task body | `append` adds the agent body to the child's own Pi system prompt (Pi's default unless the child has an applicable `SYSTEM.md`); `replace` replaces that base prompt with the agent body. The parent agent's system prompt is never inherited. |
 | `session-mode` | `lineage-only` | `standalone`, `lineage-only`, or `fork` |
 | `flags` | unset | Extra CLI flags passed to the child pi process (e.g. `--verbose` or `--some-custom-flag`). Appended after all generated args — last-wins semantics against conflicting generated args, including `--approve` / `--no-approve`. Use only as an advanced escape hatch for extension-registered flags or pi built-in flags not covered by other frontmatter fields. |
 | `env` | unset | Line-based `KEY=VALUE` pairs passed as environment variables to the child process. Use YAML block syntax for values with commas or `=`. `PI_CODING_AGENT_DIR` is special: when set here, it is resolved before launch and becomes the child's Pi config/session root. `~/` is expanded. Internal PI vars such as PI\_SUBAGENT\_\* still take precedence if names conflict. |

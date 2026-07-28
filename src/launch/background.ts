@@ -32,6 +32,7 @@ import { getSubagentDisplayTitle } from "../agents/titles.ts";
 import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
+import { buildAppendSystemInheritancePlan } from "./append-system.ts";
 
 export interface BackgroundLaunchRuntime {
 	getContextWindow(modelRef: string | undefined): number | undefined;
@@ -77,12 +78,15 @@ export async function launchBackgroundSubagent(
 	if (model) args.push("--model", model);
 	if (resolveSubagentNoContextFiles(prepared.agentDefs)) args.push("--no-context-files");
 
-	if (launch.systemPrompt) {
-		args.push(launch.systemPrompt.flag, launch.systemPrompt.text);
-	}
-	if (launch.boundarySystemPrompt) {
-		args.push("--append-system-prompt", CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT);
-	}
+	const appendSystemPlan = buildAppendSystemInheritancePlan({
+		inheritAppendSystem: launch.launchMetadata.inheritAppendSystem === true,
+		systemPromptMode: launch.launchMetadata.systemPromptMode,
+		systemPrompt: launch.launchMetadata.systemPrompt,
+		boundarySystemPrompt: launch.boundarySystemPrompt
+			? CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT
+			: undefined,
+	});
+	args.push(...appendSystemPlan.promptArgs);
 	args.push(...getApprovalLaunchArgs(prepared.agentDefs, "background"));
 	args.push(...getSubagentToolLaunchArgs(prepared.effectiveTools, prepared.denySet));
 	args.push(...getPreparedSkillLaunchArgs(prepared));

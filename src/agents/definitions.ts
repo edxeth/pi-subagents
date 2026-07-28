@@ -26,6 +26,7 @@ export interface AgentDefaults {
 	async?: boolean;
 	blocking?: boolean;
 	noContextFiles?: boolean;
+	inheritAppendSystem?: boolean;
 	noSession?: boolean;
 	trustProject?: boolean;
 	timeout?: number;
@@ -85,6 +86,7 @@ function parseAgentDefinition(
 	const asyncRaw = get("async");
 	const blockingRaw = get("blocking");
 	const noContextFilesRaw = get("no-context-files");
+	const inheritAppendSystemRaw = get("inherit-append-system");
 	const noSessionRaw = get("no-session");
 	const trustProjectRaw = get("trust-project");
 	const timeoutRaw = get("timeout");
@@ -136,6 +138,7 @@ function parseAgentDefinition(
 		blocking: blockingRaw != null ? blockingRaw === "true" : undefined,
 		noContextFiles:
 			noContextFilesRaw != null ? noContextFilesRaw === "true" : undefined,
+		inheritAppendSystem: inheritAppendSystemRaw === "true",
 		noSession: noSessionRaw != null ? noSessionRaw === "true" : undefined,
 		trustProject:
 			trustProjectRaw != null ? trustProjectRaw === "true" : undefined,

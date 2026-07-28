@@ -494,6 +494,16 @@ describe("agent launch configuration", () => {
 		assert.equal(env.PI_PACKAGE_DIR, "");
 	});
 
+	it("clears a parent child's generated append prompt before launching a nested child", () => {
+		process.env.PI_SUBAGENT_APPEND_SYSTEM_PROMPT = "parent identity";
+		const env = getSubagentChildProcessEnvForTest(
+			{ command: "pi", args: [] },
+			{ PI_SUBAGENT_APPEND_SYSTEM_PROMPT: "" },
+		);
+
+		assert.equal(env.PI_SUBAGENT_APPEND_SYSTEM_PROMPT, "");
+	});
+
 	it("loads global agent defaults from PI_CODING_AGENT_DIR and records cwd base", () => {
 		const dir = createTestDir();
 		const configDir = join(dir, "agent-root");
@@ -512,6 +522,26 @@ describe("agent launch configuration", () => {
 		assert.equal(defs?.mode, "background");
 		assert.equal(defs?.async, false);
 		assert.equal(resolveSubagentBlockingForTest({}, defs), true);
+	});
+
+	it("defaults APPEND_SYSTEM inheritance off and parses an explicit opt-in", () => {
+		const dir = createTestDir();
+		const configDir = join(dir, "agent-root");
+		const agentsDir = join(configDir, "agents");
+		mkdirSync(agentsDir, { recursive: true });
+		process.env.PI_CODING_AGENT_DIR = configDir;
+
+		writeFileSync(
+			join(agentsDir, "tester.md"),
+			`---\nname: tester\n---\n\nYou are the tester.`,
+		);
+		assert.equal(loadAgentDefaults("tester")?.inheritAppendSystem, false);
+
+		writeFileSync(
+			join(agentsDir, "tester.md"),
+			`---\nname: tester\ninherit-append-system: true\n---\n\nYou are the tester.`,
+		);
+		assert.equal(loadAgentDefaults("tester")?.inheritAppendSystem, true);
 	});
 
 	it("defaults context-file injection to on and can disable it in agent frontmatter", () => {

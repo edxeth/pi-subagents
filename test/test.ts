@@ -8,6 +8,7 @@ import "./tools/provider-error-recovery.test.ts";
 import "./tools/subagents-view.test.ts";
 import "./tools/message-renderers.test.ts";
 import "./artifacts/storage.test.ts";
+import "./launch/append-system-inheritance.test.ts";
 import "./launch/child-launch-plan.test.ts";
 import "./launch/launch-coordinator.test.ts";
 import "./launch/task-expansion.test.ts";

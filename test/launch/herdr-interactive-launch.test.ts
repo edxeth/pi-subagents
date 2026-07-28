@@ -552,6 +552,7 @@ describe("Herdr interactive launch parity", () => {
 		assert.deepEqual(metadata?.extensions, []);
 		assert.deepEqual(metadata?.denyTools, ["subagent", "subagent_resume", "grep", "set_tab_title"]);
 		assert.equal(metadata?.noContextFiles, true);
+		assert.equal(metadata?.inheritAppendSystem, false);
 
 		const log = readFileSync(logFile, "utf8");
 		assert.match(log, /pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/);
@@ -565,6 +566,7 @@ describe("Herdr interactive launch parity", () => {
 		assert.match(launchScript, /PI_SUBAGENT_EXTENSIONS=''/);
 		assert.match(launchScript, /--model 'zai-messages\/glm-5-turbo:off'/);
 		assert.match(launchScript, /--no-context-files/);
+		assert.match(launchScript, /--append-system-prompt ''/);
 		assert.match(launchScript, /'--no-extensions' '-e' '.*\/tools\/subagent-done\.ts'/);
 		assert.equal(launchScript.match(/'--tools' '([^']+)'/)?.[1], "read,grep,caller_ping,subagent_done");
 		assert.equal(
@@ -649,6 +651,7 @@ describe("Herdr interactive launch parity", () => {
 		assert.match(childLog, /SURFACE=\n/);
 		assert.match(childLog, /--no-approve/);
 		assert.match(childLog, /--background-flag/);
+		assert.match(childLog, /--append-system-prompt\s{2}--no-approve/);
 		assert.equal(readFileSync(herdrLogFile, "utf8"), "");
 	});
 });

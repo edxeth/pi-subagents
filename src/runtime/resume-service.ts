@@ -8,6 +8,8 @@ import { writeResumeTaskArtifact } from "../launch/prompt-artifacts.ts";
 import { expandSubagentTask } from "../launch/task-expansion.ts";
 import { buildInteractiveSentinelShellCommands } from "../launch/interactive-sentinel.ts";
 import { parseEnvString } from "../launch/env.ts";
+import { buildAppendSystemInheritancePlan } from "../launch/append-system.ts";
+import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "../launch/context-boundary.ts";
 import { assertModelAllowed, buildModelRef, splitModelRef } from "../agents/model-refs.ts";
 import {
 	getExtensionLaunchArgs,
@@ -252,6 +254,17 @@ export async function resumeSubagentSession(
 	if (invocationMetadata?.env) {
 		Object.assign(resumeEnvVars, parseEnvString(invocationMetadata.env));
 	}
+	Object.assign(
+		resumeEnvVars,
+		buildAppendSystemInheritancePlan({
+			inheritAppendSystem: invocationMetadata?.inheritAppendSystem === true,
+			systemPromptMode: invocationMetadata?.systemPromptMode,
+			systemPrompt: invocationMetadata?.systemPrompt,
+			boundarySystemPrompt: invocationMetadata?.boundarySystemPrompt
+				? CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT
+				: undefined,
+		}).env,
+	);
 	if (invocationMetadata?.agentConfigDir) {
 		resumeEnvVars.PI_CODING_AGENT_DIR = invocationMetadata.agentConfigDir;
 	} else if (process.env.PI_CODING_AGENT_DIR) {
