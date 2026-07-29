@@ -94,6 +94,12 @@ describe("isRetryableProviderErrorMessage", () => {
 		assert.equal(isRetryableProviderErrorMessage("HTTP 429 rate limit"), true);
 		assert.equal(isRetryableProviderErrorMessage("service unavailable"), true);
 		assert.equal(isRetryableProviderErrorMessage("stream ended before message_stop"), true);
+		assert.equal(
+			isRetryableProviderErrorMessage(
+				"Codex error: An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com.",
+			),
+			true,
+		);
 	});
 
 	it("rejects permanent quota, billing, and auth failures", () => {

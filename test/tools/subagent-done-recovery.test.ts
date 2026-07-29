@@ -186,7 +186,7 @@ describe("subagent-done.ts", () => {
 			}
 		});
 
-		it("fails permanent provider errors immediately without recovery nudges", async () => {
+		it("reports permanent provider errors on shutdown without recovery nudges", async () => {
 			const h = loadRecoveryChild();
 			try {
 				h.handlers.get("agent_end")?.(
@@ -194,6 +194,7 @@ describe("subagent-done.ts", () => {
 					h.ctx,
 				);
 				await sleep(20);
+				h.handlers.get("session_shutdown")?.();
 
 				const exit = JSON.parse(readFileSync(`${h.sessionFile}.exit`, "utf8"));
 				assert.equal(exit.type, "error");
@@ -205,7 +206,7 @@ describe("subagent-done.ts", () => {
 			}
 		});
 
-		it("cancels an armed recovery timer when a later permanent error fast-fails", () => {
+		it("cancels an armed recovery timer when a later permanent error requests shutdown", () => {
 			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
 			const h = loadRecoveryChild();
 			try {
@@ -219,6 +220,7 @@ describe("subagent-done.ts", () => {
 				);
 
 				mock.timers.tick(10_000);
+				h.handlers.get("session_shutdown")?.();
 				const exit = JSON.parse(readFileSync(`${h.sessionFile}.exit`, "utf8"));
 				assert.equal(exit.type, "error");
 				assert.equal(exit.errorMessage, "insufficient_quota");

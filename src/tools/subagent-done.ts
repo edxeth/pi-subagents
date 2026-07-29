@@ -3,7 +3,6 @@
  * - Provides a `subagent_done` tool for autonomous agents to self-terminate
  */
 
-import { existsSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -14,6 +13,7 @@ import {
 } from "../auto-exit.ts";
 import { ProviderErrorRecoveryController, resolveProviderRecoveryDelaysMs } from "./provider-error-recovery.ts";
 import { PI_SUBAGENT_APPEND_SYSTEM_PROMPT } from "../launch/append-system.ts";
+import { writeSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import {
 	CALLER_PING_TOOL_NAME,
 	SUBAGENT_DONE_TOOL_NAME,
@@ -176,12 +176,13 @@ export default function (pi: ExtensionAPI) {
 		}, 0);
 	}
 
-	function writeExitSignal(payload: object) {
+	function writeExitSignal(
+		payload: object,
+		opts?: { supersede?: boolean },
+	) {
 		const sessionFile = process.env.PI_SUBAGENT_SESSION;
 		if (!sessionFile) return;
-		const exitFile = `${sessionFile}.exit`;
-		if (existsSync(exitFile)) return;
-		writeFileSync(exitFile, JSON.stringify(payload), "utf8");
+		writeSubagentExitSidecar(sessionFile, payload, opts);
 	}
 
 	const subagentName = process.env.PI_SUBAGENT_NAME ?? "";
@@ -436,12 +437,9 @@ export default function (pi: ExtensionAPI) {
 				if (errorInfo.recoveryKind === "none") {
 					providerErrorRecovery.cancelPendingRecovery();
 					cancelPendingPiRecovery();
-					writeExitSignal({
-						type: "error",
-						errorMessage: errorInfo.errorMessage,
-						stopReason: errorInfo.stopReason,
-						outputTokens,
-					});
+					// Defer stamping the failure while Pi's in-flight retry may still
+					// recover. If the child really dies, session_shutdown reports it
+					// from pendingProviderError.
 					requestShutdown(ctx);
 					return;
 				}
@@ -453,7 +451,7 @@ export default function (pi: ExtensionAPI) {
 			pendingProviderError = null;
 			providerErrorRecovery.cancelPendingRecovery(true);
 			cancelPendingPiRecovery();
-			writeExitSignal({ type: "done", outputTokens });
+			writeExitSignal({ type: "done", outputTokens }, { supersede: true });
 			requestShutdown(ctx);
 		});
 	}
@@ -483,7 +481,7 @@ export default function (pi: ExtensionAPI) {
 				name: process.env.PI_SUBAGENT_NAME ?? "subagent",
 				message: params.message,
 				outputTokens,
-			});
+			}, { supersede: true });
 			requestShutdown(ctx);
 			return {
 				content: [
@@ -505,7 +503,7 @@ export default function (pi: ExtensionAPI) {
 				"Your LAST assistant message before calling this becomes the summary returned to the caller.",
 			parameters: doneParams,
 			async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-				writeExitSignal({ type: "done", outputTokens });
+				writeExitSignal({ type: "done", outputTokens }, { supersede: true });
 				requestShutdown(ctx);
 				return {
 					content: [{ type: "text", text: "Shutting down subagent session." }],

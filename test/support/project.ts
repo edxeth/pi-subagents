@@ -117,6 +117,7 @@ export {
 	copySessionFile,
 	findLastAssistantMessage,
 	findLastSubagentOutput,
+	findLastSubagentOutputWithSource,
 	getEntries,
 	getEntryCount,
 	getLeafId,

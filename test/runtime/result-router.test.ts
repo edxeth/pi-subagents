@@ -31,6 +31,7 @@ function makeResult(overrides: Partial<SubagentResult> = {}): SubagentResult {
 		name: "Result child",
 		task: "Report result",
 		summary: "Finished the delegated work.",
+		summarySource: "subagent",
 		sessionFile: "/tmp/result-child.jsonl",
 		exitCode: 0,
 		elapsed: 3,
@@ -74,6 +75,57 @@ describe("result router", () => {
 		assert.deepEqual(sent[0].options, { triggerTurn: true, deliverAs: "steer" });
 	});
 
+	it("delivers salvaged child output with provider errors", () => {
+		const sent: Array<{ message: any; options: any }> = [];
+		const running = makeRunning();
+		setRunningSubagentForTest(running);
+
+		routeSubagentOutcome({
+			pi: {
+				sendMessage(message: any, options: any) {
+					sent.push({ message, options });
+				},
+			},
+			running,
+			result: makeResult({
+				summary: "Completed the requested implementation.",
+				errorMessage: "Provider unavailable",
+			}),
+			formatElapsed: (seconds) => `${seconds}s`,
+			updateWidget: () => {},
+		});
+
+		assert.match(sent[0].message.content, /Last output before the failure/);
+		assert.match(sent[0].message.content, /Completed the requested implementation\./);
+		assert.doesNotMatch(sent[0].message.content, /did not produce a result/);
+	});
+
+	it("does not present runtime diagnostics as salvaged child output", () => {
+		const sent: Array<{ message: any; options: any }> = [];
+		const running = makeRunning();
+		setRunningSubagentForTest(running);
+
+		routeSubagentOutcome({
+			pi: {
+				sendMessage(message: any, options: any) {
+					sent.push({ message, options });
+				},
+			},
+			running,
+			result: makeResult({
+				summary: "Background agent exited with code 1\n\nprovider stack trace",
+				summarySource: "runtime",
+				errorMessage: "Provider unavailable",
+			}),
+			formatElapsed: (seconds) => `${seconds}s`,
+			updateWidget: () => {},
+		});
+
+		assert.match(sent[0].message.content, /did not produce a result/);
+		assert.doesNotMatch(sent[0].message.content, /Last output before the failure/);
+		assert.doesNotMatch(sent[0].message.content, /provider stack trace/);
+	});
+
 	it("routes child pings without caching a completed result", () => {
 		const sent: Array<{ message: any; options: any }> = [];
 		let widgetUpdates = 0;
@@ -106,6 +158,7 @@ describe("result router", () => {
 		assert.equal(sent[0].message.customType, "subagent_ping");
 		assert.equal(sent[0].message.details.id, running.id);
 		assert.equal(sent[0].message.details.message, "Need parent input.");
+		assert.match(sent[0].message.content, /Need parent input\./);
 		assert.deepEqual(sent[0].options, { triggerTurn: true, deliverAs: "steer" });
 	});
 });

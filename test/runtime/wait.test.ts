@@ -16,6 +16,70 @@ describe("subagent wait behavior", () => {
 		resetSubagentStateForTest();
 	});
 
+	function waitForResult(result: any) {
+		const running = {
+			id: `child-wait-${Math.random()}`,
+			name: result.name,
+			task: result.task,
+			mode: "background" as const,
+			executionState: "running" as const,
+			deliveryState: "detached" as const,
+			parentClosePolicy: "terminate" as const,
+			startTime: Date.now(),
+			sessionFile: result.sessionFile,
+			completionPromise: Promise.resolve(result),
+		};
+		setRunningSubagentForTest(running);
+		return waitForSubagentForTest({ id: running.id });
+	}
+
+	it("includes salvaged child output in provider error results", async () => {
+		const waited = await waitForResult({
+			name: "Failed child",
+			task: "Finish work",
+			summary: "Implemented the requested fix.",
+			summarySource: "subagent",
+			sessionFile: "/tmp/failed-child.jsonl",
+			exitCode: 0,
+			elapsed: 2,
+			errorMessage: "Provider unavailable",
+		});
+		const text = (waited.content[0] as { text: string }).text;
+		assert.match(text, /Last output before the failure \(may be incomplete/);
+		assert.match(text, /Implemented the requested fix\./);
+		assert.doesNotMatch(text, /did not produce a result/);
+	});
+
+	it("reports no result when a provider error has only watcher fallback output", async () => {
+		const waited = await waitForResult({
+			name: "Failed child",
+			task: "Finish work",
+			summary: "Background agent exited without output",
+			summarySource: "runtime",
+			sessionFile: "/tmp/failed-child.jsonl",
+			exitCode: 1,
+			elapsed: 2,
+			errorMessage: "Provider unavailable",
+		});
+		const text = (waited.content[0] as { text: string }).text;
+		assert.match(text, /The subagent did not produce a result\./);
+		assert.doesNotMatch(text, /Last output before the failure/);
+	});
+
+	it("includes the child message in ping results", async () => {
+		const waited = await waitForResult({
+			name: "Ping child",
+			task: "Investigate",
+			summary: "",
+			sessionFile: "/tmp/ping-child.jsonl",
+			exitCode: 0,
+			elapsed: 1,
+			ping: { name: "Ping child", message: "Which API version should I use?" },
+		});
+		const text = (waited.content[0] as { text: string }).text;
+		assert.match(text, /Message from the subagent:\nWhich API version should I use\?/);
+	});
+
 	it("returns cached result when wait follows steer delivery", async () => {
 		const sent: Array<{ message: any; options: any }> = [];
 		const running = {

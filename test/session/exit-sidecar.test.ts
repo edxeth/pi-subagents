@@ -5,6 +5,7 @@ import { assert, createTestDir } from "../support/index.ts";
 import {
 	clearSubagentExitSidecar,
 	getSubagentExitSidecarPath,
+	writeSubagentExitSidecar,
 } from "../../src/session/exit-sidecar.ts";
 import { consumeSubagentExitSignal } from "../../src/mux/poll.ts";
 
@@ -24,6 +25,57 @@ describe("subagent exit sidecars", () => {
 		});
 		assert.equal(existsSync(exitFile), false);
 		assert.equal(consumeSubagentExitSignal(sessionFile), null);
+	});
+
+	it("supersedes only existing error signals when requested", () => {
+		const dir = createTestDir();
+		const sessionFile = join(dir, "child.jsonl");
+		const exitFile = getSubagentExitSidecarPath(sessionFile);
+
+		for (const replacement of [
+			{ type: "done", outputTokens: 8 },
+			{ type: "ping", message: "help" },
+		]) {
+			writeFileSync(exitFile, JSON.stringify({ type: "error", errorMessage: "transient" }));
+			writeSubagentExitSidecar(sessionFile, replacement, { supersede: true });
+			assert.deepEqual(JSON.parse(readFileSync(exitFile, "utf8")), replacement);
+		}
+	});
+
+	it("never supersedes existing done or ping signals", () => {
+		const dir = createTestDir();
+		const sessionFile = join(dir, "child.jsonl");
+		const exitFile = getSubagentExitSidecarPath(sessionFile);
+
+		for (const existing of [{ type: "done" }, { type: "ping", message: "help" }]) {
+			writeFileSync(exitFile, JSON.stringify(existing));
+			writeSubagentExitSidecar(sessionFile, { type: "done", outputTokens: 8 }, { supersede: true });
+			assert.deepEqual(JSON.parse(readFileSync(exitFile, "utf8")), existing);
+		}
+	});
+
+	it("replaces an unreadable sidecar with a genuine completion", () => {
+		const dir = createTestDir();
+		const sessionFile = join(dir, "child.jsonl");
+		const exitFile = getSubagentExitSidecarPath(sessionFile);
+		const completion = { type: "done", outputTokens: 8 };
+		writeFileSync(exitFile, "{truncated");
+
+		writeSubagentExitSidecar(sessionFile, completion, { supersede: true });
+
+		assert.deepEqual(JSON.parse(readFileSync(exitFile, "utf8")), completion);
+	});
+
+	it("keeps first-write-wins behavior by default", () => {
+		const dir = createTestDir();
+		const sessionFile = join(dir, "child.jsonl");
+		const exitFile = getSubagentExitSidecarPath(sessionFile);
+		const error = { type: "error", errorMessage: "failure" };
+		writeFileSync(exitFile, JSON.stringify(error));
+
+		writeSubagentExitSidecar(sessionFile, { type: "done" });
+
+		assert.deepEqual(JSON.parse(readFileSync(exitFile, "utf8")), error);
 	});
 
 	it("clears stale sidecars before reusing a session path", () => {

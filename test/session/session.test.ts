@@ -13,6 +13,7 @@ import {
 	copySessionFile,
 	findLastAssistantMessage,
 	findLastSubagentOutput,
+	findLastSubagentOutputWithSource,
 	getEntries,
 	getEntryCount,
 	getLeafId,
@@ -284,6 +285,26 @@ describe("session.ts", () => {
 			] as any[];
 
 			assert.equal(findLastSubagentOutput(entries), "Final assistant summary.");
+		});
+
+		it("marks synthesized terminal errors as runtime summaries", () => {
+			const terminalError = {
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [],
+					stopReason: "error",
+					errorMessage: "Provider unavailable",
+				},
+			};
+
+			assert.deepEqual(
+				findLastSubagentOutputWithSource([terminalError] as any[]),
+				{
+					summary: "Subagent error: Provider unavailable",
+					summarySource: "runtime",
+				},
+			);
 		});
 
 		it("does not fall back to stale output after a terminal length stop", () => {

@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { consumeSubagentExitSignal } from "../mux.ts";
-import type { RunningSubagent, SessionEntryLike, SubagentResult } from "../types.ts";
-import { findLastSubagentOutput, getEntries, getEntryCount, getNewEntries } from "../session/session.ts";
+import type { RunningSubagent, SessionEntryLike, SubagentResult, SubagentSummarySource } from "../types.ts";
+import { findLastSubagentOutputWithSource, getEntries, getEntryCount, getNewEntries } from "../session/session.ts";
 import { getTerminalAssistantSummary, shouldReapStableTerminalSummary } from "../agents/titles.ts";
 
 export interface BackgroundWatchRuntime {
@@ -108,20 +108,26 @@ export function watchBackgroundSubagent(
 			const stderr = running.stderrTail?.trim();
 			const stdout = running.stdoutTail?.trim();
 			let summary = `Background agent exited with code ${exitCode}`;
+			let summarySource: SubagentSummarySource = "runtime";
 			if (!running.noSession && existsSync(running.sessionFile)) {
 				const allEntries = getNewEntries(
 					running.sessionFile,
 					running.launchEntryCount ?? 0,
 				);
-				summary =
-					findLastSubagentOutput(allEntries) ??
-					(exitCode !== 0 && stderr
-						? `Background agent exited with code ${exitCode}\n\n${stderr}`
-						: exitCode !== 0
-							? `Background agent exited with code ${exitCode}`
-							: stdout || "Background agent exited without output");
+				const output = findLastSubagentOutputWithSource(allEntries);
+				if (output) {
+					({ summary, summarySource } = output);
+				} else if (exitCode !== 0 && stderr) {
+					summary = `Background agent exited with code ${exitCode}\n\n${stderr}`;
+				} else if (exitCode === 0 && stdout) {
+					summary = stdout;
+					summarySource = "subagent";
+				} else if (exitCode === 0) {
+					summary = "Background agent exited without output";
+				}
 			} else if (stdout) {
 				summary = stdout;
+				summarySource = "subagent";
 			} else if (exitCode !== 0 && stderr) {
 				summary = `Background agent exited with code ${exitCode}\n\n${stderr}`;
 			}
@@ -129,6 +135,7 @@ export function watchBackgroundSubagent(
 				name: running.name,
 				task: running.task,
 				summary,
+				summarySource,
 				sessionFile: running.noSession ? undefined : running.sessionFile,
 				exitCode,
 				elapsed,
@@ -142,6 +149,7 @@ export function watchBackgroundSubagent(
 				name: running.name,
 				task: running.task,
 				summary: `Background agent failed to start: ${error.message}`,
+				summarySource: "runtime",
 				sessionFile: running.noSession ? undefined : running.sessionFile,
 				exitCode: 1,
 				elapsed: Math.floor((Date.now() - running.startTime) / 1000),

@@ -1,3 +1,4 @@
+import "./auto-exit.test.ts";
 import "./session/session.test.ts";
 import "./session/child-session-storage.test.ts";
 import "./session/exit-sidecar.test.ts";
