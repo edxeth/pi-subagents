@@ -42,7 +42,7 @@ function getSubagentCompletionStatus(
  * for a child that exited without answering. Used to tell an operator pane-close
  * of a manual interactive child apart from a crash before it produced output.
  */
-function hasRealSubagentOutput(summary: string | undefined): boolean {
+export function hasRealSubagentOutput(summary: string | undefined): boolean {
 	const text = (summary ?? "").trim();
 	if (!text) return false;
 	return (

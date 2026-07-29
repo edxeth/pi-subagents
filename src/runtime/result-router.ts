@@ -8,6 +8,7 @@ import {
 	buildCompletedSubagentResult,
 	cacheCompletedSubagentResult,
 	clearSubagentShutdownTimer,
+	hasRealSubagentOutput,
 	runningSubagents,
 	stopAfterCurrentSubagentBatch,
 } from "./state.ts";
@@ -149,12 +150,14 @@ function getCompletedSubagentContent(
 	sessionRef: string,
 ): string {
 	if (completed.errorMessage) {
+		const resultBody = hasRealSubagentOutput(completed.summary)
+			? `Last output before the failure (may be incomplete — verify before trusting):\n\n${completed.summary}`
+			: `The subagent did not produce a result. You can retry by spawning a new ` +
+				`subagent or resume the session with subagent_resume.`;
 		return (
 			`Sub-agent "${completed.name}" failed after ${formatElapsed(completed.elapsed)} ` +
 			`(provider/agent error — auto-retry exhausted).\n\n` +
-			`Error: ${completed.errorMessage}\n\n` +
-			`The subagent did not produce a result. You can retry by spawning a new ` +
-			`subagent or resume the session with subagent_resume.${sessionRef}`
+			`Error: ${completed.errorMessage}\n\n${resultBody}${sessionRef}`
 		);
 	}
 	return completed.exitCode !== 0
