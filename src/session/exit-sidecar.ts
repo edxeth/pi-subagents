@@ -22,7 +22,8 @@ export function writeSubagentExitSidecar(
 			};
 			if (existing.type !== "error") return;
 		} catch {
-			return;
+			// A consumed or unreadable sidecar carries no verdict worth protecting.
+			// Let a genuine completion replace it.
 		}
 	}
 	writeFileSync(exitFile, JSON.stringify(payload), "utf8");

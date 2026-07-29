@@ -38,6 +38,7 @@ describe("subagent wait behavior", () => {
 			name: "Failed child",
 			task: "Finish work",
 			summary: "Implemented the requested fix.",
+			summarySource: "subagent",
 			sessionFile: "/tmp/failed-child.jsonl",
 			exitCode: 0,
 			elapsed: 2,
@@ -53,7 +54,8 @@ describe("subagent wait behavior", () => {
 		const waited = await waitForResult({
 			name: "Failed child",
 			task: "Finish work",
-			summary: "Sub-agent exited without output",
+			summary: "Background agent exited without output",
+			summarySource: "runtime",
 			sessionFile: "/tmp/failed-child.jsonl",
 			exitCode: 1,
 			elapsed: 2,

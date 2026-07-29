@@ -54,6 +54,18 @@ describe("subagent exit sidecars", () => {
 		}
 	});
 
+	it("replaces an unreadable sidecar with a genuine completion", () => {
+		const dir = createTestDir();
+		const sessionFile = join(dir, "child.jsonl");
+		const exitFile = getSubagentExitSidecarPath(sessionFile);
+		const completion = { type: "done", outputTokens: 8 };
+		writeFileSync(exitFile, "{truncated");
+
+		writeSubagentExitSidecar(sessionFile, completion, { supersede: true });
+
+		assert.deepEqual(JSON.parse(readFileSync(exitFile, "utf8")), completion);
+	});
+
 	it("keeps first-write-wins behavior by default", () => {
 		const dir = createTestDir();
 		const sessionFile = join(dir, "child.jsonl");

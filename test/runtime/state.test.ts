@@ -25,6 +25,7 @@ function makeResult(overrides: Partial<SubagentResult> = {}): SubagentResult {
 		name: "test-agent",
 		task: "test task",
 		summary: "done",
+		summarySource: "subagent",
 		exitCode: 0,
 		elapsed: 5,
 		...overrides,
@@ -69,7 +70,11 @@ describe("getSubagentCompletionStatus (via buildCompletedSubagentResult)", () =>
 		// when there is a real final message to return.
 		const result = buildCompletedSubagentResult(
 			makeRunning({ mode: "interactive", autoExit: false }),
-			makeResult({ exitCode: 1, summary: "Sub-agent exited with code 1" }),
+			makeResult({
+				exitCode: 1,
+				summary: "Sub-agent exited with code 1",
+				summarySource: "runtime",
+			}),
 		);
 		assert.equal(result.status, "failed");
 	});

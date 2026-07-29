@@ -2,8 +2,8 @@ import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { consumeSubagentExitSignal, getMuxBackend, pollForExit } from "../mux.ts";
 import type { PollResult } from "../mux/poll.ts";
 import { isZellijSurfaceLive } from "../mux/zellij-runtime.ts";
-import type { RunningSubagent, SubagentResult } from "../types.ts";
-import { findLastSubagentOutput, getNewEntries } from "../session/session.ts";
+import type { RunningSubagent, SubagentResult, SubagentSummarySource } from "../types.ts";
+import { findLastSubagentOutputWithSource, getNewEntries } from "../session/session.ts";
 import { traceSubagentLaunch } from "../launch/trace.ts";
 
 export interface InteractiveWatchRuntime {
@@ -43,7 +43,7 @@ export async function watchSubagent(
 
 		traceSubagentLaunch("interactive.watch.pollResult", { name, surface, sessionFile, pollResult });
 		const elapsed = Math.floor((Date.now() - startTime) / 1000);
-		const summary = getSummary(running, pollResult);
+		const { summary, summarySource } = getSummary(running, pollResult);
 		const errorMessage = pollResult.reason === "error" ? pollResult.errorMessage : undefined;
 		const exitSignal = pollResult.outputTokens === undefined
 			? consumeSubagentExitSignal(sessionFile)
@@ -58,6 +58,7 @@ export async function watchSubagent(
 			name,
 			task,
 			summary,
+			summarySource,
 			sessionFile: running.noSession ? undefined : sessionFile,
 			exitCode: pollResult.exitCode,
 			elapsed,
@@ -79,6 +80,7 @@ export async function watchSubagent(
 				name,
 				task,
 				summary: "Subagent cancelled.",
+				summarySource: "runtime",
 				exitCode: 1,
 				elapsed: Math.floor((Date.now() - startTime) / 1000),
 				outputTokens: 0,
@@ -89,6 +91,7 @@ export async function watchSubagent(
 			name,
 			task,
 			summary: `Subagent error: ${errorMessage}`,
+			summarySource: "runtime",
 			exitCode: 1,
 			elapsed: Math.floor((Date.now() - startTime) / 1000),
 			outputTokens: 0,
@@ -97,16 +100,22 @@ export async function watchSubagent(
 	}
 }
 
-function getSummary(running: RunningSubagent, pollResult: PollResult): string {
+function getSummary(
+	running: RunningSubagent,
+	pollResult: PollResult,
+): { summary: string; summarySource: SubagentSummarySource } {
 	if (!running.noSession && existsSync(running.sessionFile)) {
-		const output = findLastSubagentOutput(
+		const output = findLastSubagentOutputWithSource(
 			getNewEntries(running.sessionFile, running.launchEntryCount ?? 0),
 		);
 		if (output) return output;
 	}
-	return pollResult.exitCode !== 0
-		? `Sub-agent exited with code ${pollResult.exitCode}`
-		: "Sub-agent exited without output";
+	return {
+		summary: pollResult.exitCode !== 0
+			? `Sub-agent exited with code ${pollResult.exitCode}`
+			: "Sub-agent exited without output",
+		summarySource: "runtime",
+	};
 }
 
 async function pollForZellijFiles(

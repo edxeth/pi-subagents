@@ -150,7 +150,7 @@ function getCompletedSubagentContent(
 	sessionRef: string,
 ): string {
 	if (completed.errorMessage) {
-		const resultBody = hasRealSubagentOutput(completed.summary)
+		const resultBody = hasRealSubagentOutput(completed)
 			? `Last output before the failure (may be incomplete — verify before trusting):\n\n${completed.summary}`
 			: `The subagent did not produce a result. You can retry by spawning a new ` +
 				`subagent or resume the session with subagent_resume.`;

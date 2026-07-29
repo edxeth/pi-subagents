@@ -46,7 +46,7 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 		: "";
 	let text: string;
 	if (cached.errorMessage) {
-		const resultBody = hasRealSubagentOutput(cached.summary)
+		const resultBody = hasRealSubagentOutput(cached)
 			? `Last output before the failure (may be incomplete — verify before trusting):\n\n${cached.summary}`
 			: `The subagent did not produce a result. You can retry by spawning a new ` +
 				`subagent or resume the session with subagent_resume.`;
