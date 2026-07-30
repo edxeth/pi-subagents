@@ -433,6 +433,85 @@ describe("subagent_resume approval args", () => {
 	});
 });
 
+describe("subagent_resume extension parity", () => {
+	function createResumeRuntime() {
+		return {
+			isMuxAvailable: () => true,
+			getShellReadyDelayMs: () => 0,
+			watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
+			watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
+			getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
+			startWidgetRefresh: () => {},
+			getContextWindow: () => undefined,
+			runningSubagents: new Map<string, any>(),
+		};
+	}
+
+	it("keeps normal extension discovery for metadata-backed extensions all resumes", async () => {
+		const dir = createTestDir();
+		const bin = writeExecutable(dir, "capture-pi", `#!/usr/bin/env bash\nexit 0\n`);
+		const originalCommand = process.env.PI_SUBAGENT_PI_COMMAND;
+		process.env.PI_SUBAGENT_PI_COMMAND = bin;
+		try {
+			const sessionFile = join(dir, "child.jsonl");
+			writeFileSync(
+				sessionFile,
+				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			);
+			await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
+				version: 1,
+				timestamp: new Date().toISOString(),
+				name: "resume-child",
+				mode: "background",
+				sessionMode: "lineage-only",
+				autoExit: true,
+				parentClosePolicy: "terminate",
+				async: true,
+				denyTools: [],
+				noContextFiles: false,
+				noSession: false,
+				agentConfigDir: dir,
+				cwd: dir,
+				boundarySystemPrompt: false,
+			});
+
+			const running = await resumeSubagentSession(
+				{ sessionFile },
+				createResumeRuntime(),
+			);
+
+			assert.equal(running.childProcess?.spawnargs.includes("--no-extensions"), false);
+		} finally {
+			if (originalCommand == null) delete process.env.PI_SUBAGENT_PI_COMMAND;
+			else process.env.PI_SUBAGENT_PI_COMMAND = originalCommand;
+		}
+	});
+
+	it("keeps extension discovery disabled when legacy sessions have no extension metadata", async () => {
+		const dir = createTestDir();
+		const bin = writeExecutable(dir, "capture-pi", `#!/usr/bin/env bash\nexit 0\n`);
+		const originalCommand = process.env.PI_SUBAGENT_PI_COMMAND;
+		process.env.PI_SUBAGENT_PI_COMMAND = bin;
+		try {
+			const sessionFile = join(dir, "legacy-child.jsonl");
+			writeFileSync(
+				sessionFile,
+				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			);
+
+			const running = await resumeSubagentSession(
+				{ sessionFile, mode: "background" },
+				createResumeRuntime(),
+			);
+
+			assert.equal(running.childProcess?.spawnargs.includes("--no-extensions"), true);
+		} finally {
+			if (originalCommand == null) delete process.env.PI_SUBAGENT_PI_COMMAND;
+			else process.env.PI_SUBAGENT_PI_COMMAND = originalCommand;
+		}
+	});
+});
+
 describe("subagent_resume prompt delivery", () => {
 	it("writes a direct sentinel for tmux resumes without parsing Herdr placement", async () => {
 		const dir = createTestDir();

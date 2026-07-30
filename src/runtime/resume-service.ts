@@ -228,9 +228,10 @@ export async function resumeSubagentSession(
 		"tools",
 		"subagent-done.ts",
 	);
-	const savedExtensions =
-		invocationMetadata?.extensions ?? readSubagentExtensionEntry(sessionFile);
-	const extensionArgs = savedExtensions
+	const savedExtensions = invocationMetadata
+		? invocationMetadata.extensions
+		: readSubagentExtensionEntry(sessionFile);
+	const extensionArgs = invocationMetadata !== undefined || savedExtensions !== undefined
 		? getExtensionLaunchArgs(savedExtensions, subagentDonePath)
 		: ["--no-extensions", "-e", subagentDonePath];
 	const parityArgs = [
