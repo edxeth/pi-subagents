@@ -83,11 +83,20 @@ function getTextContent(msg: MessageEntry): string | null {
 	return texts.length > 0 && texts.join("").trim() ? texts.join("\n") : null;
 }
 
-function getTerminalStopMessage(msg: MessageEntry): string | null {
+function getStopReason(msg: MessageEntry): string | null {
 	const stopReason = (msg.message as Record<string, unknown>).stopReason;
-	if (typeof stopReason !== "string" || stopReason.trim() === "") {
-		return null;
-	}
+	return typeof stopReason === "string" && stopReason.trim() !== ""
+		? stopReason
+		: null;
+}
+
+function isToolUseStopReason(stopReason: string | null): boolean {
+	return stopReason?.replace(/[-_]/g, "").toLowerCase() === "tooluse";
+}
+
+function getTerminalStopMessage(msg: MessageEntry): string | null {
+	const stopReason = getStopReason(msg);
+	if (!stopReason) return null;
 
 	const errorMessage = (msg.message as Record<string, unknown>).errorMessage;
 	if (stopReason === "error") {
@@ -121,6 +130,10 @@ function findLastAssistantOutput(entries: SessionEntry[]): SubagentOutput | null
 		if (msg.message.role !== "assistant") continue;
 		const text = getTextContent(msg);
 		if (text) return { summary: text, summarySource: "subagent" };
+		// A tool-use assistant message is a boundary, not a final answer. Stop
+		// before stale assistant text and let the caller inspect the trailing tool
+		// result, which may be the intentional output of a terminating tool.
+		if (isToolUseStopReason(getStopReason(msg))) return null;
 
 		// A terminal assistant turn with no text is still the child outcome.
 		// Mark the synthesized status as runtime-owned instead of presenting it as

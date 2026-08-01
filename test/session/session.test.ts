@@ -340,6 +340,32 @@ describe("session.ts", () => {
 			);
 		});
 
+		it("uses a terminating tool result after a textless tool-use boundary", () => {
+			const entries = [
+				{
+					type: "message",
+					message: {
+						role: "assistant",
+						content: [{ type: "toolCall", name: "detached_launch", arguments: {} }],
+						stopReason: "toolUse",
+					},
+				},
+				{
+					type: "message",
+					message: {
+						role: "toolResult",
+						toolName: "detached_launch",
+						content: [{ type: "text", text: "INTENTIONAL_TOOL_RESULT_OK" }],
+					},
+				},
+			] as any[];
+
+			assert.deepEqual(findLastSubagentOutputWithSource(entries), {
+				summary: "INTENTIONAL_TOOL_RESULT_OK",
+				summarySource: "subagent",
+			});
+		});
+
 		it("falls back to the last meaningful tool result when assistant only calls subagent_done", () => {
 			const entries = [
 				{
@@ -459,4 +485,3 @@ describe("session.ts", () => {
 		});
 	});
 });
-

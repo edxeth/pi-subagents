@@ -24,6 +24,19 @@ import {
 } from "./set-tab-title.ts";
 
 const require = createRequire(import.meta.url);
+const TOOL_BOUNDARY_RECOVERY_NUDGE = "continue";
+const MAX_CONSECUTIVE_TOOL_BOUNDARY_ENDS = 3;
+
+function endedAtToolUseBoundary(messages: unknown[] | undefined): boolean {
+	if (!messages) return false;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i] as { role?: unknown; stopReason?: unknown } | undefined;
+		if (message?.role !== "assistant") continue;
+		if (typeof message.stopReason !== "string") return false;
+		return message.stopReason.replace(/[-_]/g, "").toLowerCase() === "tooluse";
+	}
+	return false;
+}
 
 function isMissingOptionalDependency(error: unknown, id: string): boolean {
 	const maybeError = error as { code?: unknown; message?: unknown } | null;
@@ -381,10 +394,24 @@ export default function (pi: ExtensionAPI) {
 	if (autoExit) {
 		let userTookOver = false;
 		let agentStarted = false;
+		let consecutiveToolBoundaryEnds = 0;
+		let toolExecutionsThisTurn = 0;
+		let terminatingToolExecutionsThisTurn = 0;
 
 		pi.on("agent_start", () => {
 			agentStarted = true;
 			userTookOver = false;
+		});
+
+		pi.on("turn_start", () => {
+			toolExecutionsThisTurn = 0;
+			terminatingToolExecutionsThisTurn = 0;
+		});
+
+		pi.on("tool_execution_end", (event) => {
+			toolExecutionsThisTurn += 1;
+			const result = event.result as { terminate?: unknown } | undefined;
+			if (result?.terminate === true) terminatingToolExecutionsThisTurn += 1;
 		});
 
 		pi.on("input", (event) => {
@@ -411,6 +438,37 @@ export default function (pi: ExtensionAPI) {
 				// the session open and cancel any pending autonomous recovery action.
 				providerErrorRecovery.cancelPendingRecovery(userTookOver);
 				cancelPendingPiRecovery();
+				return;
+			}
+
+			// An agent loop cannot be complete when its last assistant message still
+			// requests tool execution. Some providers occasionally stop Pi at this
+			// boundary instead of continuing after the tool result. Nudge immediately
+			// so background children do not exit before a delayed retry can fire, but
+			// bound the retries so a persistently broken provider cannot loop forever.
+			const intentionallyTerminatedToolBatch =
+				toolExecutionsThisTurn > 0 &&
+				toolExecutionsThisTurn === terminatingToolExecutionsThisTurn;
+			if (endedAtToolUseBoundary(messages) && !intentionallyTerminatedToolBatch) {
+				pendingProviderError = null;
+				providerErrorRecovery.cancelPendingRecovery();
+				cancelPendingPiRecovery();
+				consecutiveToolBoundaryEnds += 1;
+				if (consecutiveToolBoundaryEnds < MAX_CONSECUTIVE_TOOL_BOUNDARY_ENDS) {
+					pi.sendUserMessage(TOOL_BOUNDARY_RECOVERY_NUDGE, {
+						deliverAs: "steer",
+					});
+					return;
+				}
+				writeExitSignal({
+					type: "error",
+					errorMessage:
+						`Subagent recovery exhausted after ${consecutiveToolBoundaryEnds} consecutive ` +
+						"tool-use boundary endings.",
+					stopReason: "toolUse",
+					outputTokens,
+				});
+				requestShutdown(ctx);
 				return;
 			}
 
@@ -449,6 +507,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			pendingProviderError = null;
+			consecutiveToolBoundaryEnds = 0;
 			providerErrorRecovery.cancelPendingRecovery(true);
 			cancelPendingPiRecovery();
 			writeExitSignal({ type: "done", outputTokens }, { supersede: true });

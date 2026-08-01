@@ -21,6 +21,7 @@ describe("subagent-done.ts", () => {
 		function loadRecoveryChild(options: { interactive?: boolean } = {}) {
 			const handlers = new Map<string, any>();
 			const sentMessages: string[] = [];
+			const sentMessageOptions: unknown[] = [];
 			const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
 			let shutdowns = 0;
 			let stale = false;
@@ -44,8 +45,9 @@ describe("subagent-done.ts", () => {
 				on(event: string, handler: any) {
 					handlers.set(event, handler);
 				},
-				sendUserMessage(message: string) {
+				sendUserMessage(message: string, options?: unknown) {
 					sentMessages.push(message);
+					sentMessageOptions.push(options);
 				},
 				registerShortcut() {},
 			} as any);
@@ -68,6 +70,7 @@ describe("subagent-done.ts", () => {
 			return {
 				handlers,
 				sentMessages,
+				sentMessageOptions,
 				statusUpdates,
 				sessionFile,
 				ctx,
@@ -180,6 +183,114 @@ describe("subagent-done.ts", () => {
 				const exit = JSON.parse(readFileSync(`${h.sessionFile}.exit`, "utf8"));
 				assert.equal(exit.type, "done");
 				assert.equal(h.sentMessages.length, 1);
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("nudges an auto-exit child that ends at a tool-use boundary", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "tooluse" }] },
+					h.ctx,
+				);
+
+				assert.deepEqual(h.sentMessages, ["continue"]);
+				assert.deepEqual(h.sentMessageOptions, [{ deliverAs: "steer" }]);
+				assert.equal(h.shutdowns, 0);
+				assertNoExit(h);
+
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] }] },
+					h.ctx,
+				);
+
+				assert.equal(readExit(h).type, "done");
+				assert.equal(h.sentMessages.length, 1);
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("preserves an intentional tool-result termination", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 0 });
+				h.handlers.get("tool_execution_end")?.({
+					type: "tool_execution_end",
+					toolCallId: "intentional-stop",
+					toolName: "detached_launch",
+					result: { content: [{ type: "text", text: "started" }], terminate: true },
+					isError: false,
+				});
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "toolUse" }] },
+					h.ctx,
+				);
+				mock.timers.tick(0);
+
+				assert.deepEqual(h.sentMessages, []);
+				assert.equal(readExit(h).type, "done");
+				assert.equal(h.shutdowns, 1);
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("fails instead of looping after repeated tool-use boundary endings", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				for (let attempt = 0; attempt < 3; attempt++) {
+					h.handlers.get("agent_end")?.(
+						{ messages: [{ role: "assistant", stopReason: "toolUse" }] },
+						h.ctx,
+					);
+				}
+				mock.timers.tick(0);
+
+				assert.deepEqual(h.sentMessages, ["continue", "continue"]);
+				assert.equal(h.shutdowns, 1);
+				const exit = readExit(h);
+				assert.equal(exit.type, "error");
+				assert.equal(exit.stopReason, "toolUse");
+				assert.match(exit.errorMessage, /3 consecutive tool-use boundary/i);
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("bounds recovery when provider errors alternate with tool-use endings", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				for (let attempt = 0; attempt < 2; attempt++) {
+					h.handlers.get("agent_end")?.(
+						{ messages: [{ role: "assistant", stopReason: "toolUse" }] },
+						h.ctx,
+					);
+					h.handlers.get("agent_end")?.(
+						{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+						h.ctx,
+					);
+					mock.timers.tick(10_000);
+				}
+
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "toolUse" }] },
+					h.ctx,
+				);
+				mock.timers.tick(0);
+
+				assert.equal(h.shutdowns, 1);
+				assert.equal(readExit(h).type, "error");
 			} finally {
 				cleanup(h.dir);
 				mock.timers.reset();
