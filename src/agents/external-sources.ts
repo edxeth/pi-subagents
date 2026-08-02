@@ -59,6 +59,7 @@ export interface AgentSourceProvider {
 
 export interface AgentSourceProviderContext {
 	cwd: string;
+	projectTrusted: boolean;
 	reason: "startup" | "reload" | "new" | "resume" | "fork";
 	signal: AbortSignal;
 }
@@ -411,6 +412,7 @@ export async function discoverExternalAgentSources(
 	events: EventBus,
 	cwd: string,
 	reason: AgentSourceProviderContext["reason"],
+	projectTrusted: boolean,
 ): Promise<void> {
 	const state: DiscoveryState = {
 		cwd,
@@ -423,6 +425,7 @@ export async function discoverExternalAgentSources(
 	};
 	const request: DiscoveryRequest = {
 		cwd,
+		projectTrusted,
 		reason,
 		signal: new AbortController().signal,
 		register: (provider) => registerProvider(state, provider),
@@ -438,7 +441,7 @@ export async function discoverExternalAgentSources(
 	const aggregateController = new AbortController();
 	const aggregateTimer = setTimeout(() => aggregateController.abort(), AGGREGATE_TIMEOUT_MS);
 	try {
-		await Promise.all(providers.map((provider) => discoverOne(state, provider, { cwd, reason }, aggregateController.signal)));
+		await Promise.all(providers.map((provider) => discoverOne(state, provider, { cwd, projectTrusted, reason }, aggregateController.signal)));
 	} finally {
 		clearTimeout(aggregateTimer);
 	}

@@ -43,7 +43,7 @@ let currentCwd = "";
 async function discoverExternalAgentSources(events: TestEventBus, cwd: string, reason: "startup" | "reload" | "new" | "resume" | "fork"): Promise<void> {
 	currentEvents = events;
 	currentCwd = cwd;
-	await discoverExternalAgentSourcesForTest(events, cwd, reason);
+	await discoverExternalAgentSourcesForTest(events, cwd, reason, true);
 }
 
 function getEffectiveAgentDefinitions(cwd: string) {
@@ -136,6 +136,7 @@ describe("external agent-source seam", () => {
 		await sessionStart?.({ type: "session_start", reason: "startup" }, {
 			cwd: dir,
 			hasUI: false,
+			isProjectTrusted: () => true,
 			ui: { setWidget() {} },
 			sessionManager: { getHeader: () => ({ id: "session", type: "session", timestamp: "", cwd: dir }) },
 		});

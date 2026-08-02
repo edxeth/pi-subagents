@@ -212,7 +212,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			finishSessionStart();
 			return;
 		}
-		return discoverExternalAgentSources(pi.events, ctx.cwd, event.reason)
+		return discoverExternalAgentSources(
+			pi.events,
+			ctx.cwd,
+			event.reason,
+			ctx.isProjectTrusted(),
+		)
 			.then(finishSessionStart)
 			.catch(finishSessionStart);
 	});
