@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { EventBus, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Editor, matchesKey, Key, type Component, type EditorTheme } from "@earendil-works/pi-tui";
 import { completedSubagentResults } from "../../runtime/state.ts";
 import { resumeSubagentSession, type ResumeServiceRuntime } from "../../runtime/resume-service.ts";
@@ -32,6 +32,7 @@ export class SubagentsOverlayController implements Component {
 	private runtime: OverlayRuntime;
 	private theme: Theme;
 	private tui: OverlayTui;
+	private events?: EventBus;
 	private state: OverlayState = {
 		activeTab: "running",
 		selectedIndex: 0,
@@ -47,12 +48,14 @@ export class SubagentsOverlayController implements Component {
 		theme: Theme,
 		runtime: OverlayRuntime,
 		tui: OverlayTui,
+		events?: EventBus,
 	) {
 		this.done = done;
 		this.ctx = ctx;
 		this.theme = theme;
 		this.runtime = runtime;
 		this.tui = tui;
+		this.events = events;
 		this.editor = new Editor(tui, createEditorTheme(theme), { paddingX: 1 });
 		this.editor.onSubmit = (text) => this.submitResume(text);
 		runtime.startWidgetRefresh();
@@ -236,6 +239,7 @@ export class SubagentsOverlayController implements Component {
 			ui: this.ctx.ui,
 			cwd: this.ctx.cwd,
 			sessionManager: this.ctx.sessionManager,
+			events: this.events,
 		};
 
 		if (this.state.activeTab === "running") {

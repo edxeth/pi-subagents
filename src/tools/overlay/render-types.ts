@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { EventBus, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 
 export type Theme = {
@@ -70,4 +70,6 @@ export interface FooterHint {
 	action: string;
 }
 
-export type OverlayContext = Pick<ExtensionContext, "ui" | "cwd" | "sessionManager">;
+export type OverlayContext = Pick<ExtensionContext, "ui" | "cwd" | "sessionManager"> & {
+	events?: EventBus;
+};

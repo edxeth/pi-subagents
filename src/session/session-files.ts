@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { AgentDefaults } from "../agents/definitions.ts";
+import type { AgentDefaults, AgentSourceMetadata } from "../agents/definitions.ts";
 import type { ParentClosePolicy, SubagentParamsInput } from "../types.ts";
 import type { HerdrPlacementPolicy } from "../mux/herdr-surfaces.ts";
 import type { ZellijPlacementPolicy } from "../mux/zellij-placement.ts";
@@ -33,6 +33,7 @@ export interface PersistedSubagentLaunchMetadata {
 	title?: string;
 	sessionTitle?: string;
 	agent?: string;
+	agentSource?: AgentSourceMetadata;
 	mode: ResumeMode;
 	sessionMode: SubagentSessionMode;
 	autoExit?: boolean;

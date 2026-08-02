@@ -45,7 +45,7 @@ const SubagentChildParams = Type.Object({
 	name: Type.String({ description: SUBAGENT_NAME_DESCRIPTION }),
 	task: Type.String({ description: "Task/prompt for the sub-agent. For non-trivial work, write readable Markdown: short paragraphs, bullets, or headings as appropriate. Use a one-line task only for trivial work." }),
 	title: Type.String({ description: SUBAGENT_TITLE_DESCRIPTION }),
-	agent: Type.String({ description: "Required agent definition name. Reads .pi/agents/<name>.md or ~/.pi/agent/agents/<name>.md and refuses ad-hoc unnamed subagents." }),
+	agent: Type.String({ description: "Required agent definition name from the subagent roster. Native definitions and registered external agent sources are supported; ad-hoc unnamed subagents are refused." }),
 	model: Type.Optional(Type.String({ description: SUBAGENT_MODEL_DESCRIPTION })),
 	thinking: Type.Optional(Type.String({ description: SUBAGENT_THINKING_DESCRIPTION })),
 });
@@ -156,6 +156,7 @@ async function launchOneSubagent(
 	const launchCtx: SubagentLaunchContext = {
 		sessionManager: ctx.sessionManager,
 		cwd: ctx.cwd,
+		events: pi.events,
 
 		launchToolCallId: toolCallId,
 		autoExit: headlessAutoExit,

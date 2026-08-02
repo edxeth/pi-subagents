@@ -17,7 +17,7 @@ type AgentDetailDefaults = AgentDefaults & {
 const SECTION_FIELDS = [
 	{
 		title: "Identity",
-		fields: ["name", "description", "agent file"],
+		fields: ["name", "description", "agent file", "source", "source path"],
 	},
 	{
 		title: "Runtime",
@@ -55,6 +55,11 @@ function buildSections(
 	fields.push({ label: "name", value: name });
 	fields.push({ label: "description", value: defs?.description ?? "—" });
 	fields.push({ label: "agent file", value: defs?.path ?? "—" });
+	const sourceMetadata = meta?.agentSource ?? defs?.sourceMetadata;
+	if (sourceMetadata) {
+		fields.push({ label: "source", value: `${sourceMetadata.providerId}/${sourceMetadata.sourceId} (${sourceMetadata.scope})` });
+		fields.push({ label: "source path", value: sourceMetadata.path });
+	}
 	if (meta) {
 		fields.push({
 			label: "launched",
@@ -156,8 +161,8 @@ function safeMeta(f: string): PersistedSubagentLaunchMetadata | undefined {
 	try { return readSubagentLaunchMetadata(f); } catch { return undefined; }
 }
 
-function safeDefs(a: string, cwd: string): AgentDetailDefaults | null {
-	try { return loadAgentDefaults(a, undefined, cwd, (_h, b) => b); } catch { return null; }
+function safeDefs(a: string, cwd: string, events?: OverlayContext["events"]): AgentDetailDefaults | null {
+	try { return loadAgentDefaults(a, undefined, cwd, (_h, b) => b, events); } catch { return null; }
 }
 
 function usageTotal(usage: SessionUsage): number {
@@ -307,7 +312,7 @@ export function buildRunningItems(ctx: OverlayContext): OverlayItem[] {
 	const items: OverlayItem[] = [];
 	for (const a of runningSubagents.values()) {
 		const meta = safeMeta(a.sessionFile);
-		const defs = a.agent ? safeDefs(a.agent, ctx.cwd) : null;
+		const defs = a.agent ? safeDefs(a.agent, ctx.cwd, ctx.events) : null;
 		const sections = buildSections(defs, meta);
 		sections.push(buildRuntimeSection(true, a));
 
@@ -371,7 +376,7 @@ export async function buildCompletedItems(ctx: OverlayContext): Promise<OverlayI
 
 		const sessionStats = readCompletedSessionStats(r.sessionFile);
 		const meta = r.sessionFile ? safeMeta(r.sessionFile) : undefined;
-		const defs = r.agent ? safeDefs(r.agent, ctx.cwd) : null;
+		const defs = r.agent ? safeDefs(r.agent, ctx.cwd, ctx.events) : null;
 		const sections = buildSections(defs, meta);
 		sections.push(completedRuntimeSection({
 			status: r.status,
@@ -412,7 +417,7 @@ export async function buildCompletedItems(ctx: OverlayContext): Promise<OverlayI
 				const summary = recovered.errorMessage ? `error: ${firstLine(recovered.errorMessage, 80)}` : recoverSummary(entry);
 				const sessionStats = readCompletedSessionStats(recovered.sessionFile);
 				const meta = safeMeta(recovered.sessionFile);
-				const defs = recovered.agent ? safeDefs(recovered.agent, ctx.cwd) : null;
+				const defs = recovered.agent ? safeDefs(recovered.agent, ctx.cwd, ctx.events) : null;
 				const sections = buildSections(defs, meta);
 				sections.push(completedRuntimeSection({
 					status: recovered.status,
@@ -448,11 +453,14 @@ export async function buildCompletedItems(ctx: OverlayContext): Promise<OverlayI
 	return items;
 }
 
-export function buildAgentItems(_ctx: OverlayContext): OverlayItem[] {
-	return getEffectiveAgentDefinitions().map((d) => {
+export function buildAgentItems(ctx: OverlayContext): OverlayItem[] {
+	return getEffectiveAgentDefinitions(ctx.cwd, ctx.events).map((d) => {
 		const defs = d as AgentDetailDefaults;
 		const sections = buildSections(defs, undefined);
-		if (d.body) {
+		// External providers may carry sensitive prompt bodies. The overlay is a
+		// catalog, not a prompt inspector; native definitions retain their
+		// historical detail view while external bodies stay in memory only.
+		if (d.body && !d.sourceMetadata) {
 			const bodyLines = d.body
 				.split("\n")
 				.filter((l: string) => l.trim())

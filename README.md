@@ -27,6 +27,49 @@ Special thanks to [@FasalZein](https://github.com/FasalZein) and [@isthatyousaf]
 pi install git:github.com/edxeth/pi-subagents
 ```
 
+## External agent sources
+
+Agent definitions normally come from the native project and user locations. Extensions
+may add other sources without writing generated agent files by registering a provider
+through the shared Pi event bus:
+
+```ts
+import { registerAgentSourceProvider } from "pi-subagents";
+
+export default function (pi) {
+  registerAgentSourceProvider(pi.events, {
+    id: "example-source",
+    discover: ({ cwd }) => loadNormalizedDefinitions(cwd),
+  });
+}
+```
+
+`discover` owns source parsing and returns a bounded, normalized v1 subset with `name`,
+`body`, `description`, `providerId`, `sourceId`, `scope`, absolute `path`, and an integer
+`rank` from 0 through 100, plus safe model/thinking/tool/skill, deny-list, execution,
+and session fields. Definitions are limited to 256 entries and a 1 MiB aggregate
+payload; descriptions are limited to 512 bytes and bodies to 32 KiB. The provider must
+return definitions only; this package never creates translated files.
+
+The handshake uses `pi-subagents.agent-sources/discover`. The core emits that event at
+`session_start` (including reload) with a synchronous `register(provider)` callback.
+Providers listen through `registerAgentSourceProvider`, so extension load order does
+not matter. Discovery is concurrent, fail-open, and bounded to a 1 second provider
+budget and 3 second aggregate budget. The provider context includes an `AbortSignal`.
+Provider IDs use a first-valid-wins policy; source IDs are unique within a provider.
+The event bus is trusted in-process communication, not authentication. Malformed,
+disabled, unavailable, and thrown providers are isolated and do not prevent native
+agents from loading.
+
+Native `.pi/agents` definitions retain their existing precedence. External definitions
+cannot replace a native definition; among external collisions, higher rank wins, then
+`project` scope wins over `user`, followed by stable provider/source/path ordering.
+The model-facing roster exposes only opaque `providerId/sourceId` provenance—never
+absolute source paths, bodies, or frontmatter. The operator overlay may show a
+validated source path, and launch metadata preserves sanitized source provenance.
+External control-plane fields such as `flags`, `env`, `extensions`, `trustProject`,
+`taskExpansion`, `cwd`, and `cwdBase` are rejected.
+
 ## The model
 
 A subagent is a named agent file plus a launch policy.

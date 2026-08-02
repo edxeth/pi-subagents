@@ -25,7 +25,7 @@ export function getSubagentAgentRequirementError(
 			content: [
 				{
 					type: "text" as const,
-					text: `Error: agent "${params.agent}" was not found in .pi/agents/ or ${globalDir}.`,
+					text: `Error: agent "${params.agent}" was not found in the configured native or external agent sources (native global path: ${globalDir}).`,
 				},
 			],
 			details: { error: "agent_not_found", agent: params.agent },

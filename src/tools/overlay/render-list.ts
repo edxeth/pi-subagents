@@ -12,7 +12,7 @@ const EMPTY_MESSAGES: Record<TabId, string[]> = {
 	],
 	agents: [
 		"No agent definitions found.",
-		"Add .md agent files in .pi/agents or ~/.pi/agent/agents.",
+		"Add agent definitions in the configured native or external agent sources.",
 	],
 };
 

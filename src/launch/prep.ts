@@ -2,6 +2,7 @@ import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { getArtifactStorageRoot } from "../artifact-storage.ts";
+import type { EventBus } from "@earendil-works/pi-coding-agent";
 import type { AgentDefaults } from "../agents/definitions.ts";
 import { loadAgentDefaults as loadAgentDefaultsFromDefinitions } from "../agents/definitions.ts";
 
@@ -41,6 +42,7 @@ export interface SubagentLaunchContext {
 		getLeafId?(): string | null;
 	};
 	cwd: string;
+	events?: EventBus;
 	modelRegistry?: ModelRegistryLike;
 
 	launchToolCallId?: string;
@@ -77,12 +79,14 @@ function loadAgentDefaults(
 	agentName: string,
 	cwdHint: string | null | undefined,
 	baseCwd: string,
+	events?: EventBus,
 ): AgentDefaults | null {
 	return loadAgentDefaultsFromDefinitions(
 		agentName,
 		cwdHint,
 		baseCwd,
 		resolveSubagentCwd,
+		events,
 	);
 }
 
@@ -92,7 +96,7 @@ export async function prepareSubagentLaunch(
 	mode: ResumeMode = "background",
 ): Promise<PreparedSubagentLaunch> {
 	const agentDefs = params.agent
-		? loadAgentDefaults(params.agent, params.cwd, ctx.cwd)
+		? loadAgentDefaults(params.agent, params.cwd, ctx.cwd, ctx.events)
 		: null;
 	// Preserve the original agent-level auto-exit before any headless-mode override
 	// so that persisted metadata always reflects the agent file, not the runtime override.
@@ -320,6 +324,9 @@ export function buildPersistedSubagentLaunchMetadata(
 		...(params.title ? { title: params.title } : {}),
 		...(prepared.sessionTitle ? { sessionTitle: prepared.sessionTitle } : {}),
 		...(params.agent ? { agent: params.agent } : {}),
+		...(prepared.agentDefs?.sourceMetadata
+			? { agentSource: prepared.agentDefs.sourceMetadata }
+			: {}),
 		mode,
 		sessionMode,
 		...(prepared.agentAutoExit !== undefined

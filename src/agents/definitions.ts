@@ -1,6 +1,18 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { getExternalAgentDefinitions } from "./external-sources.ts";
+import type { EventBus } from "@earendil-works/pi-coding-agent";
+
+export interface AgentSourceMetadata {
+	providerId: string;
+	sourceId: string;
+	scope: string;
+	path: string;
+	rank: number;
+	effective?: boolean;
+	shadowedBy?: Omit<AgentSourceMetadata, "shadowedBy">;
+}
 
 export interface AgentDefaults {
 	enabled?: boolean;
@@ -35,12 +47,13 @@ export interface AgentDefaults {
 	flags?: string;
 	env?: string;
 	parentClosePolicy?: "terminate" | "continue";
+	sourceMetadata?: AgentSourceMetadata;
 }
 
 export interface ResolvedAgentDefinition extends AgentDefaults {
 	name: string;
 	description?: string;
-	source: "project" | "global";
+	source: "project" | "global" | "external";
 	path: string;
 }
 
@@ -163,6 +176,7 @@ export type ResolveAgentCwd = (cwdHint: string | null, baseCwd: string) => strin
 
 export function getEffectiveAgentDefinitions(
 	baseCwd = process.cwd(),
+	events?: EventBus,
 ): ResolvedAgentDefinition[] {
 	const configDir = getAgentConfigDir();
 	const agents = new Map<string, ResolvedAgentDefinition>();
@@ -188,6 +202,13 @@ export function getEffectiveAgentDefinitions(
 			agents.set(definition.name, definition);
 		}
 	}
+
+	// Native .pi definitions retain their historical precedence: project wins
+	// over global. External sources are considered only for otherwise-unclaimed
+	// names, so an external provider cannot silently replace a native definition.
+	for (const definition of getExternalAgentDefinitions(baseCwd, new Set(agents.keys()), events)) {
+		agents.set(definition.name, definition as ResolvedAgentDefinition);
+	}
 	return [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -196,10 +217,11 @@ export function loadAgentDefaults(
 	cwdHint: string | null | undefined,
 	baseCwd: string,
 	resolveAgentCwd: ResolveAgentCwd,
+	events?: EventBus,
 ): AgentDefaults | null {
 	const resolvedBaseCwd = resolveAgentCwd(cwdHint ?? null, baseCwd);
 	return (
-		getEffectiveAgentDefinitions(resolvedBaseCwd).find(
+		getEffectiveAgentDefinitions(resolvedBaseCwd, events).find(
 			(agent) => agent.name === agentName,
 		) ?? null
 	);

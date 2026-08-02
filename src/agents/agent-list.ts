@@ -1,4 +1,5 @@
-import type { ResolvedAgentDefinition } from "./definitions.ts";
+import type { EventBus } from "@earendil-works/pi-coding-agent";
+import type { AgentSourceMetadata, ResolvedAgentDefinition } from "./definitions.ts";
 import { getEffectiveAgentDefinitions } from "./definitions.ts";
 import { buildModelRef, parseAllowedModels } from "./model-refs.ts";
 
@@ -6,7 +7,9 @@ type SubagentSessionMode = "standalone" | "lineage-only" | "fork";
 
 export interface AgentListEntry {
 	name: string;
-	source: "project" | "global";
+	source: "project" | "global" | "external";
+	sourceScope?: string;
+	sourceMetadata?: Omit<AgentSourceMetadata, "path" | "shadowedBy">;
 	mode?: "interactive" | "background";
 	sessionMode: SubagentSessionMode;
 	async?: boolean;
@@ -25,12 +28,17 @@ export type ResolveSubagentSessionMode = (
 export function getAgentListEntries(
 	baseCwd: string,
 	resolveSessionMode: ResolveSubagentSessionMode,
+	events?: EventBus,
 ): AgentListEntry[] {
-	return getEffectiveAgentDefinitions(baseCwd)
+	return getEffectiveAgentDefinitions(baseCwd, events)
 		.filter((agent) => agent.description?.trim())
 		.map((agent) => ({
 			name: agent.name,
 			source: agent.source,
+			sourceScope: agent.sourceMetadata?.scope,
+			sourceMetadata: agent.sourceMetadata
+				? (({ path: _path, shadowedBy: _shadowedBy, ...safe }) => safe)(agent.sourceMetadata)
+				: undefined,
 			mode: agent.mode,
 			sessionMode: resolveSessionMode(agent),
 			async: agent.async,
@@ -84,6 +92,9 @@ export function renderAgentListReminder(
 	const agentLines = entries.map((entry) => {
 		return [
 			`- \`${entry.name}\`: ${entry.description}`,
+			...(entry.sourceMetadata
+				? [`  source: ${entry.sourceMetadata.providerId}/${entry.sourceMetadata.sourceId} (${entry.sourceMetadata.scope})`]
+				: []),
 			`  tool_return: ${getToolReturn(entry)}`,
 			`  runs_as: ${getRunsAs(entry)}`,
 			`  context: ${getContext(entry)}`,
@@ -121,6 +132,8 @@ export function getAgentListSignature(
 		entries.map((entry) => ({
 			name: entry.name,
 			source: entry.source,
+			sourceScope: entry.sourceScope,
+			sourceMetadata: entry.sourceMetadata,
 			mode: entry.mode,
 			sessionMode: entry.sessionMode,
 			async: entry.async,

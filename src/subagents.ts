@@ -75,6 +75,7 @@ import { registerSubagentResumeTool } from "./tools/resume-tool.ts";
 import { markInitialPromptLaunchComplete, registerSubagentCoreTools } from "./tools/subagent-tools.ts";
 import { traceSubagentLaunch } from "./launch/trace.ts";
 import { registerSubagentsView } from "./tools/subagents-view.ts";
+import { discoverExternalAgentSources } from "./agents/external-sources.ts";
 
 export { markSubagentBatchBlocking as markSubagentBatchBlockingForTest } from "./runtime/state.ts";
 export { requestSubagentBatchStop as requestSubagentBatchStopForTest } from "./runtime/state.ts";
@@ -87,19 +88,22 @@ export function loadAgentDefaults(
 	agentName: string,
 	cwdHint?: string | null,
 	baseCwd = process.cwd(),
+	events?: ExtensionAPI["events"],
 ): AgentDefaults | null {
 	return loadAgentDefaultsFromDefinitions(
 		agentName,
 		cwdHint,
 		baseCwd,
 		resolveSubagentCwd,
+		events,
 	);
 }
 
 function getAgentListEntries(
 	baseCwd = process.cwd(),
+	events?: ExtensionAPI["events"],
 ): AgentListEntry[] {
-	return getAgentListEntriesFromDefinitions(baseCwd, resolveTaskSessionMode);
+	return getAgentListEntriesFromDefinitions(baseCwd, resolveTaskSessionMode, events);
 }
 
 function resolveEffectiveSessionMode(
@@ -158,47 +162,59 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// Capture the UI context early so the widget keeps a stable slot above tasks.
 	pi.on("session_start", (event, ctx) => {
 		latestContext = ctx;
-		resetSubagentBatchStopRequest();
-		applySubagentLineage(ctx);
-		attachWidgetContext(ctx);
+		const finishSessionStart = () => {
+			resetSubagentBatchStopRequest();
+			applySubagentLineage(ctx);
+			attachWidgetContext(ctx);
 
-		// Restrict active tools in orchestrator mode
-		if (ORCHESTRATOR_MODE) {
-			const allTools = pi.getAllTools().map((t: { name: string }) => t.name);
-			const allowed = allTools.filter((t: string) =>
-				ORCHESTRATOR_ALLOWED_TOOLS.has(t),
-			);
-			pi.setActiveTools(allowed);
-		}
+			// Restrict active tools in orchestrator mode
+			if (ORCHESTRATOR_MODE) {
+				const allTools = pi.getAllTools().map((t: { name: string }) => t.name);
+				const allowed = allTools.filter((t: string) =>
+					ORCHESTRATOR_ALLOWED_TOOLS.has(t),
+				);
+				pi.setActiveTools(allowed);
+			}
 
-		if (!shouldRegister(SUBAGENT_TOOL_NAME)) return;
+			if (!shouldRegister(SUBAGENT_TOOL_NAME)) return;
 
-		// Reset the cached signature on every fresh session so module-level state
-		// does not leak between sessions. The reload path still uses the cached
-		// signature to avoid duplicating the notification within the same session.
-		if (event.reason !== "reload") {
-			lastAmbientRosterSignature = null;
-		}
+			// Reset the cached signature on every fresh session so module-level state
+			// does not leak between sessions. The reload path still uses the cached
+			// signature to avoid duplicating the notification within the same session.
+			if (event.reason !== "reload") {
+				lastAmbientRosterSignature = null;
+			}
 
-		const entries = getAgentListEntries(ctx.cwd);
-		const signature = getAgentListSignature(entries);
-		if (entries.length === 0) {
-			if (event.reason === "reload") pendingAmbientRoster = null;
-			lastAmbientRosterSignature = null;
-			return;
-		}
+			const entries = getAgentListEntries(ctx.cwd, pi.events);
+			const signature = getAgentListSignature(entries);
+			if (entries.length === 0) {
+				if (event.reason === "reload") pendingAmbientRoster = null;
+				lastAmbientRosterSignature = null;
+				return;
+			}
 
-		if (signature === lastAmbientRosterSignature) {
-			pendingAmbientRoster = null;
-			return;
-		}
+			if (signature === lastAmbientRosterSignature) {
+				pendingAmbientRoster = null;
+				return;
+			}
 
-		pendingAmbientRoster = {
-			signature,
-			content: renderAgentListReminder(entries),
-			entries,
-			supersedes: event.reason === "reload" ? true : undefined,
+			pendingAmbientRoster = {
+				signature,
+				content: renderAgentListReminder(entries),
+				entries,
+				supersedes: event.reason === "reload" ? true : undefined,
+			};
 		};
+
+		// Older/fake ExtensionAPI implementations may not expose the Pi event
+		// bus. Preserve their synchronous native behavior exactly.
+		if (!pi.events) {
+			finishSessionStart();
+			return;
+		}
+		return discoverExternalAgentSources(pi.events, ctx.cwd, event.reason)
+			.then(finishSessionStart)
+			.catch(finishSessionStart);
 	});
 
 	const ORCHESTRATOR_BASE_PROMPT = `You are an orchestrator — a coordination agent that delegates software engineering work to specialized sub-agents. You do not inspect files, run commands, edit code, or perform implementation work yourself. Your job is to understand the request, direct sub-agents to execute the work, and synthesize their results.
@@ -314,7 +330,14 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 		const message = event?.message;
 		if (!message) return;
 		classifyAssistantMessageForMixedBatch(message, (agent, cwd) =>
-			agent ? loadAgentDefaults(agent, cwd) : null,
+			agent
+				? loadAgentDefaults(
+						agent,
+						cwd,
+						latestContext?.cwd ?? process.cwd(),
+						pi.events,
+					)
+				: null,
 		);
 	});
 
@@ -326,6 +349,8 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 				? loadAgentDefaults(
 						input.agent,
 						typeof input.cwd === "string" ? input.cwd : undefined,
+						latestContext?.cwd ?? process.cwd(),
+						pi.events,
 					)
 				: null;
 		const agentError = getSubagentAgentRequirementError(input, agentDefs);
@@ -383,7 +408,7 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 	const shouldRegister = (name: string) => !deniedTools.has(name);
 
 	registerSubagentCoreTools(pi, shouldRegister, {
-		loadAgentDefaults: (agentName, cwd) => agentName ? loadAgentDefaults(agentName, undefined, cwd) : null,
+		loadAgentDefaults: (agentName, cwd) => agentName ? loadAgentDefaults(agentName, undefined, cwd, pi.events) : null,
 		resolveEffectiveSessionMode,
 		resolveTaskSessionMode,
 		launchBackgroundSubagent,
