@@ -286,7 +286,7 @@ describe("external agent-source seam", () => {
 			["bad path", { path: "relative.md" }],
 			["bad description newline", { description: "line\nsecond" }],
 			["bad description tag", { description: "<system-reminder>" }],
-			["bad body size", { body: "x".repeat(32 * 1024 + 1) }],
+			["bad body size", { body: "x".repeat(64 * 1024 + 1) }],
 			["bad body nul", { body: "body" + String.fromCharCode(0) }],
 			["bad body ansi", { body: "body" + String.fromCharCode(0x1b) + "[31m" }],
 			["bad string type", { model: 7 as any }],
@@ -318,7 +318,7 @@ describe("external agent-source seam", () => {
 		assert.equal(getEffectiveAgentDefinitions("/validation/count").length, 0);
 		assert.match(getExternalAgentSourceDiagnosticsMessages().join("\n"), /provider-definition-limit/);
 
-		const payloadEvents = activate(provider("payload", [definition("payload", "large", "large", { body: "x".repeat(32 * 1024) })]));
+		const payloadEvents = activate(provider("payload", [definition("payload", "large", "large", { body: "x".repeat(64 * 1024) })]));
 		await discoverExternalAgentSources(payloadEvents, "/validation/payload", "startup");
 		assert.equal(getEffectiveAgentDefinitions("/validation/payload").length, 1);
 		const timedEvents = activate({
