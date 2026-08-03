@@ -9,15 +9,30 @@ export interface SubagentErrorInfo {
 	stopReason: "error";
 }
 
-const NON_RETRYABLE_PROVIDER_ERROR_PATTERN =
-	/GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|billing/i;
+const PERMANENT_PROVIDER_ERROR_PATTERNS = [
+	/\busage limit\b|\binsufficient quota\b|\bout of budget\b|\bquota exceeded\b|\bcredit balance too low\b|\binsufficient(?: available)? balance\b|\bavailable balance (?:is )?(?:too low|zero|exhausted)\b|\bbilling\b|\bpayment method required\b|\baccount suspended\b/,
+	/\bno api key\b|\bapi (?:key|token) (?:is )?(?:invalid|incorrect|expired|not valid|missing|required)\b|\b(?:invalid|incorrect|expired|missing) api (?:key|token)\b|\btoken (?:is )?(?:invalid|expired)\b|\bauth(?:entication|orization) (?:failed|failure|error|required)\b|\bunauthorized\b|\bforbidden\b|\baccess denied(?: exception)?\b|\baccessdeniedexception\b|\bdon t have access\b|\b(?:401|403)\b/,
+	/\bmodel not found\b|\bunknown model\b|\bmodel\b.{0,100}\bdoes not exist\b/,
+	/\bhttp (?:404|422)\b|\b404 not found\b|\b422 unprocessable entity\b|\bcontent filter\b|\bsafety filter\b|\bmoderation (?:blocked|failed|rejected|triggered)\b/,
+] as const;
 
-const RETRYABLE_PROVIDER_ERROR_PATTERN =
-	/overloaded|provider.?returned.?error|an error occurred while processing your request|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i;
+function normalizeProviderErrorMessage(errorMessage: string): string {
+	return errorMessage
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, " ")
+		.trim()
+		.replace(/\s+/g, " ");
+}
 
-export function isRetryableProviderErrorMessage(errorMessage: string): boolean {
-	if (NON_RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage)) return false;
-	return RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage);
+/**
+ * Provider failures are eligible for bounded recovery by default. Pi may still
+ * be retrying when the error event arrives, so the recovery controller waits
+ * for a stable quiet window before nudging. Exclude only failures that are
+ * clearly permanent without maintaining provider-specific allowlists.
+ */
+export function shouldRecoverProviderErrorMessage(errorMessage: string): boolean {
+	const normalized = normalizeProviderErrorMessage(errorMessage);
+	return !PERMANENT_PROVIDER_ERROR_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 export function shouldDeferErrorForPiRecovery(message: unknown): boolean {
@@ -27,8 +42,9 @@ export function shouldDeferErrorForPiRecovery(message: unknown): boolean {
 /**
  * If the last assistant message ended with stopReason: "error", return its
  * error info so the parent can surface a clear failure. `recoveryKind` separates
- * transient provider/transport retries from Pi-native context-overflow recovery.
- * Permanent quota/billing/auth failures should fail immediately.
+ * bounded provider recovery from Pi-native context-overflow recovery. Provider
+ * failures recover by default; clearly permanent quota, billing, auth, and
+ * missing-model failures fail immediately.
  */
 export function findLatestAssistantError(
 	messages: any[] | undefined,
@@ -46,7 +62,7 @@ export function findLatestAssistantError(
 		const recoveryKind: SubagentErrorRecoveryKind =
 			!!raw && shouldDeferErrorForPiRecovery(msg)
 				? "pi"
-				: !!raw && isRetryableProviderErrorMessage(raw)
+				: !!raw && shouldRecoverProviderErrorMessage(raw)
 					? "provider"
 					: "none";
 		return {

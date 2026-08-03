@@ -189,6 +189,35 @@ describe("subagent-done.ts", () => {
 			}
 		});
 
+		it("nudges after an unfamiliar HTTP 400 provider failure", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				h.handlers.get("agent_end")?.(
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "error",
+								errorMessage:
+									'400: {"type":"invalid_request_error","message":"Upstream request failed: Invalid request: text content is empty"}',
+							},
+						],
+					},
+					h.ctx,
+				);
+
+				mock.timers.tick(10_000);
+
+				assert.deepEqual(h.sentMessages, ["continue"]);
+				assert.equal(h.shutdowns, 0);
+				assertNoExit(h);
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
 		it("nudges an auto-exit child that ends at a tool-use boundary", () => {
 			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
 			const h = loadRecoveryChild();
