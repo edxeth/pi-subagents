@@ -68,6 +68,20 @@ describe("agent launch configuration", () => {
 		assert.equal(loadAgentDefaults("untrusted", undefined, dir)?.trustProject, false);
 	});
 
+	it("parses context-warn-threshold frontmatter", () => {
+		const dir = createTestDir();
+		mkdirSync(join(dir, ".pi", "agents"), { recursive: true });
+		writeFileSync(
+			join(dir, ".pi", "agents", "context-aware.md"),
+			"---\nname: context-aware\ncontext-warn-threshold: 80%\n---\nWrap up before compaction.",
+		);
+
+		assert.equal(
+			loadAgentDefaults("context-aware", undefined, dir)?.contextWarnThreshold,
+			"80%",
+		);
+	});
+
 	it("parses allow-model-override frontmatter", () => {
 		const dir = createTestDir();
 		mkdirSync(join(dir, ".pi", "agents"), { recursive: true });
@@ -108,6 +122,7 @@ describe("agent launch configuration", () => {
 				agentDefs: {
 					trustProject: true,
 					allowedModels: "provider/other",
+					contextWarnThreshold: "80%",
 				},
 				effectiveModel: "provider/requested",
 				effectiveThinking: "high",
@@ -135,6 +150,7 @@ describe("agent launch configuration", () => {
 		assert.equal(metadata.requestedModelOverride, "provider/requested:high");
 		assert.equal(metadata.modelRef, "provider/requested:high");
 		assert.equal(metadata.allowedModels, "provider/other");
+		assert.equal(metadata.contextWarnThreshold, "80%");
 	});
 
 	it("writes native model and thinking state entries for effective subagent model", async () => {

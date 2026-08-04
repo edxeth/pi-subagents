@@ -31,6 +31,8 @@ export interface AgentDefaults {
 	trustProject?: boolean;
 	timeout?: number;
 	taskExpansion?: "shell";
+	contextWarnThreshold?: string;
+	contextWarnStep?: string;
 
 	flags?: string;
 	env?: string;
@@ -91,6 +93,8 @@ function parseAgentDefinition(
 	const trustProjectRaw = get("trust-project");
 	const timeoutRaw = get("timeout");
 	const taskExpansionRaw = get("task-expansion");
+	const contextWarnThresholdRaw = get("context-warn-threshold");
+	const contextWarnStepRaw = get("context-warn-step");
 
 	const systemPromptRaw = get("system-prompt");
 	const extensionsRaw = get("extensions");
@@ -148,6 +152,8 @@ function parseAgentDefinition(
 				: undefined,
 		timeout: timeoutRaw != null ? parseInt(timeoutRaw, 10) : undefined,
 		taskExpansion: taskExpansionRaw === "shell" ? "shell" : undefined,
+		contextWarnThreshold: contextWarnThresholdRaw,
+		contextWarnStep: contextWarnStepRaw,
 
 		flags: flagsRaw,
 		env: getBlock("env"),

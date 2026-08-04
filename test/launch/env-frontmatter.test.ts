@@ -118,6 +118,22 @@ describe("env frontmatter field", () => {
 		assert.equal(typeof env.PI_SUBAGENT_NAME, "string");
 	});
 
+	it("passes context-warn-threshold and step as child-owned internal env vars", () => {
+		const env = getBaseSubagentEnvVarsForTest({
+			contextWarnThreshold: "80%",
+			contextWarnStep: "10%",
+			env: "PI_SUBAGENT_CONTEXT_WARN_THRESHOLD=5%\nPI_SUBAGENT_CONTEXT_WARN_STEP=1%",
+		});
+		assert.equal(env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD, "80%");
+		assert.equal(env.PI_SUBAGENT_CONTEXT_WARN_STEP, "10%");
+	});
+
+	it("clears an inherited parent context threshold when the child does not opt in", () => {
+		const env = getBaseSubagentEnvVarsForTest(null);
+		assert.equal(env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD, "");
+		assert.equal(env.PI_SUBAGENT_CONTEXT_WARN_STEP, "");
+	});
+
 	it("propagates PI_SUBAGENT_ENABLE_SET_TAB_TITLE to children when opted in", () => {
 		const original = process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE;
 		process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE = "1";

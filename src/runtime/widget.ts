@@ -216,7 +216,9 @@ export class SubagentWidgetManager {
 		if (!contextTokens) return undefined;
 
 		const pct = Math.min((contextTokens / contextWindow) * 100, 100);
-		return `${pct.toFixed(1)}%/${formatCompactCount(contextWindow)} ctx`;
+		return `${formatCompactCount(contextTokens)}/${formatCompactCount(
+			contextWindow,
+		)} ctx (${pct.toFixed(1)}%)`;
 	}
 
 	private refreshRunningSubagentState(agent: RunningSubagent): void {

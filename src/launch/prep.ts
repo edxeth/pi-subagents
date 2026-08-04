@@ -23,6 +23,10 @@ import {
 	type SubagentSessionMode,
 } from "../session/session-files.ts";
 import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
+import {
+	PI_SUBAGENT_CONTEXT_WARN_STEP,
+	PI_SUBAGENT_CONTEXT_WARN_THRESHOLD,
+} from "../tools/context-reminders.ts";
 import { buildSkillLaunchPlan, formatInjectedSkills, type SkillLaunchPlan } from "./skills.ts";
 import {
 	buildChildLaunchPlan,
@@ -364,6 +368,15 @@ export function buildPersistedSubagentLaunchMetadata(
 		...(prepared.agentDefs?.taskExpansion
 			? { taskExpansion: prepared.agentDefs.taskExpansion }
 			: {}),
+		...(prepared.agentDefs?.contextWarnThreshold
+			? {
+					contextWarnThreshold:
+						prepared.agentDefs.contextWarnThreshold,
+					...(prepared.agentDefs.contextWarnStep
+						? { contextWarnStep: prepared.agentDefs.contextWarnStep }
+						: {}),
+				}
+			: {}),
 		...(placement?.herdrPlacementPolicy
 			? { herdrPlacementPolicy: placement.herdrPlacementPolicy }
 			: {}),
@@ -406,6 +419,10 @@ export function getBaseSubagentEnvVars(
 	if (process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE === "1") {
 		envVars.PI_SUBAGENT_ENABLE_SET_TAB_TITLE = "1";
 	}
+	envVars[PI_SUBAGENT_CONTEXT_WARN_THRESHOLD] =
+		prepared.agentDefs?.contextWarnThreshold ?? "";
+	envVars[PI_SUBAGENT_CONTEXT_WARN_STEP] =
+		prepared.agentDefs?.contextWarnStep ?? "";
 	envVars.PI_SUBAGENT_NAME = params.name;
 	if (params.agent) envVars.PI_SUBAGENT_AGENT = params.agent;
 	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);

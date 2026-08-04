@@ -156,7 +156,7 @@ describe("widget manager direct module tests", () => {
 		const widget = new SubagentWidgetManager(() => [running]);
 		(widget as any).refreshRunningSubagentState(running);
 
-		assert.equal(running.contextLabel, "100.0%/100 ctx");
+		assert.equal(running.contextLabel, "150/100 ctx (100.0%)");
 	});
 
 	it("ignores inherited fork history before subagent launch metadata", () => {

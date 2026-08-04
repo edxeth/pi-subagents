@@ -341,6 +341,49 @@ describe("subagent_resume approval args", () => {
 		}
 	});
 
+	it("restores the persisted child context threshold on resume", async () => {
+		const dir = createTestDir();
+		const capturedThreshold = join(dir, "captured-threshold.txt");
+		const bin = writeExecutable(
+			dir,
+			"capture-context-threshold",
+			`#!/usr/bin/env bash\nprintf '%s' "$PI_SUBAGENT_CONTEXT_WARN_THRESHOLD" > ${JSON.stringify(capturedThreshold)}\n`,
+		);
+		const originalCommand = process.env.PI_SUBAGENT_PI_COMMAND;
+		process.env.PI_SUBAGENT_PI_COMMAND = bin;
+		try {
+			const sessionFile = join(dir, "context-aware-child.jsonl");
+			writeFileSync(
+				sessionFile,
+				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			);
+			await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
+				version: 1,
+				timestamp: new Date().toISOString(),
+				name: "context-aware-child",
+				mode: "background",
+				sessionMode: "lineage-only",
+				autoExit: true,
+				parentClosePolicy: "terminate",
+				async: true,
+				denyTools: [],
+				noContextFiles: false,
+				noSession: false,
+				agentConfigDir: dir,
+				cwd: dir,
+				boundarySystemPrompt: false,
+				contextWarnThreshold: "80%",
+			});
+
+			await resumeSubagentSession({ sessionFile }, createResumeRuntime());
+
+			assert.equal(await readNonEmptyFileEventually(capturedThreshold), "80%");
+		} finally {
+			if (originalCommand == null) delete process.env.PI_SUBAGENT_PI_COMMAND;
+			else process.env.PI_SUBAGENT_PI_COMMAND = originalCommand;
+		}
+	});
+
 	it("does not duplicate generated approval args for metadata-backed background resumes", async () => {
 		const dir = createTestDir();
 		const bin = writeExecutable(dir, "capture-pi", `#!/usr/bin/env bash\nexit 0\n`);

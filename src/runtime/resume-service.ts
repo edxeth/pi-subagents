@@ -47,6 +47,10 @@ import {
 	type PersistedSubagentLaunchMetadata,
 } from "../session/session-files.ts";
 import type { RunningSubagent, SubagentResult } from "../types.ts";
+import {
+	PI_SUBAGENT_CONTEXT_WARN_STEP,
+	PI_SUBAGENT_CONTEXT_WARN_THRESHOLD,
+} from "../tools/context-reminders.ts";
 
 export interface ResumeServiceRuntime {
 	getShellReadyDelayMs(): number;
@@ -284,6 +288,10 @@ export async function resumeSubagentSession(
 	if (process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE === "1") {
 		resumeEnvVars.PI_SUBAGENT_ENABLE_SET_TAB_TITLE = "1";
 	}
+	resumeEnvVars[PI_SUBAGENT_CONTEXT_WARN_THRESHOLD] =
+		invocationMetadata?.contextWarnThreshold ?? "";
+	resumeEnvVars[PI_SUBAGENT_CONTEXT_WARN_STEP] =
+		invocationMetadata?.contextWarnStep ?? "";
 	resumeEnvVars.PI_SUBAGENT_NAME = invocationMetadata?.name ?? name;
 	if (resumedAgent) resumeEnvVars.PI_SUBAGENT_AGENT = resumedAgent;
 	resumeEnvVars.PI_SUBAGENT_SESSION = sessionFile;

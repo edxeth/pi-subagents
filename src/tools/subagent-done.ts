@@ -22,6 +22,9 @@ import {
 	registerSetTabTitleTool,
 	shouldRegisterSetTabTitleTool,
 } from "./set-tab-title.ts";
+import {
+	installSubagentContextReminders,
+} from "./context-reminders.ts";
 
 const require = createRequire(import.meta.url);
 const TOOL_BOUNDARY_RECOVERY_NUDGE = "continue";
@@ -178,6 +181,7 @@ export default function (pi: ExtensionAPI) {
 	const isInteractive = !!process.env.PI_SUBAGENT_SURFACE;
 	const denied: string[] = getDeniedToolNames(autoExit);
 	let outputTokens = 0;
+	installSubagentContextReminders(pi);
 
 	function requestShutdown(ctx: { shutdown: () => void }) {
 		setTimeout(() => {
@@ -440,7 +444,6 @@ export default function (pi: ExtensionAPI) {
 				cancelPendingPiRecovery();
 				return;
 			}
-
 			// An agent loop cannot be complete when its last assistant message still
 			// requests tool execution. Some providers occasionally stop Pi at this
 			// boundary instead of continuing after the tool result. Nudge immediately
@@ -505,7 +508,7 @@ export default function (pi: ExtensionAPI) {
 				providerErrorRecovery.handleProviderError(errorInfo, ctx);
 				return;
 			}
-
+			if (ctx.hasPendingMessages?.()) return;
 			pendingProviderError = null;
 			consecutiveToolBoundaryEnds = 0;
 			providerErrorRecovery.cancelPendingRecovery(true);
