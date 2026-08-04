@@ -268,7 +268,7 @@ describe("subagents-view overlay", () => {
 			const overlay = createOverlay();
 			try {
 				const text = renderLines(overlay).map(stripAnsi).join("\n");
-				assert.ok(text.includes("171k/1M ctx"), `Expected snapshot ratio in:\n${text}`);
+				assert.ok(text.includes("171K/1M ctx"), `Expected snapshot ratio in:\n${text}`);
 				assert.ok(!text.includes("1.8M/1M"), `Should not use cumulative total in:\n${text}`);
 			} finally {
 				overlay.dispose();
@@ -633,13 +633,13 @@ describe("subagents-view overlay", () => {
 			const ctxField = item!.detailSections
 				.flatMap((s) => s.fields)
 				.find((f) => f.label === "context tokens");
-			assert.equal(ctxField?.value, "150k");
+			assert.equal(ctxField?.value, "150K");
 			assert.ok(
-				item!.stats.includes("150k ctx"),
+				item!.stats.includes("150K ctx"),
 				`Expected snapshot ctx in stats, got: ${JSON.stringify(item!.stats)}`,
 			);
 			assert.ok(
-				!item!.stats.some((s) => s.includes("250k")),
+				!item!.stats.some((s) => s.includes("250K")),
 				`Should not show cumulative total, got: ${JSON.stringify(item!.stats)}`,
 			);
 		});
@@ -707,15 +707,15 @@ describe("subagents-view overlay", () => {
 			const item = items.find((i) => i.name === "forked-scout");
 			assert.ok(item, "expected recovered forked completed item");
 			const fields = item!.detailSections.flatMap((s) => s.fields);
-			// Context snapshot = child's last turn (120k), not the parent's 900k.
-			assert.equal(fields.find((f) => f.label === "context tokens")?.value, "120k");
-			// Input/output are cumulative over CHILD activity only: 110k / 10k.
-			assert.equal(fields.find((f) => f.label === "input tokens")?.value, "110k");
-			assert.equal(fields.find((f) => f.label === "output tokens")?.value, "10k");
+			// Context snapshot = child's last turn (120K), not the parent's 900K.
+			assert.equal(fields.find((f) => f.label === "context tokens")?.value, "120K");
+			// Input/output are cumulative over CHILD activity only: 110K / 10K.
+			assert.equal(fields.find((f) => f.label === "input tokens")?.value, "110K");
+			assert.equal(fields.find((f) => f.label === "output tokens")?.value, "10K");
 			// Only the child's single assistant message is counted.
 			assert.equal(fields.find((f) => f.label === "messages")?.value, "1");
 			assert.ok(
-				!item!.stats.some((s) => s.includes("900k") || s.includes("1M")),
+				!item!.stats.some((s) => s.includes("900K") || s.includes("1M")),
 				`Should not include inherited parent usage, got: ${JSON.stringify(item!.stats)}`,
 			);
 		});
