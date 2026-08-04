@@ -13,6 +13,7 @@ import {
 	resolveSubagentNoContextFiles,
 	resolveSubagentNoSession,
 	resolveSubagentParentClosePolicy,
+	resolveSubagentReportContextUsage,
 } from "./policy.ts";
 import type { ResumeMode } from "./resume.ts";
 import { resolveSubagentCwd, type ResolvedSubagentRuntimePaths } from "./runtime-paths.ts";
@@ -330,6 +331,7 @@ export function buildPersistedSubagentLaunchMetadata(
 			? { autoExit: prepared.agentAutoExit }
 			: {}),
 		parentClosePolicy: resolveSubagentParentClosePolicy(prepared.agentDefs),
+		reportContextUsage: resolveSubagentReportContextUsage(prepared.agentDefs),
 		async: params.async !== false,
 		...(prepared.effectiveModel ? { model: prepared.effectiveModel } : {}),
 		...(prepared.effectiveThinking

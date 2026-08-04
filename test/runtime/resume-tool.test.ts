@@ -384,6 +384,47 @@ describe("subagent_resume approval args", () => {
 		}
 	});
 
+	it("restores the persisted parent context reporting opt-out on resume", async () => {
+		const dir = createTestDir();
+		const bin = writeExecutable(dir, "capture-pi", "#!/usr/bin/env bash\nexit 0\n");
+		const originalCommand = process.env.PI_SUBAGENT_PI_COMMAND;
+		process.env.PI_SUBAGENT_PI_COMMAND = bin;
+		try {
+			const sessionFile = join(dir, "quiet-context-child.jsonl");
+			writeFileSync(
+				sessionFile,
+				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			);
+			await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
+				version: 1,
+				timestamp: new Date().toISOString(),
+				name: "quiet-context-child",
+				mode: "background",
+				sessionMode: "lineage-only",
+				autoExit: true,
+				parentClosePolicy: "terminate",
+				async: true,
+				denyTools: [],
+				noContextFiles: false,
+				noSession: false,
+				agentConfigDir: dir,
+				cwd: dir,
+				boundarySystemPrompt: false,
+				reportContextUsage: false,
+			});
+
+			const running = await resumeSubagentSession(
+				{ sessionFile },
+				createResumeRuntime(),
+			);
+
+			assert.equal(running.reportContextUsage, false);
+		} finally {
+			if (originalCommand == null) delete process.env.PI_SUBAGENT_PI_COMMAND;
+			else process.env.PI_SUBAGENT_PI_COMMAND = originalCommand;
+		}
+	});
+
 	it("does not duplicate generated approval args for metadata-backed background resumes", async () => {
 		const dir = createTestDir();
 		const bin = writeExecutable(dir, "capture-pi", `#!/usr/bin/env bash\nexit 0\n`);

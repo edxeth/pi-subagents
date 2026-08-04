@@ -45,7 +45,9 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 	const sessionRef = cached.sessionFile
 		? `\n\nSession: ${cached.sessionFile}\nResume: pi --session ${cached.sessionFile}`
 		: "";
-	const contextRef = formatFinalContextUsage(cached);
+	const contextRef = cached.reportContextUsage === false
+		? ""
+		: formatFinalContextUsage(cached);
 	let text: string;
 	if (cached.errorMessage) {
 		const resultBody = hasRealSubagentOutput(cached)

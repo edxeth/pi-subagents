@@ -597,6 +597,7 @@ describe("Herdr interactive launch parity", () => {
 				"name: bg-agent",
 				"session-mode: lineage-only",
 				"trust-project: true",
+				"report-context-usage: false",
 				"cwd: background-workspace",
 				"env: |",
 				"  CUSTOM_ENV=from-background-agent",
@@ -646,6 +647,11 @@ describe("Herdr interactive launch parity", () => {
 		assert.equal(running.mode, "background");
 		assert.equal(running.surface, undefined);
 		assert.equal(running.modelContextWindow, 2048);
+		assert.equal(running.reportContextUsage, false);
+		assert.equal(
+			readSubagentLaunchMetadataForTest(running.sessionFile)?.reportContextUsage,
+			false,
+		);
 		assert.match(childLog, new RegExp(`PWD=${childCwd.replace(/'/g, "'\\''")}`));
 		assert.match(childLog, /CUSTOM_ENV=from-background-agent/);
 		assert.match(childLog, /SURFACE=\n/);

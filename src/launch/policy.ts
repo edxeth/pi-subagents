@@ -73,6 +73,12 @@ export function resolveSubagentNoSession(
 	return agentDefs?.noSession ?? false;
 }
 
+export function resolveSubagentReportContextUsage(
+	agentDefs: AgentDefaults | null,
+): boolean {
+	return agentDefs?.reportContextUsage ?? true;
+}
+
 export function resolveSubagentParentClosePolicy(
 	agentDefs: AgentDefaults | null,
 ): ParentClosePolicy {

@@ -168,6 +168,7 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `task-expansion` | unset | Set `shell` when the task may include shell placeholders that Pi resolves before launch. Pi runs each placeholder from the child's target `cwd`, gives it 30 seconds, replaces it with captured output, and gives that prepared task to the child. The command receives `PI_WORKSPACE`; long output is cut with `[output truncated]`. Leave unset unless you trust the task text to execute shell commands. |
 | `context-warn-threshold` | `off` | Send the sub-agent a wrap-up warning when its context window reaches this percentage (`1%`–`99%`). Two more warnings follow at each `context-warn-step` above it. Example: `80%` warns at 80%, 85%, and 90%. |
 | `context-warn-step` | `5%` | The percentage gap between each warning (minimum `1%`). A warning above 99% moves down to 99% so it still arrives before compaction. Decimals round down. |
+| `report-context-usage` | `true` | Add the child's final context use to the result that the parent receives. |
 | `spawning` | `false` | Allow the child to launch subagents |
 | `async` | `true` | `false` makes the launch sync |
 | `mode` | `interactive` | `interactive` pane or `background` process |
@@ -218,6 +219,47 @@ context-warn-threshold: 80%
 ```
 
 With the default `5%` step, `80%` warns at 80%, 85%, and 90%. Set `context-warn-step: 10%` to space them at 80%, 90%, and 99%. (The third lands at 100%, so it moves down to 99% to arrive before compaction.) If usage crosses two or more thresholds in one turn, Pi sends only the most urgent one. The child remembers which warnings it sent, so a reload or a resume does not send them again.
+
+### Report final context use to the parent
+
+`report-context-usage` controls one line in the child result. The default value is `true`.
+
+With the default value, the parent receives a result such as this:
+
+```text
+Sub-agent "scout" completed (3s).
+
+Reviewed the authentication flow and found the files that require changes.
+
+Session: /path/to/child.jsonl
+Resume: pi --session /path/to/child.jsonl
+
+Sub-agent context: 145K/200K tokens (72%) used at finish.
+```
+
+The last line shows the context use when the child finished. The parent can use this number before it resumes the child.
+
+Set the field to `false` to remove the last line:
+
+```yaml
+---
+name: scout
+report-context-usage: false
+---
+```
+
+The parent then receives this result:
+
+```text
+Sub-agent "scout" completed (3s).
+
+Reviewed the authentication flow and found the files that require changes.
+
+Session: /path/to/child.jsonl
+Resume: pi --session /path/to/child.jsonl
+```
+
+This field changes only the text that the parent receives. The TUI still shows the context use to the user.
 
 Named-agent frontmatter wins over duplicate launch-time fields such as `tools`, `cwd`, and `mode`. `model` and `thinking` are different: while you are in a parent Pi session, you can ask Pi to run a subagent with a specific model or thinking level for that one launch or resume. That works by default. If an agent file sets `allow-model-override: false`, Pi ignores those per-launch model choices and uses the model from the agent file, or the inherited Pi model if the file does not name one. Use that opt-out for agents whose quality, cost, or safety depends on a specific model.
 

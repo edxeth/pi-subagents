@@ -34,6 +34,7 @@ import {
 	resolveSubagentExtensions,
 	resolveSubagentNoContextFiles,
 	resolveSubagentNoSession,
+	resolveSubagentReportContextUsage,
 } from "../launch/policy.ts";
 import {
 	getAgentListEntries,
@@ -370,6 +371,12 @@ export function resolveSubagentNoContextFilesForTest(
 
 export function resolveSubagentNoSessionForTest(agentDefs: AgentDefaults | null) {
 	return resolveSubagentNoSession(agentDefs);
+}
+
+export function resolveSubagentReportContextUsageForTest(
+	agentDefs: AgentDefaults | null,
+) {
+	return resolveSubagentReportContextUsage(agentDefs);
 }
 
 export function resolveSubagentExtensionsForTest(agentDefs: AgentDefaults | null) {

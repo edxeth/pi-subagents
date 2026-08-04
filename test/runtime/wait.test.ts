@@ -25,6 +25,7 @@ describe("subagent wait behavior", () => {
 			executionState: "running" as const,
 			deliveryState: "detached" as const,
 			parentClosePolicy: "terminate" as const,
+			reportContextUsage: result.reportContextUsage,
 			startTime: Date.now(),
 			sessionFile: result.sessionFile,
 			completionPromise: Promise.resolve(result),
@@ -67,6 +68,25 @@ describe("subagent wait behavior", () => {
 			text,
 			/Resume: pi --session \/tmp\/context-child\.jsonl\n\nSub-agent context: 145K\/200K tokens \(72%\) used at finish\.$/,
 		);
+		assert.equal((waited.details as any).contextTokens, 145_000);
+		assert.equal((waited.details as any).contextWindow, 200_000);
+	});
+
+	it("keeps awaited context telemetry structured when the agent definition hides it from the parent result", async () => {
+		const waited = await waitForResult({
+			name: "Quiet context child",
+			task: "Finish work",
+			summary: "Implemented the requested fix.",
+			summarySource: "subagent",
+			sessionFile: "/tmp/quiet-context-child.jsonl",
+			exitCode: 0,
+			elapsed: 2,
+			contextTokens: 145_000,
+			contextWindow: 200_000,
+			reportContextUsage: false,
+		});
+		const text = (waited.content[0] as { text: string }).text;
+		assert.doesNotMatch(text, /Sub-agent context:/);
 		assert.equal((waited.details as any).contextTokens, 145_000);
 		assert.equal((waited.details as any).contextWindow, 200_000);
 	});

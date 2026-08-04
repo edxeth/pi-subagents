@@ -33,6 +33,7 @@ export interface AgentDefaults {
 	taskExpansion?: "shell";
 	contextWarnThreshold?: string;
 	contextWarnStep?: string;
+	reportContextUsage?: boolean;
 
 	flags?: string;
 	env?: string;
@@ -95,6 +96,7 @@ function parseAgentDefinition(
 	const taskExpansionRaw = get("task-expansion");
 	const contextWarnThresholdRaw = get("context-warn-threshold");
 	const contextWarnStepRaw = get("context-warn-step");
+	const reportContextUsageRaw = get("report-context-usage");
 
 	const systemPromptRaw = get("system-prompt");
 	const extensionsRaw = get("extensions");
@@ -154,6 +156,10 @@ function parseAgentDefinition(
 		taskExpansion: taskExpansionRaw === "shell" ? "shell" : undefined,
 		contextWarnThreshold: contextWarnThresholdRaw,
 		contextWarnStep: contextWarnStepRaw,
+		reportContextUsage:
+			reportContextUsageRaw != null
+				? reportContextUsageRaw === "true"
+				: undefined,
 
 		flags: flagsRaw,
 		env: getBlock("env"),

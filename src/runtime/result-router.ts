@@ -80,7 +80,9 @@ export function deliverCompletedSubagentResult(
 	const sessionRef = completed.sessionFile
 		? `\n\nSession: ${completed.sessionFile}\nResume: pi --session ${completed.sessionFile}`
 		: "";
-	const contextRef = formatFinalContextUsage(completed);
+	const contextRef = completed.reportContextUsage === false
+		? ""
+		: formatFinalContextUsage(completed);
 	pi.sendMessage(
 		{
 			customType: "subagent_result",

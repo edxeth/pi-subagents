@@ -20,6 +20,7 @@ import {
 import {
 	resolveSubagentNoContextFiles,
 	resolveSubagentParentClosePolicy,
+	resolveSubagentReportContextUsage,
 } from "./policy.ts";
 import {
 	createSurface,
@@ -241,6 +242,7 @@ export async function launchInteractiveSubagent(
 		async: params.async ?? !(params.blocking ?? false),
 		autoExit: prepared.agentDefs?.autoExit ?? false,
 		noSession,
+		reportContextUsage: resolveSubagentReportContextUsage(prepared.agentDefs),
 		surface,
 		startTime,
 		sessionFile: prepared.subagentSessionFile,

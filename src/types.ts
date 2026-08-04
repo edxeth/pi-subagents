@@ -66,6 +66,7 @@ export interface CompletedSubagentResult extends SubagentResult {
 	blocking?: boolean;
 	async: boolean;
 	autoExit?: boolean;
+	reportContextUsage?: boolean;
 	deliveredTo: CompletedDelivery | null;
 }
 
@@ -83,6 +84,7 @@ export interface RunningSubagent {
 	async?: boolean;
 	autoExit?: boolean;
 	noSession?: boolean;
+	reportContextUsage?: boolean;
 	resultOwner?: { kind: CompletedDelivery; ownerId: string };
 	completionPromise?: Promise<SubagentResult>;
 	surface?: string;

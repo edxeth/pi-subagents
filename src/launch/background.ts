@@ -20,6 +20,7 @@ import {
 import {
 	resolveSubagentNoContextFiles,
 	resolveSubagentParentClosePolicy,
+	resolveSubagentReportContextUsage,
 } from "./policy.ts";
 import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
 import {
@@ -128,6 +129,7 @@ export async function launchBackgroundSubagent(
 		async: params.async ?? !(params.blocking ?? false),
 		autoExit: prepared.agentDefs?.autoExit ?? false,
 		noSession,
+		reportContextUsage: resolveSubagentReportContextUsage(prepared.agentDefs),
 		childProcess: child,
 		startTime,
 		sessionFile: prepared.subagentSessionFile,

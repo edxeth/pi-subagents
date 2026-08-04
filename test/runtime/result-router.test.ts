@@ -103,6 +103,31 @@ describe("result router", () => {
 		assert.equal(sent[0].message.details.contextWindow, 200_000);
 	});
 
+	it("keeps final context telemetry structured when the agent definition hides it from the parent message", () => {
+		const sent: Array<{ message: any; options: any }> = [];
+		const running = makeRunning({ reportContextUsage: false });
+		setRunningSubagentForTest(running);
+
+		routeSubagentOutcome({
+			pi: {
+				sendMessage(message: any, options: any) {
+					sent.push({ message, options });
+				},
+			},
+			running,
+			result: makeResult({
+				contextTokens: 145_000,
+				contextWindow: 200_000,
+			}),
+			formatElapsed: (seconds) => `${seconds}s`,
+			updateWidget: () => {},
+		});
+
+		assert.doesNotMatch(sent[0].message.content, /Sub-agent context:/);
+		assert.equal(sent[0].message.details.contextTokens, 145_000);
+		assert.equal(sent[0].message.details.contextWindow, 200_000);
+	});
+
 	it("delivers salvaged child output with provider errors", () => {
 		const sent: Array<{ message: any; options: any }> = [];
 		const running = makeRunning();

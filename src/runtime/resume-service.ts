@@ -319,6 +319,7 @@ export async function resumeSubagentSession(
 		async: resumedAsync,
 		blocking: resumedAsync === false,
 		autoExit: resumedAutoExit,
+		reportContextUsage: invocationMetadata?.reportContextUsage ?? true,
 		startTime: Date.now(),
 		sessionFile,
 		launchEntryCount: entryCountBefore,

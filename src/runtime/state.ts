@@ -58,6 +58,7 @@ export function buildCompletedSubagentResult(
 		parentClosePolicy: running.parentClosePolicy,
 		async: running.async !== false,
 		autoExit: running.autoExit,
+		reportContextUsage: running.reportContextUsage,
 		deliveredTo: null,
 	};
 }

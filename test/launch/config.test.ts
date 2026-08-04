@@ -28,6 +28,7 @@ import {
 	resolveSubagentBlockingForTest,
 	resolveSubagentNoContextFilesForTest,
 	resolveSubagentNoSessionForTest,
+	resolveSubagentReportContextUsageForTest,
 	writeSubagentLaunchMetadataEntryForTest,
 	writeSubagentModelStateEntriesForTest,
 	getEntries,
@@ -80,6 +81,20 @@ describe("agent launch configuration", () => {
 			loadAgentDefaults("context-aware", undefined, dir)?.contextWarnThreshold,
 			"80%",
 		);
+	});
+
+	it("reports final child context usage by default and allows an agent definition to opt out", () => {
+		const dir = createTestDir();
+		mkdirSync(join(dir, ".pi", "agents"), { recursive: true });
+		writeFileSync(
+			join(dir, ".pi", "agents", "quiet-context.md"),
+			"---\nname: quiet-context\nreport-context-usage: false\n---\nReport without context metadata.",
+		);
+
+		const defs = loadAgentDefaults("quiet-context", undefined, dir);
+		assert.equal(defs?.reportContextUsage, false);
+		assert.equal(resolveSubagentReportContextUsageForTest(defs), false);
+		assert.equal(resolveSubagentReportContextUsageForTest(null), true);
 	});
 
 	it("parses allow-model-override frontmatter", () => {

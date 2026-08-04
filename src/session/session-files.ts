@@ -69,6 +69,7 @@ export interface PersistedSubagentLaunchMetadata {
 	taskExpansion?: "shell";
 	contextWarnThreshold?: string;
 	contextWarnStep?: string;
+	reportContextUsage?: boolean;
 	herdrPlacementPolicy?: HerdrPlacementPolicy;
 	zellijPlacementPolicy?: ZellijPlacementPolicy;
 	zellijPlacementGroupKey?: string;

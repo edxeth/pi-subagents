@@ -72,6 +72,7 @@ export {
 	resolveSubagentExtensionsForTest,
 	resolveSubagentNoContextFilesForTest,
 	resolveSubagentNoSessionForTest,
+	resolveSubagentReportContextUsageForTest,
 	resolveSubagentRuntimePathsForTest,
 	resolveTaskSessionModeForTest,
 	requestSubagentBatchStopForTest,
