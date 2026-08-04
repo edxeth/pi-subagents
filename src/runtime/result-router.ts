@@ -12,6 +12,7 @@ import {
 	runningSubagents,
 	stopAfterCurrentSubagentBatch,
 } from "./state.ts";
+import { formatFinalContextUsage } from "./final-context-usage.ts";
 
 interface ParentMessageSink {
 	sendMessage(message: unknown, options: unknown): void;
@@ -79,10 +80,15 @@ export function deliverCompletedSubagentResult(
 	const sessionRef = completed.sessionFile
 		? `\n\nSession: ${completed.sessionFile}\nResume: pi --session ${completed.sessionFile}`
 		: "";
+	const contextRef = formatFinalContextUsage(completed);
 	pi.sendMessage(
 		{
 			customType: "subagent_result",
-			content: getCompletedSubagentContent(completed, formatElapsed, sessionRef),
+			content: getCompletedSubagentContent(
+				completed,
+				formatElapsed,
+				`${sessionRef}${contextRef}`,
+			),
 			display: true,
 			details: {
 				id: completed.id,
@@ -98,6 +104,8 @@ export function deliverCompletedSubagentResult(
 				exitCode: completed.exitCode,
 				elapsed: completed.elapsed,
 				outputTokens: completed.outputTokens,
+				contextTokens: completed.contextTokens,
+				contextWindow: completed.contextWindow,
 				sessionFile: completed.sessionFile,
 				...(completed.errorMessage ? { errorMessage: completed.errorMessage } : {}),
 			},

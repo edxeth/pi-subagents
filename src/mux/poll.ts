@@ -6,6 +6,8 @@ export interface PollResult {
 	reason: "done" | "ping" | "sentinel" | "error";
 	exitCode: number;
 	outputTokens?: number;
+	contextTokens?: number;
+	contextWindow?: number;
 	ping?: { name: string; message: string };
 	errorMessage?: string;
 }
@@ -24,6 +26,18 @@ function withDefinedTokens(
 	return obj;
 }
 
+function withDefinedContextUsage(
+	obj: PollResult,
+	contextTokens: number | undefined,
+	contextWindow: number | undefined,
+): PollResult {
+	if (contextTokens !== undefined && contextWindow !== undefined) {
+		obj.contextTokens = contextTokens;
+		obj.contextWindow = contextWindow;
+	}
+	return obj;
+}
+
 /**
  * Interpret an `.exit` sidecar payload. Centralized so both
  * consumeSubagentExitSignal and pollForExit decode the same way.
@@ -31,8 +45,18 @@ function withDefinedTokens(
 function interpretExitSidecar(data: any): PollResult {
 	const tokens =
 		typeof data?.outputTokens === "number" ? data.outputTokens : undefined;
+	const contextTokens =
+		typeof data?.contextTokens === "number" ? data.contextTokens : undefined;
+	const contextWindow =
+		typeof data?.contextWindow === "number" ? data.contextWindow : undefined;
+	const withUsage = (result: PollResult) =>
+		withDefinedContextUsage(
+			withDefinedTokens(result, tokens),
+			contextTokens,
+			contextWindow,
+		);
 	if (data?.type === "ping") {
-		return withDefinedTokens(
+		return withUsage(
 			{
 				reason: "ping" as const,
 				exitCode: 0,
@@ -41,7 +65,6 @@ function interpretExitSidecar(data: any): PollResult {
 					message: data.message ?? "",
 				},
 			},
-			tokens,
 		);
 	}
 	if (data?.type === "error") {
@@ -49,14 +72,12 @@ function interpretExitSidecar(data: any): PollResult {
 			typeof data.errorMessage === "string" && data.errorMessage.trim() !== ""
 				? data.errorMessage
 				: "Subagent exited with stopReason=error (no errorMessage in sidecar).";
-		return withDefinedTokens(
+		return withUsage(
 			{ reason: "error" as const, exitCode: 1, errorMessage },
-			tokens,
 		);
 	}
-	return withDefinedTokens(
+	return withUsage(
 		{ reason: "done" as const, exitCode: 0 },
-		tokens,
 	);
 }
 

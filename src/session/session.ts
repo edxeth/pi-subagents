@@ -122,6 +122,51 @@ export interface SubagentOutput {
 	summarySource: SubagentSummarySource;
 }
 
+export interface AssistantContextSnapshot {
+	contextTokens: number;
+	provider?: string;
+	model?: string;
+}
+
+export function findLatestAssistantContextSnapshot(
+	entries: SessionEntry[],
+): AssistantContextSnapshot | undefined {
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (entry.type !== "message") continue;
+		const message = (entry as { message?: Record<string, unknown> }).message;
+		if (message?.role !== "assistant") continue;
+		const usage = message.usage as
+			| {
+					totalTokens?: number;
+					input?: number;
+					output?: number;
+					cacheRead?: number;
+					cacheWrite?: number;
+				}
+			| undefined;
+		if (!usage) continue;
+		return {
+			contextTokens:
+				usage.totalTokens ??
+				(usage.input ?? 0) +
+					(usage.output ?? 0) +
+					(usage.cacheRead ?? 0) +
+					(usage.cacheWrite ?? 0),
+			provider:
+				typeof message.provider === "string" ? message.provider : undefined,
+			model: typeof message.model === "string" ? message.model : undefined,
+		};
+	}
+	return undefined;
+}
+
+export function findLatestAssistantContextTokens(
+	entries: SessionEntry[],
+): number | undefined {
+	return findLatestAssistantContextSnapshot(entries)?.contextTokens;
+}
+
 function findLastAssistantOutput(entries: SessionEntry[]): SubagentOutput | null {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];

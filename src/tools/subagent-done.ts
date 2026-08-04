@@ -25,6 +25,10 @@ import {
 import {
 	installSubagentContextReminders,
 } from "./context-reminders.ts";
+import {
+	getFinalContextSnapshot,
+	type FinalContextSnapshot,
+} from "./final-context-snapshot.ts";
 
 const require = createRequire(import.meta.url);
 const TOOL_BOUNDARY_RECOVERY_NUDGE = "continue";
@@ -181,6 +185,7 @@ export default function (pi: ExtensionAPI) {
 	const isInteractive = !!process.env.PI_SUBAGENT_SURFACE;
 	const denied: string[] = getDeniedToolNames(autoExit);
 	let outputTokens = 0;
+	let finalContextUsage: FinalContextSnapshot | undefined;
 	installSubagentContextReminders(pi);
 
 	function requestShutdown(ctx: { shutdown: () => void }) {
@@ -199,7 +204,11 @@ export default function (pi: ExtensionAPI) {
 	) {
 		const sessionFile = process.env.PI_SUBAGENT_SESSION;
 		if (!sessionFile) return;
-		writeSubagentExitSidecar(sessionFile, payload, opts);
+		writeSubagentExitSidecar(
+			sessionFile,
+			{ ...payload, ...finalContextUsage },
+			opts,
+		);
 	}
 
 	const subagentName = process.env.PI_SUBAGENT_NAME ?? "";
@@ -342,7 +351,7 @@ export default function (pi: ExtensionAPI) {
 		};
 	});
 
-	pi.on("message_end", (event) => {
+	pi.on("message_end", (event, ctx) => {
 		const message = event.message as {
 			role?: string;
 			stopReason?: string;
@@ -351,6 +360,7 @@ export default function (pi: ExtensionAPI) {
 		if (message.role !== "assistant") return;
 		if (!message.usage) return;
 		outputTokens += message.usage.output ?? 0;
+		finalContextUsage = getFinalContextSnapshot(ctx) ?? finalContextUsage;
 	});
 
 	// Every subagent child reports Pi shutdown through the session sidecar. This is

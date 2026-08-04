@@ -75,6 +75,34 @@ describe("result router", () => {
 		assert.deepEqual(sent[0].options, { triggerTurn: true, deliverAs: "steer" });
 	});
 
+	it("appends final child context usage after the session reference", () => {
+		const sent: Array<{ message: any; options: any }> = [];
+		const running = makeRunning();
+		setRunningSubagentForTest(running);
+
+		routeSubagentOutcome({
+			pi: {
+				sendMessage(message: any, options: any) {
+					sent.push({ message, options });
+				},
+			},
+			running,
+			result: makeResult({
+				contextTokens: 145_000,
+				contextWindow: 200_000,
+			}),
+			formatElapsed: (seconds) => `${seconds}s`,
+			updateWidget: () => {},
+		});
+
+		assert.match(
+			sent[0].message.content,
+			/Finished the delegated work\.\n\nSession: \/tmp\/result-child\.jsonl\nResume: pi --session \/tmp\/result-child\.jsonl\n\nSub-agent context: 145K\/200K tokens \(72%\) used at finish\.$/,
+		);
+		assert.equal(sent[0].message.details.contextTokens, 145_000);
+		assert.equal(sent[0].message.details.contextWindow, 200_000);
+	});
+
 	it("delivers salvaged child output with provider errors", () => {
 		const sent: Array<{ message: any; options: any }> = [];
 		const running = makeRunning();
@@ -90,6 +118,8 @@ describe("result router", () => {
 			result: makeResult({
 				summary: "Completed the requested implementation.",
 				errorMessage: "Provider unavailable",
+				contextTokens: 145_000,
+				contextWindow: 200_000,
 			}),
 			formatElapsed: (seconds) => `${seconds}s`,
 			updateWidget: () => {},
@@ -98,6 +128,10 @@ describe("result router", () => {
 		assert.match(sent[0].message.content, /Last output before the failure/);
 		assert.match(sent[0].message.content, /Completed the requested implementation\./);
 		assert.doesNotMatch(sent[0].message.content, /did not produce a result/);
+		assert.match(
+			sent[0].message.content,
+			/Sub-agent context: 145K\/200K tokens \(72%\) used at finish\.$/,
+		);
 	});
 
 	it("does not present runtime diagnostics as salvaged child output", () => {

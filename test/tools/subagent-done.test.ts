@@ -448,14 +448,25 @@ describe("subagent-done.ts", () => {
 						registerShortcut() {},
 					} as any);
 
-					handlers.get("message_end")?.({
-						message: { role: "assistant", usage: { output: 23 } },
-					});
+					handlers.get("message_end")?.(
+						{ message: { role: "assistant", usage: { output: 23 } } },
+						{
+							getContextUsage: () => ({
+								tokens: 145_000,
+								contextWindow: 200_000,
+							}),
+						},
+					);
 					handlers.get("session_shutdown")?.();
 
 					assert.deepEqual(
 						JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
-						{ type: "done", outputTokens: 23 },
+						{
+							type: "done",
+							outputTokens: 23,
+							contextTokens: 145_000,
+							contextWindow: 200_000,
+						},
 						testCase.name,
 					);
 				}
@@ -606,9 +617,15 @@ describe("subagent-done.ts", () => {
 			const originalSession = process.env.PI_SUBAGENT_SESSION;
 			try {
 				process.env.PI_SUBAGENT_SESSION = sessionFile;
-				handlers.get("message_end")?.({
-					message: { role: "assistant", usage: { output: 17 } },
-				});
+				handlers.get("message_end")?.(
+					{ message: { role: "assistant", usage: { output: 17 } } },
+					{
+						getContextUsage: () => ({
+							tokens: 145_000,
+							contextWindow: 200_000,
+						}),
+					},
+				);
 				let shutdowns = 0;
 				await doneTool.execute("tool-2", {}, undefined, undefined, {
 					shutdown() {
@@ -620,7 +637,12 @@ describe("subagent-done.ts", () => {
 				assert.equal(shutdowns, 1);
 				assert.deepEqual(
 					JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
-					{ type: "done", outputTokens: 17 },
+					{
+						type: "done",
+						outputTokens: 17,
+						contextTokens: 145_000,
+						contextWindow: 200_000,
+					},
 				);
 			} finally {
 				if (originalSession == null) delete process.env.PI_SUBAGENT_SESSION;
@@ -739,4 +761,3 @@ describe("subagent-done.ts", () => {
 		});
 	});
 });
-

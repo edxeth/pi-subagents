@@ -9,6 +9,7 @@ import type {
 import { hasRealSubagentOutput } from "./state.ts";
 import { formatElapsed } from "./wiring.ts";
 import type { WaitRuntime } from "./wait.ts";
+import { formatFinalContextUsage } from "./final-context-usage.ts";
 
 function getSubagentWaitPingResult(
 	running: RunningSubagent,
@@ -44,6 +45,7 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 	const sessionRef = cached.sessionFile
 		? `\n\nSession: ${cached.sessionFile}\nResume: pi --session ${cached.sessionFile}`
 		: "";
+	const contextRef = formatFinalContextUsage(cached);
 	let text: string;
 	if (cached.errorMessage) {
 		const resultBody = hasRealSubagentOutput(cached)
@@ -53,7 +55,7 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 		text =
 			`Sub-agent "${cached.name}" failed after ${formatElapsed(cached.elapsed)} ` +
 			`(provider/agent error — auto-retry exhausted).\n\n` +
-			`Error: ${cached.errorMessage}\n\n${resultBody}${sessionRef}`;
+			`Error: ${cached.errorMessage}\n\n${resultBody}${sessionRef}${contextRef}`;
 	} else {
 		const verb =
 			cached.status === "completed"
@@ -62,8 +64,8 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 					? "was cancelled"
 					: "failed";
 		text = cached.status === "completed"
-				? `Sub-agent "${cached.name}" completed (${formatElapsed(cached.elapsed)}).\n\n${cached.summary}${sessionRef}`
-				: `Sub-agent "${cached.name}" ${verb} (exit ${cached.exitCode}).\n\n${cached.summary}${sessionRef}`;
+				? `Sub-agent "${cached.name}" completed (${formatElapsed(cached.elapsed)}).\n\n${cached.summary}${sessionRef}${contextRef}`
+				: `Sub-agent "${cached.name}" ${verb} (exit ${cached.exitCode}).\n\n${cached.summary}${sessionRef}${contextRef}`;
 	}
 	return {
 		content: [{ type: "text", text }],
@@ -80,6 +82,8 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 			exitCode: cached.exitCode,
 			elapsed: cached.elapsed,
 			outputTokens: cached.outputTokens,
+			contextTokens: cached.contextTokens,
+			contextWindow: cached.contextWindow,
 			summary: cached.summary,
 			sessionFile: cached.sessionFile,
 			...(cached.errorMessage

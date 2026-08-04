@@ -118,6 +118,7 @@ export {
 	findLastAssistantMessage,
 	findLastSubagentOutput,
 	findLastSubagentOutputWithSource,
+	findLatestAssistantContextTokens,
 	getEntries,
 	getEntryCount,
 	getLeafId,

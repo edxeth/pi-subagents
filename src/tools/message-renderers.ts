@@ -54,7 +54,9 @@ function expandHint(): string {
 }
 
 function stripSessionRef(text: string): string {
-	return text.replace(/\n\nSession: .+\nResume: .+$/, "");
+	return text
+		.replace(/\n\nSub-agent context: .+ used at finish\.$/, "")
+		.replace(/\n\nSession: .+\nResume: .+$/, "");
 }
 
 function firstTextContent(result: AgentToolResult<unknown>): string {

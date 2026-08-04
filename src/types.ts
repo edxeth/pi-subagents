@@ -46,6 +46,10 @@ export interface SubagentResult {
 	exitCode: number;
 	elapsed: number;
 	outputTokens?: number;
+	/** Context tokens used by the child when it finished. */
+	contextTokens?: number;
+	/** Context-window size for the child's final usage snapshot. */
+	contextWindow?: number;
 	error?: string;
 	errorMessage?: string;
 	ping?: SubagentPing;
@@ -166,6 +170,8 @@ export interface SubagentResultMessageDetails {
 	elapsed?: number;
 	sessionFile?: string;
 	outputTokens?: number;
+	contextTokens?: number;
+	contextWindow?: number;
 	error?: string;
 	errorMessage?: string;
 }

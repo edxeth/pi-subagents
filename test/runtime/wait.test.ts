@@ -50,6 +50,27 @@ describe("subagent wait behavior", () => {
 		assert.doesNotMatch(text, /did not produce a result/);
 	});
 
+	it("appends final child context usage to awaited results", async () => {
+		const waited = await waitForResult({
+			name: "Context child",
+			task: "Finish work",
+			summary: "Implemented the requested fix.",
+			summarySource: "subagent",
+			sessionFile: "/tmp/context-child.jsonl",
+			exitCode: 0,
+			elapsed: 2,
+			contextTokens: 145_000,
+			contextWindow: 200_000,
+		});
+		const text = (waited.content[0] as { text: string }).text;
+		assert.match(
+			text,
+			/Resume: pi --session \/tmp\/context-child\.jsonl\n\nSub-agent context: 145K\/200K tokens \(72%\) used at finish\.$/,
+		);
+		assert.equal((waited.details as any).contextTokens, 145_000);
+		assert.equal((waited.details as any).contextWindow, 200_000);
+	});
+
 	it("reports no result when a provider error has only watcher fallback output", async () => {
 		const waited = await waitForResult({
 			name: "Failed child",

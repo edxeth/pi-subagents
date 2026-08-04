@@ -113,4 +113,29 @@ describe("subagent message renderers", () => {
 		assert.deepEqual(lines.slice(1, 11), ["result", "a", "b", "c", "d", "e", "f", "g", "h", "i"]);
 		assert.match(lines[11], /\.\.\. \(1 more lines,.*to expand\)/);
 	});
+
+	it("does not render no-session context metadata as child summary text", () => {
+		const lines = formatSubagentCompletionLines(
+			{
+				content: [
+					{
+						type: "text",
+						text:
+							'Sub-agent "astronaut" completed (7s).\n\nresult\n\n' +
+							"Sub-agent context: 145K/200K tokens (72%) used at finish.",
+					},
+				],
+				details: {
+					name: "astronaut",
+					status: "completed",
+					exitCode: 0,
+					elapsed: 7,
+				},
+			},
+			{ expanded: true },
+			theme,
+		);
+
+		assert.deepEqual(lines, ["✓ astronaut — completed (7s)", "result"]);
+	});
 });

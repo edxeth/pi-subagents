@@ -5,6 +5,7 @@ import { isZellijSurfaceLive } from "../mux/zellij-runtime.ts";
 import type { RunningSubagent, SubagentResult, SubagentSummarySource } from "../types.ts";
 import { findLastSubagentOutputWithSource, getNewEntries } from "../session/session.ts";
 import { traceSubagentLaunch } from "../launch/trace.ts";
+import { resolveFinalContextUsage } from "./final-context-usage.ts";
 
 export interface InteractiveWatchRuntime {
 	cleanupNoSessionSessionFile(running: RunningSubagent): void;
@@ -48,6 +49,10 @@ export async function watchSubagent(
 		const exitSignal = pollResult.outputTokens === undefined
 			? consumeSubagentExitSignal(sessionFile)
 			: undefined;
+		const finalContextUsage = resolveFinalContextUsage(
+			running,
+			pollResult.contextTokens === undefined ? exitSignal : pollResult,
+		);
 		cleanupDoneSentinel(running);
 		try {
 			await runtime.closeRunningSurface(running);
@@ -63,6 +68,7 @@ export async function watchSubagent(
 			exitCode: pollResult.exitCode,
 			elapsed,
 			outputTokens: pollResult.outputTokens ?? exitSignal?.outputTokens,
+			...finalContextUsage,
 			ping: pollResult.ping,
 			errorMessage,
 		};

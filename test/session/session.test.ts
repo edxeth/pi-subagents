@@ -14,6 +14,7 @@ import {
 	findLastAssistantMessage,
 	findLastSubagentOutput,
 	findLastSubagentOutputWithSource,
+	findLatestAssistantContextTokens,
 	getEntries,
 	getEntryCount,
 	getLeafId,
@@ -268,6 +269,33 @@ describe("session.ts", () => {
 				findLastAssistantMessage([earlierStatus, finalLengthStop] as any[]),
 				"Subagent stopped before producing a result (stopReason: length)",
 			);
+		});
+	});
+
+	describe("findLatestAssistantContextTokens", () => {
+		it("returns the latest assistant usage total", () => {
+			const entries = [
+				{
+					type: "message",
+					message: {
+						role: "assistant",
+						usage: { totalTokens: 12_000 },
+					},
+				},
+				{
+					type: "message",
+					message: {
+						role: "assistant",
+						usage: {
+							input: 100_000,
+							output: 5_000,
+							cacheRead: 40_000,
+						},
+					},
+				},
+			] as any[];
+
+			assert.equal(findLatestAssistantContextTokens(entries), 145_000);
 		});
 	});
 

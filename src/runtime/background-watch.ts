@@ -3,6 +3,7 @@ import { consumeSubagentExitSignal } from "../mux.ts";
 import type { RunningSubagent, SessionEntryLike, SubagentResult, SubagentSummarySource } from "../types.ts";
 import { findLastSubagentOutputWithSource, getEntries, getEntryCount, getNewEntries } from "../session/session.ts";
 import { getTerminalAssistantSummary, shouldReapStableTerminalSummary } from "../agents/titles.ts";
+import { resolveFinalContextUsage } from "./final-context-usage.ts";
 
 export interface BackgroundWatchRuntime {
 	cleanupNoSessionSessionFile(running: RunningSubagent): void;
@@ -105,6 +106,7 @@ export function watchBackgroundSubagent(
 				exitSignal?.reason === "error"
 					? exitSignal.errorMessage
 					: undefined;
+			const finalContextUsage = resolveFinalContextUsage(running, exitSignal);
 			const stderr = running.stderrTail?.trim();
 			const stdout = running.stdoutTail?.trim();
 			let summary = `Background agent exited with code ${exitCode}`;
@@ -140,6 +142,7 @@ export function watchBackgroundSubagent(
 				exitCode,
 				elapsed,
 				outputTokens: exitSignal?.outputTokens,
+				...finalContextUsage,
 				ping: exitSignal?.ping,
 				errorMessage,
 			});

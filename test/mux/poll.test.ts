@@ -64,4 +64,20 @@ describe("interpretExitSidecar", () => {
 		});
 		assert.equal(result.outputTokens, 17);
 	});
+
+	it("threads final context usage through done payloads", () => {
+		assert.deepEqual(
+			interpretExitSidecar({
+				type: "done",
+				contextTokens: 145_000,
+				contextWindow: 200_000,
+			}),
+			{
+				reason: "done",
+				exitCode: 0,
+				contextTokens: 145_000,
+				contextWindow: 200_000,
+			},
+		);
+	});
 });
