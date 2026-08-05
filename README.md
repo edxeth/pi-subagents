@@ -388,6 +388,8 @@ A child can finish in three ways.
 
 Use `auto-exit: true` for autonomous agents. The child exits after a normal assistant completion.
 
+Once the operator interrupts (Escape) or sends input to the child, auto-exit is permanently disabled for that session — the child warns the operator and stays open. Run `/auto-exit` inside the child to re-arm it: the next normal assistant completion closes the child again. Background children never receive operator input and are unaffected.
+
 ### `subagent_done`
 
 Manual-lifecycle children get a `subagent_done` tool. The child writes its final assistant message, calls `subagent_done`, and Pi returns that final message to the parent.
