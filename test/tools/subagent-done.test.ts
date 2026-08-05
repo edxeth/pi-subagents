@@ -388,6 +388,7 @@ describe("subagent-done.ts", () => {
 						handlers.set(event, handler);
 					},
 					registerShortcut() {},
+					registerCommand() {},
 				} as any);
 
 				handlers.get("session_start")?.(
@@ -446,6 +447,7 @@ describe("subagent-done.ts", () => {
 							handlers.set(event, handler);
 						},
 						registerShortcut() {},
+					registerCommand() {},
 					} as any);
 
 					handlers.get("message_end")?.(
@@ -496,6 +498,7 @@ describe("subagent-done.ts", () => {
 					handlers.set(event, handler);
 				},
 				registerShortcut() {},
+					registerCommand() {},
 			} as any);
 
 			const pingTool = tools.get("caller_ping");
@@ -568,11 +571,15 @@ describe("subagent-done.ts", () => {
 						handlers.set(event, handler);
 					},
 					registerShortcut() {},
+					registerCommand() {},
 				} as any);
 
 				let shutdowns = 0;
 				handlers.get("agent_start")?.({});
 				handlers.get("input")?.({ streamingBehavior: "followUp" });
+				// Simulate the real event sequence: after user input, a new agent_start
+				// fires before agent_end processes the follow-up turn.
+				handlers.get("agent_start")?.({});
 				handlers.get("agent_end")?.(
 					{ messages: [{ role: "assistant", stopReason: "stop" }] },
 					{ shutdown() { shutdowns += 1; } },
@@ -586,6 +593,278 @@ describe("subagent-done.ts", () => {
 				else process.env.PI_SUBAGENT_SESSION = originalSession;
 				if (originalAutoExit == null) delete process.env.PI_SUBAGENT_AUTO_EXIT;
 				else process.env.PI_SUBAGENT_AUTO_EXIT = originalAutoExit;
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		it("keeps auto-exit agents open after Escape then steer", async () => {
+			const handlers = new Map<string, any>();
+			const dir = createTestDir();
+			const sessionFile = join(dir, "child.jsonl");
+			writeFileSync(sessionFile, "");
+
+			const originalSession = process.env.PI_SUBAGENT_SESSION;
+			const originalAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+			try {
+				process.env.PI_SUBAGENT_SESSION = sessionFile;
+				process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+				subagentDoneExtension({
+					getAllTools: () => [],
+					getActiveTools: () => [],
+					setActiveTools() {},
+					registerTool(definition: { name: string }) {
+						return definition;
+					},
+					on(event: string, handler: any) {
+						handlers.set(event, handler);
+					},
+					registerShortcut() {},
+					registerCommand() {},
+				} as any);
+
+				let shutdowns = 0;
+				// 1. Agent starts working
+				handlers.get("agent_start")?.({});
+
+				// 2. User presses Escape — agent turn aborted
+				handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "aborted" }] },
+					{
+						shutdown() { shutdowns += 1; },
+						ui: { setStatus() {}, notify() {} },
+					},
+				);
+				assert.equal(shutdowns, 0, "aborted turn should not shutdown");
+
+				// 3. User types a question
+				handlers.get("input")?.({ streamingBehavior: "steer" });
+
+				// 4. New turn starts to process the question
+				handlers.get("agent_start")?.({});
+
+				// 5. Agent answers the question — should NOT auto-exit
+				handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "stop" }] },
+					{ shutdown() { shutdowns += 1; } },
+				);
+				await sleep(0);
+
+				assert.equal(shutdowns, 0, "should not auto-exit after user interaction");
+				assert.throws(() => readFileSync(`${sessionFile}.exit`, "utf8"));
+			} finally {
+				if (originalSession == null) delete process.env.PI_SUBAGENT_SESSION;
+				else process.env.PI_SUBAGENT_SESSION = originalSession;
+				if (originalAutoExit == null) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+				else process.env.PI_SUBAGENT_AUTO_EXIT = originalAutoExit;
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		it("keeps interactive auto-exit agents open after Escape alone", async () => {
+			const handlers = new Map<string, any>();
+			const dir = createTestDir();
+			const sessionFile = join(dir, "child.jsonl");
+			writeFileSync(sessionFile, "");
+
+			const originalSession = process.env.PI_SUBAGENT_SESSION;
+			const originalAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+			const originalSurface = process.env.PI_SUBAGENT_SURFACE;
+			try {
+				process.env.PI_SUBAGENT_SESSION = sessionFile;
+				process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+				process.env.PI_SUBAGENT_SURFACE = "pane:test";
+				subagentDoneExtension({
+					getAllTools: () => [],
+					getActiveTools: () => [],
+					setActiveTools() {},
+					registerTool(definition: { name: string }) {
+						return definition;
+					},
+					on(event: string, handler: any) {
+						handlers.set(event, handler);
+					},
+					registerShortcut() {},
+					registerCommand() {},
+				} as any);
+
+				let shutdowns = 0;
+				// 1. Agent starts working on an interactive pane
+				handlers.get("agent_start")?.({});
+
+				// 2. User presses Escape — agent turn aborted
+				handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "aborted" }] },
+					{ shutdown() { shutdowns += 1; }, ui: { setStatus() {}, notify() {} }, },
+				);
+				assert.equal(shutdowns, 0, "aborted turn should not shutdown");
+
+				// 3. New autonomous turn starts (retry/nudge)
+				handlers.get("agent_start")?.({});
+
+				// 4. Agent completes normally — should NOT auto-exit because
+				//    Escape permanently disabled auto-exit for interactive agents
+				handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "stop" }] },
+					{
+						shutdown() { shutdowns += 1; },
+						ui: { setStatus() {}, notify() {} },
+					},
+				);
+				await sleep(0);
+
+				assert.equal(shutdowns, 0, "should not auto-exit after Escape in interactive mode");
+				assert.throws(() => readFileSync(`${sessionFile}.exit`, "utf8"));
+			} finally {
+				if (originalSession == null) delete process.env.PI_SUBAGENT_SESSION;
+				else process.env.PI_SUBAGENT_SESSION = originalSession;
+				if (originalAutoExit == null) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+				else process.env.PI_SUBAGENT_AUTO_EXIT = originalAutoExit;
+				if (originalSurface == null) delete process.env.PI_SUBAGENT_SURFACE;
+				else process.env.PI_SUBAGENT_SURFACE = originalSurface;
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		it("shows auto-exit disabled status after Escape on interactive pane", async () => {
+			const handlers = new Map<string, any>();
+			const commands = new Map<string, any>();
+			const dir = createTestDir();
+			const sessionFile = join(dir, "child.jsonl");
+			writeFileSync(sessionFile, "");
+
+			const originalSession = process.env.PI_SUBAGENT_SESSION;
+			const originalAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+			const originalSurface = process.env.PI_SUBAGENT_SURFACE;
+			try {
+				process.env.PI_SUBAGENT_SESSION = sessionFile;
+				process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+				process.env.PI_SUBAGENT_SURFACE = "pane:test";
+				let statusKey: string | undefined;
+				let statusMessage: string | undefined;
+				subagentDoneExtension({
+					getAllTools: () => [],
+					getActiveTools: () => [],
+					setActiveTools() {},
+					registerTool(definition: { name: string }) {
+						return definition;
+					},
+					on(event: string, handler: any) {
+						handlers.set(event, handler);
+					},
+					registerShortcut() {},
+					registerCommand(name: string, def: any) {
+						commands.set(name, def);
+					},
+				} as any);
+
+				let shutdowns = 0;
+				handlers.get("agent_start")?.({});
+				handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "aborted" }] },
+					{
+						shutdown() { shutdowns += 1; },
+						ui: {
+							setStatus(key: string, msg?: string) {
+								statusKey = key;
+								statusMessage = msg;
+							},
+							notify() {},
+						},
+					},
+				);
+				assert.equal(statusKey, "pi-subagent-auto-exit");
+				assert.equal(statusMessage, "Auto-exit disabled \u2014 close manually or /auto-exit to re-enable");
+			} finally {
+				if (originalSession == null) delete process.env.PI_SUBAGENT_SESSION;
+				else process.env.PI_SUBAGENT_SESSION = originalSession;
+				if (originalAutoExit == null) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+				else process.env.PI_SUBAGENT_AUTO_EXIT = originalAutoExit;
+				if (originalSurface == null) delete process.env.PI_SUBAGENT_SURFACE;
+				else process.env.PI_SUBAGENT_SURFACE = originalSurface;
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		it("re-enables auto-exit via /auto-exit command", async () => {
+			const handlers = new Map<string, any>();
+			const commands = new Map<string, any>();
+			const dir = createTestDir();
+			const sessionFile = join(dir, "child.jsonl");
+			writeFileSync(sessionFile, "");
+
+			const originalSession = process.env.PI_SUBAGENT_SESSION;
+			const originalAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+			const originalSurface = process.env.PI_SUBAGENT_SURFACE;
+			try {
+				process.env.PI_SUBAGENT_SESSION = sessionFile;
+				process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+				process.env.PI_SUBAGENT_SURFACE = "pane:test";
+				let statusKey: string | undefined;
+				let statusMessage: string | undefined;
+				let notifyMsg: string | undefined;
+				subagentDoneExtension({
+					getAllTools: () => [],
+					getActiveTools: () => [],
+					setActiveTools() {},
+					registerTool(definition: { name: string }) {
+						return definition;
+					},
+					on(event: string, handler: any) {
+						handlers.set(event, handler);
+					},
+					registerShortcut() {},
+					registerCommand(name: string, def: any) {
+						commands.set(name, def);
+					},
+				} as any);
+
+				// Simulate user interaction that disables auto-exit
+				let shutdowns = 0;
+				handlers.get("agent_start")?.({});
+				handlers.get("input")?.({ streamingBehavior: "steer" });
+
+				// Verify /auto-exit command was registered
+				const autoExitCmd = commands.get("auto-exit");
+				assert.ok(autoExitCmd, "/auto-exit command should be registered");
+				assert.equal(autoExitCmd.description, "Re-enable auto-exit after operator interaction");
+
+				// Run the command handler
+				await autoExitCmd.handler({}, {
+					ui: {
+						setStatus(key: string, msg?: string) {
+							statusKey = key;
+							statusMessage = msg;
+						},
+						notify(msg: string) {
+							notifyMsg = msg;
+						},
+					},
+				});
+
+				// Status should be cleared
+				assert.equal(statusKey, "pi-subagent-auto-exit");
+				assert.equal(statusMessage, undefined);
+				// Should notify that auto-exit is re-enabled
+				assert.ok(notifyMsg?.includes("re-enabled"), "should notify re-enabled");
+
+				// Now simulate a new turn completing normally
+				handlers.get("agent_start")?.({});
+				// After /auto-exit, agent_end should auto-exit
+				handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "stop" }] },
+					{ shutdown() { shutdowns += 1; } },
+				);
+				await sleep(0);
+
+				assert.equal(shutdowns, 1, "should auto-exit after /auto-exit re-enables it");
+				assert.doesNotThrow(() => readFileSync(`${sessionFile}.exit`, "utf8"));
+			} finally {
+				if (originalSession == null) delete process.env.PI_SUBAGENT_SESSION;
+				else process.env.PI_SUBAGENT_SESSION = originalSession;
+				if (originalAutoExit == null) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+				else process.env.PI_SUBAGENT_AUTO_EXIT = originalAutoExit;
+				if (originalSurface == null) delete process.env.PI_SUBAGENT_SURFACE;
+				else process.env.PI_SUBAGENT_SURFACE = originalSurface;
 				rmSync(dir, { recursive: true, force: true });
 			}
 		});
@@ -605,6 +884,7 @@ describe("subagent-done.ts", () => {
 					handlers.set(event, handler);
 				},
 				registerShortcut() {},
+					registerCommand() {},
 			} as any);
 
 			const doneTool = tools.get("subagent_done");
@@ -670,6 +950,7 @@ describe("subagent-done.ts", () => {
 						handlers.set(event, handler);
 					},
 					registerShortcut() {},
+					registerCommand() {},
 				} as any);
 
 				const result = handlers.get("before_agent_start")({
@@ -706,6 +987,7 @@ describe("subagent-done.ts", () => {
 				},
 				on() {},
 				registerShortcut() {},
+					registerCommand() {},
 			} as any);
 			return tools;
 		}

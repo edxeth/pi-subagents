@@ -401,12 +401,16 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Auto-exit: when the agent loop ends, shut down automatically.
-	// If the user interrupts (Escape) or sends any input, auto-exit is disabled
-	// for that cycle — the user wants to steer. Once they're done and the agent
-	// completes normally again, auto-exit re-engages.
+	// If the user interrupts (Escape) or sends any input, auto-exit is
+	// permanently disabled for the rest of the session — the operator has
+	// taken over and the child stays open until closed or re-armed with
+	// /auto-exit.
 	// Enabled via `auto-exit: true` in agent frontmatter.
+	const AUTO_EXIT_STATUS_KEY = "pi-subagent-auto-exit";
 	if (autoExit) {
-		let userTookOver = false;
+		let operatorInputQueuedThisRun = false;
+		let autoExitDisabledByOperator = false;
+		let autoExitReArmed = false;
 		let agentStarted = false;
 		let consecutiveToolBoundaryEnds = 0;
 		let toolExecutionsThisTurn = 0;
@@ -414,7 +418,7 @@ export default function (pi: ExtensionAPI) {
 
 		pi.on("agent_start", () => {
 			agentStarted = true;
-			userTookOver = false;
+			operatorInputQueuedThisRun = false;
 		});
 
 		pi.on("turn_start", () => {
@@ -437,7 +441,12 @@ export default function (pi: ExtensionAPI) {
 			// Inputs while streaming, queued follow-ups, or later manual prompts mean
 			// the operator is steering and the child should stay open for that turn.
 			if (!shouldMarkUserTookOver(agentStarted, event.streamingBehavior)) return;
-			userTookOver = true;
+			operatorInputQueuedThisRun = true;
+			if (autoExitReArmed) {
+				autoExitReArmed = false;
+			} else {
+				autoExitDisabledByOperator = true;
+			}
 			providerErrorRecovery.cancelPendingRecovery(true);
 			cancelPendingPiRecovery();
 		});
@@ -447,10 +456,25 @@ export default function (pi: ExtensionAPI) {
 				typeof shouldAutoExitOnAgentEnd
 			>[0];
 			const shouldExit = shouldAutoExitOnAgentEnd(messages);
-			if (!shouldExit || userTookOver) {
-				// Agent turn was aborted (Escape), or the operator is steering. Leave
-				// the session open and cancel any pending autonomous recovery action.
-				providerErrorRecovery.cancelPendingRecovery(userTookOver);
+			if (!shouldExit || operatorInputQueuedThisRun) {
+				// Agent turn was aborted (Escape), or the operator sent a queued
+				// steering message. Leave the session open and cancel any pending
+				// autonomous recovery action.
+				if (!shouldExit && isInteractive) {
+					autoExitDisabledByOperator = true;
+					ctx.ui.setStatus(
+						AUTO_EXIT_STATUS_KEY,
+						"Auto-exit disabled — close manually or /auto-exit to re-enable",
+					);
+					ctx.ui.notify("Auto-exit disabled \u2014 close manually or /auto-exit to re-enable", "warning");
+				}
+				if (operatorInputQueuedThisRun && autoExitDisabledByOperator && isInteractive) {
+					ctx.ui.setStatus(
+						AUTO_EXIT_STATUS_KEY,
+						"Auto-exit disabled — close manually or /auto-exit to re-enable",
+					);
+				}
+				providerErrorRecovery.cancelPendingRecovery(operatorInputQueuedThisRun);
 				cancelPendingPiRecovery();
 				return;
 			}
@@ -523,8 +547,24 @@ export default function (pi: ExtensionAPI) {
 			consecutiveToolBoundaryEnds = 0;
 			providerErrorRecovery.cancelPendingRecovery(true);
 			cancelPendingPiRecovery();
+			if (autoExitDisabledByOperator) return;
 			writeExitSignal({ type: "done", outputTokens }, { supersede: true });
 			requestShutdown(ctx);
+		});
+
+		// /auto-exit re-enables auto-exit after operator interaction disabled it.
+		pi.registerCommand?.("auto-exit", {
+			description: "Re-enable auto-exit after operator interaction",
+			handler: async (_args, ctx) => {
+				if (!autoExitDisabledByOperator) {
+					ctx.ui.notify("Auto-exit is already enabled.", "info");
+					return;
+				}
+				autoExitDisabledByOperator = false;
+				autoExitReArmed = true;
+				ctx.ui.setStatus(AUTO_EXIT_STATUS_KEY, undefined);
+				ctx.ui.notify("Auto-exit re-enabled — will close after next response.", "info");
+			},
 		});
 	}
 
