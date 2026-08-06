@@ -156,7 +156,7 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `deny-tools` | unset | Final comma-separated tool names to remove from the child after built-in tools, extensions, and protocol tools are selected |
 | `skills` | `all` | Child skill availability: `all`, `none`, or a comma-separated allowlist resolved by skill name |
 | `inject-skills` | unset | Comma-separated skills to load into the child prompt before the task |
-| `no-context-files` | `false` | Skip trusted project context-file discovery in the child. With the default `trust-project: false`, Pi already ignores project-local context files. |
+| `no-context-files` | `false` | Skip project context-file discovery in the child, including `AGENTS.override.md`, `AGENTS.md`, and `CLAUDE.md`. Pi loads these files independently of project approval. |
 | `inherit-append-system` | `false` | Let Pi load the child's applicable global or trusted-project `APPEND_SYSTEM.md` file |
 | `no-session` | `false` | Use an ephemeral child session file and delete it after completion |
 | `trust-project` | `false` | Whether interactive child launches pass Pi's `--approve` flag and trust project-local files/settings. Background children always generate `--no-approve` for safety; use `flags` only as an explicit advanced override. |
@@ -185,7 +185,7 @@ env: |
 
 Pi splits `env` by line. It does not split values by comma. When you set `PI_CODING_AGENT_DIR`, the child uses that directory for its Pi config and sessions. For per-agent Herdr or Zellij placement, set `PI_SUBAGENT_HERDR_PLACEMENT` or `PI_SUBAGENT_ZELLIJ_PLACEMENT` here. The parent reads placement before the child pane exists. See [Herdr placement](#herdr-placement) and [Zellij placement](#zellij-placement).
 
-`trust-project` controls Pi's project-local trust boundary. The default `false` passes `--no-approve`, so child sessions ignore project-local settings and project-local context files such as `AGENTS.md`/`CLAUDE.md` even when the parent project was previously approved. Set `trust-project: true` only for interactive children that should inherit those project-local resources. Background children still generate `--no-approve`; `flags` is the explicit advanced escape hatch if you need to override that safety default.
+`trust-project` controls Pi's project-local trust boundary for resources such as settings, extensions, skills, prompts, themes, `SYSTEM.md`, and `APPEND_SYSTEM.md`. The default `false` passes `--no-approve`, even when the parent project was previously approved. Project context files are separate: Pi still loads applicable `AGENTS.override.md`, `AGENTS.md`, or `CLAUDE.md` files unless `no-context-files: true` passes `--no-context-files`. Background children always generate `--no-approve`; `flags` is the explicit advanced escape hatch if you need to override that safety default.
 
 `task-expansion: shell` prepares task context before launch for small models that should not have to plan tool calls. It is opt-in because the parent task text becomes shell input and runs in the parent Pi process before the child starts. Commands execute in source order from the child's effective `cwd`; each placeholder gets 30 seconds before Pi inserts a timeout diagnostic. Use `$PI_WORKSPACE` or `${PI_WORKSPACE}` inside the shell command to read the workspace path from the environment. This explicit opt-in works in every parent mode, including orchestrator mode. Use explicit shell placeholders:
 

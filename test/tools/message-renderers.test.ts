@@ -2,6 +2,7 @@ import {
 	formatSubagentBatchLines,
 	formatSubagentCompletionLines,
 	formatTaskPreview,
+	registerSubagentMessageRenderers,
 } from "../../src/tools/message-renderers.ts";
 import { assert, describe, it } from "../support/index.ts";
 
@@ -18,6 +19,45 @@ const theme = {
 } as any;
 
 describe("subagent message renderers", () => {
+	it("honors Pi output padding for custom result and ping messages", () => {
+		const renderers = new Map<string, (...args: any[]) => any>();
+		registerSubagentMessageRenderers(
+			{
+				registerMessageRenderer(name: string, renderer: (...args: any[]) => any) {
+					renderers.set(name, renderer);
+				},
+			} as any,
+			(seconds) => `${seconds}s`,
+		);
+
+		const messages = [
+			{
+				type: "subagent_result",
+				message: {
+					content: "done",
+					details: { name: "child", status: "completed", exitCode: 0, elapsed: 1 },
+				},
+			},
+			{
+				type: "subagent_ping",
+				message: { content: "help", details: { name: "child", message: "help", elapsed: 1 } },
+			},
+		];
+
+		for (const { type, message } of messages) {
+			const renderer = renderers.get(type)!;
+			const unpadded = renderer(message, { expanded: true, outputPad: 0 }, theme).render(40);
+			const padded = renderer(message, { expanded: true, outputPad: 1 }, theme).render(40);
+			const unpaddedContent = unpadded.find((line: string) => line.trim().startsWith(type === "subagent_ping" ? "?" : "✓"));
+			const paddedContent = padded.find((line: string) => line.trim().startsWith(type === "subagent_ping" ? "?" : "✓"));
+
+			assert.ok(unpaddedContent);
+			assert.ok(paddedContent);
+			assert.equal(unpaddedContent.startsWith(" "), false);
+			assert.equal(paddedContent.startsWith(" "), true);
+		}
+	});
+
 	it("renders expandable task previews with the native tool expand hint", () => {
 		const preview = formatTaskPreview(
 			Array.from({ length: 12 }, (_, index) => `line ${index + 1}`).join("\n"),

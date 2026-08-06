@@ -4,7 +4,7 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import type { SubagentPingMessageDetails, SubagentResultMessageDetails } from "../types.ts";
 
 type ThemeLike = Parameters<Parameters<ExtensionAPI["registerMessageRenderer"]>[1]>[2];
-type RenderOptions = { expanded: boolean };
+type RenderOptions = { expanded: boolean; outputPad?: number };
 
 type BatchChildArgs = {
 	name?: string;
@@ -229,7 +229,7 @@ export function registerSubagentMessageRenderers(pi: ExtensionAPI, formatElapsed
 					],
 					details,
 				};
-				const box = new Box(1, 1, bgFn);
+				const box = new Box(options.outputPad ?? 1, 1, bgFn);
 				box.addChild(new Text(formatSubagentCompletionLines(result, options, theme, formatElapsed).join("\n"), 0, 0));
 				return ["", ...box.render(width)];
 			},
@@ -258,7 +258,7 @@ export function registerSubagentMessageRenderers(pi: ExtensionAPI, formatElapsed
 					contentLines.push(theme.fg("dim", `Resume:  pi --session ${details.sessionFile}`));
 				}
 
-				const box = new Box(1, 1, (text: string) => theme.bg("toolPendingBg", text));
+				const box = new Box(options.outputPad ?? 1, 1, (text: string) => theme.bg("toolPendingBg", text));
 				box.addChild(new Text(contentLines.join("\n"), 0, 0));
 				return ["", ...box.render(width)];
 			},

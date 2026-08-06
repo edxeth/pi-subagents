@@ -210,6 +210,22 @@ describe("agent launch configuration", () => {
 		assert.equal(shouldForceSynchronousLaunchForTest(false, ["node", "pi", "task"]), true);
 	});
 
+	it("does not mistake Pi CLI option values for startup prompts", () => {
+		for (const [flag, value] of [
+			["--tui-mode", "fullscreen"],
+			["--session-id", "018f-test"],
+			["--models", "anthropic/*,openai/*"],
+			["--exclude-tools", "edit,write"],
+			["-xt", "edit,write"],
+			["--name", "Review session"],
+			["-n", "Review session"],
+			["--extension", "./extension.ts"],
+			["-t", "read,bash"],
+		]) {
+			assert.equal(isInitialPromptInvocationForTest(["node", "pi", flag, value]), false, flag);
+		}
+	});
+
 	it("parses getFlagsLaunchArgs from a flags string", () => {
 		assert.deepEqual(getFlagsLaunchArgs("--plan"), ["--plan"]);
 		assert.deepEqual(getFlagsLaunchArgs("--plan --foo bar"), ["--plan", "--foo", "bar"]);
