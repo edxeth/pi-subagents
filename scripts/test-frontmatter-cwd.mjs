@@ -51,7 +51,7 @@ writeAgent(ctx.agentsDir, "fm-cwd-child", {
   description: "Live cwd frontmatter smoke test agent.",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
   tools: "bash,write",
   cwd: workDir,

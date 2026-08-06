@@ -39,7 +39,7 @@ writeAgent(ctx.agentsDir, "fm-continue-child", {
   "parent-close-policy": "continue",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
 }, [
   "Reply with exactly `FM_CONTINUE_OK`.",
@@ -52,7 +52,7 @@ writeAgent(ctx.agentsDir, "fm-terminate-child", {
   "parent-close-policy": "terminate",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
 }, [
   "Reply with exactly `FM_TERMINATE_OK`.",
@@ -64,7 +64,7 @@ writeAgent(ctx.agentsDir, "fm-default-child", {
   description: "Default close policy test agent.",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
 }, [
   "Reply with exactly `FM_DEFAULT_OK`.",

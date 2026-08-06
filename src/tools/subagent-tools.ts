@@ -69,7 +69,7 @@ export interface SubagentToolRuntime {
 	resolveTaskSessionMode(defs: AgentDefaults): string;
 	launchBackgroundSubagent(params: SubagentParamsInput, ctx: SubagentLaunchContext): Promise<RunningSubagent>;
 	launchSubagent(params: SubagentParamsInput, ctx: SubagentLaunchContext): Promise<RunningSubagent>;
-	watchBackgroundSubagent(running: RunningSubagent, signal: AbortSignal, timeout?: number): Promise<SubagentResult>;
+	watchBackgroundSubagent(running: RunningSubagent, signal: AbortSignal): Promise<SubagentResult>;
 	watchSubagent(running: RunningSubagent, signal: AbortSignal): Promise<SubagentResult>;
 	getWatcherSignal(running: RunningSubagent, controller: AbortController): AbortSignal;
 	wireSubagentSteerBack(pi: ExtensionAPI, running: RunningSubagent, promise: Promise<SubagentResult>): void;
@@ -168,7 +168,7 @@ async function launchOneSubagent(
 		running = await runtime.launchBackgroundSubagent(effectiveParams, launchCtx);
 		const watcherAbort = new AbortController();
 		running.abortController = watcherAbort;
-		running.completionPromise = runtime.watchBackgroundSubagent(running, runtime.getWatcherSignal(running, watcherAbort), agentDefs?.timeout);
+		running.completionPromise = runtime.watchBackgroundSubagent(running, runtime.getWatcherSignal(running, watcherAbort));
 	} else if (ctx.hasUI && isMuxAvailable()) {
 		running = await runtime.launchSubagent(effectiveParams, launchCtx);
 		const watcherAbort = new AbortController();
@@ -178,7 +178,7 @@ async function launchOneSubagent(
 		running = await runtime.launchBackgroundSubagent(effectiveParams, launchCtx);
 		const watcherAbort = new AbortController();
 		running.abortController = watcherAbort;
-		running.completionPromise = runtime.watchBackgroundSubagent(running, runtime.getWatcherSignal(running, watcherAbort), agentDefs?.timeout);
+		running.completionPromise = runtime.watchBackgroundSubagent(running, runtime.getWatcherSignal(running, watcherAbort));
 	}
 	return running;
 }

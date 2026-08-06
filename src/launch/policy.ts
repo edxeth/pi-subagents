@@ -49,9 +49,7 @@ export function resolveSubagentBlocking(
 	_params: Partial<SubagentParamsInput>,
 	agentDefs: AgentDefaults | null,
 ): boolean {
-	if (agentDefs?.async != null) return agentDefs.async === false;
-	if (agentDefs?.blocking != null) return agentDefs.blocking === true;
-	return false;
+	return agentDefs?.async === false;
 }
 
 function resolveSubagentAsync(

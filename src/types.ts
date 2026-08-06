@@ -19,7 +19,6 @@ export interface SubagentParamsInput {
 	injectSkills?: string;
 	tools?: string;
 	cwd?: string;
-	fork?: boolean;
 	background?: boolean;
 	async?: boolean;
 	blocking?: boolean;

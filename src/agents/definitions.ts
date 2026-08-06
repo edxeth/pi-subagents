@@ -22,14 +22,11 @@ export interface AgentDefaults {
 	body?: string;
 	mode?: "interactive" | "background";
 	sessionMode?: "standalone" | "lineage-only" | "fork";
-	fork?: boolean;
 	async?: boolean;
-	blocking?: boolean;
 	noContextFiles?: boolean;
 	inheritAppendSystem?: boolean;
 	noSession?: boolean;
 	trustProject?: boolean;
-	timeout?: number;
 	taskExpansion?: "shell";
 	contextWarnThreshold?: string;
 	contextWarnStep?: string;
@@ -85,14 +82,11 @@ function parseAgentDefinition(
 	const allowModelOverrideRaw = get("allow-model-override");
 	const modeRaw = get("mode");
 	const sessionModeRaw = get("session-mode");
-	const forkRaw = get("fork");
 	const asyncRaw = get("async");
-	const blockingRaw = get("blocking");
 	const noContextFilesRaw = get("no-context-files");
 	const inheritAppendSystemRaw = get("inherit-append-system");
 	const noSessionRaw = get("no-session");
 	const trustProjectRaw = get("trust-project");
-	const timeoutRaw = get("timeout");
 	const taskExpansionRaw = get("task-expansion");
 	const contextWarnThresholdRaw = get("context-warn-threshold");
 	const contextWarnStepRaw = get("context-warn-step");
@@ -136,12 +130,8 @@ function parseAgentDefinition(
 			sessionModeRaw === "lineage-only" ||
 			sessionModeRaw === "fork"
 				? sessionModeRaw
-				: forkRaw === "true"
-					? "fork"
-					: undefined,
-		fork: forkRaw != null ? forkRaw === "true" : undefined,
+				: undefined,
 		async: asyncRaw != null ? asyncRaw === "true" : undefined,
-		blocking: blockingRaw != null ? blockingRaw === "true" : undefined,
 		noContextFiles:
 			noContextFilesRaw != null ? noContextFilesRaw === "true" : undefined,
 		inheritAppendSystem: inheritAppendSystemRaw === "true",
@@ -152,7 +142,6 @@ function parseAgentDefinition(
 			modeRaw === "background" || modeRaw === "interactive"
 				? modeRaw
 				: undefined,
-		timeout: timeoutRaw != null ? parseInt(timeoutRaw, 10) : undefined,
 		taskExpansion: taskExpansionRaw === "shell" ? "shell" : undefined,
 		contextWarnThreshold: contextWarnThresholdRaw,
 		contextWarnStep: contextWarnStepRaw,

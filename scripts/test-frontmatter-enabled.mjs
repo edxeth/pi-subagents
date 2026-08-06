@@ -46,7 +46,7 @@ writeAgent(ctx.agentsDir, "fm-enabled-child", {
   description: "This agent should be visible.",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
 }, [
   "Reply with exactly `FM_ENABLED_OK`.",

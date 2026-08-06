@@ -69,7 +69,7 @@ writeAgent(ctx.agentsDir, "fm-flags-child", {
   description: "Live flags frontmatter smoke test agent.",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
   tools: "bash",
   flags: "--verbose",

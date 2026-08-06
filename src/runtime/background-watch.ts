@@ -25,31 +25,22 @@ function terminateChildProcessGroup(
 
 /**
  * Watch a background subagent until it exits. Listens for the child process
- * exit event, polls the session file for widget updates, and handles timeout
- * and abort.
+ * exit event, polls the session file for widget updates, and handles abort.
  */
 export function watchBackgroundSubagent(
 	running: RunningSubagent,
 	runtime: BackgroundWatchRuntime,
 	signal: AbortSignal,
-	timeout?: number,
 ): Promise<SubagentResult> {
 	const child = running.childProcess!;
 	const terminalGraceMs = 1000;
 
 	return new Promise((resolve) => {
 		let settled = false;
-		let timer: ReturnType<typeof setTimeout> | undefined;
 		let terminalSummary: string | null = null;
 		let terminalSeenAt = 0;
-		if (timeout && timeout > 0) {
-			timer = setTimeout(() => {
-				terminateChildProcessGroup(running, "SIGTERM");
-			}, timeout * 1000);
-		}
 
 		const cleanup = () => {
-			if (timer) clearTimeout(timer);
 			clearInterval(pollInterval);
 			signal.removeEventListener("abort", onAbort);
 			child.removeListener("exit", onExit);

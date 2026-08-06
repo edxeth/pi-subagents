@@ -21,7 +21,7 @@ const SECTION_FIELDS = [
 	},
 	{
 		title: "Runtime",
-		fields: ["mode", "session-mode", "async", "auto-exit", "parent-close", "no-session", "timeout", "launched"],
+		fields: ["mode", "session-mode", "async", "auto-exit", "parent-close", "no-session", "launched"],
 	},
 	{
 		title: "Model",
@@ -98,7 +98,6 @@ function buildSections(
 	fields.push({ label: "session-mode", value: (meta?.sessionMode ?? defs?.sessionMode ?? "lineage-only") as string });
 	fields.push({ label: "parent-close", value: (meta?.parentClosePolicy ?? defs?.parentClosePolicy ?? "terminate") as string });
 	fields.push({ label: "no-session", value: String(meta ? meta.noSession : (defs?.noSession ?? false)) });
-	fields.push({ label: "timeout", value: defs?.timeout != null ? `${defs.timeout}s` : "none" });
 
 	return SECTION_FIELDS.map((section) => ({
 		title: section.title,

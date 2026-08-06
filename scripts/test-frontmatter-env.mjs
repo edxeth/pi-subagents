@@ -32,7 +32,7 @@ writeAgent(ctx.agentsDir, "fm-env-child", {
   description: "Live env frontmatter smoke test agent.",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
   tools: "bash",
   env: "FOO=bar,BAZ=qux",

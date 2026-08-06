@@ -130,7 +130,7 @@ describe("ambient agents and runtime paths", () => {
 		const defs = {
 			path: "/tmp/reviewer.md",
 			mode: "interactive" as const,
-			blocking: false,
+			async: true,
 			cwd: "./agents/reviewer",
 		};
 
@@ -155,7 +155,7 @@ describe("ambient agents and runtime paths", () => {
 		const defs = {
 			path: "/tmp/reviewer.md",
 			mode: "background" as const,
-			blocking: false,
+			async: true,
 		};
 
 		assert.equal(
@@ -167,35 +167,35 @@ describe("ambient agents and runtime paths", () => {
 		);
 	});
 
-	it("ignores launch-time fork overrides; only agent frontmatter controls session mode", () => {
+	it("derives session mode from agent frontmatter alone", () => {
 		const defs = {
 			path: "/tmp/reviewer.md",
 			mode: "interactive" as const,
-			blocking: false,
+			async: true,
 			sessionMode: "lineage-only" as const,
 		};
 
-		assert.equal(
-			getSubagentAgentOverrideErrorForTest(
-				{ agent: "reviewer", fork: true },
-				defs,
-			),
-			null,
-		);
 		assert.equal(
 			resolveEffectiveSessionModeForTest({ agent: "reviewer" }, defs),
 			"lineage-only",
 		);
 		assert.equal(
 			resolveEffectiveSessionModeForTest(
-				{ agent: "reviewer", fork: true },
-				defs,
+				{ agent: "reviewer" },
+				{ ...defs, sessionMode: "fork" as const },
+			),
+			"fork",
+		);
+		assert.equal(
+			resolveEffectiveSessionModeForTest(
+				{ agent: "reviewer" },
+				{ path: "/tmp/reviewer.md", mode: "interactive" as const },
 			),
 			"lineage-only",
 		);
 	});
 
-	it("ignores launch-time async/blocking; only agent frontmatter controls sync policy", () => {
+	it("ignores launch-time async/blocking; only agent frontmatter async controls sync policy", () => {
 		assert.equal(
 			resolveSubagentBlockingForTest({ async: false }, { async: true }),
 			false,
@@ -209,17 +209,14 @@ describe("ambient agents and runtime paths", () => {
 		assert.equal(resolveSubagentBlockingForTest({}, { async: true }), false);
 		assert.equal(resolveSubagentBlockingForTest({}, null), false);
 		assert.equal(
-			resolveSubagentBlockingForTest({ blocking: true }, { blocking: false }),
+			resolveSubagentBlockingForTest({ blocking: true }, { async: true }),
 			false,
 		);
 		assert.equal(
-			resolveSubagentBlockingForTest({ blocking: false }, { blocking: true }),
+			resolveSubagentBlockingForTest({ blocking: false }, { async: false }),
 			true,
 		);
-		assert.equal(
-			resolveSubagentBlockingForTest({ async: true }, { blocking: true }),
-			true,
-		);
+		assert.equal(resolveSubagentBlockingForTest({ blocking: true }, {}), false);
 
 		const blockingOverride = getSubagentAgentOverrideErrorForTest(
 			{ agent: "reviewer", async: false },
@@ -242,7 +239,7 @@ describe("ambient agents and runtime paths", () => {
 		process.env.PI_CODING_AGENT_DIR = configDir;
 		writeFileSync(
 			join(agentsDir, "reviewer.md"),
-			`---\nname: reviewer\nmode: interactive\nblocking: false\n---\n\nReviewer body.`,
+			`---\nname: reviewer\nmode: interactive\nasync: true\n---\n\nReviewer body.`,
 		);
 
 		const tools = new Map<string, any>();

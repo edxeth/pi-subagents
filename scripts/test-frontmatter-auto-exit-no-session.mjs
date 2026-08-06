@@ -29,7 +29,7 @@ writeAgent(ctx.agentsDir, "fm-autoexit-child", {
   description: "Auto-exit test agent.",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
 }, [
   "Reply with exactly `FM_AUTOEXIT_OK`.",
@@ -43,7 +43,7 @@ writeAgent(ctx.agentsDir, "fm-nosession-child", {
   "no-session": "true",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
   model: baseModel,
 }, [

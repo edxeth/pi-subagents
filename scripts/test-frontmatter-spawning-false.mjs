@@ -40,7 +40,7 @@ async function main() {
     description: "Spawning false test agent.",
     "auto-exit": "true",
     mode: "background",
-    blocking: "true",
+    async: "false",
     spawning: "false",
     tools: "bash",
     extensions: extFile,

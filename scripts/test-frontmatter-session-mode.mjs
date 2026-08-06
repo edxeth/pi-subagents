@@ -41,7 +41,7 @@ writeAgent(ctx.agentsDir, "fm-standalone-child", {
   "session-mode": "standalone",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
   tools: "bash",
 }, [
@@ -57,7 +57,7 @@ writeAgent(ctx.agentsDir, "fm-fork-child", {
   "session-mode": "fork",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
   tools: "bash",
   model: baseModel,

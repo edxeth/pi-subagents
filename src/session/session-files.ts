@@ -378,7 +378,6 @@ export function resolveEffectiveSessionMode(
 	agentDefs: AgentDefaults | null,
 ): SubagentSessionMode {
 	if (agentDefs?.sessionMode) return agentDefs.sessionMode;
-	if (agentDefs?.fork) return "fork";
 	return "lineage-only";
 }
 

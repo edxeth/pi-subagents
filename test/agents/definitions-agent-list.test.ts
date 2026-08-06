@@ -16,6 +16,7 @@ import {
 	resetSubagentStateForTest,
 	resolveDenyToolsForTest,
 	resolveEffectiveSessionModeForTest,
+	resolveSubagentBlockingForTest,
 	resolveSubagentExtensionsForTest,
 	resolveTaskSessionModeForTest,
 	createTestDir,
@@ -140,7 +141,7 @@ describe("agent definitions and catalog", () => {
 		assert.equal(defs?.injectSkills, "pua, torpathy");
 	});
 
-	it("parses session-mode frontmatter and lets fork override it per launch", () => {
+	it("parses session-mode frontmatter", () => {
 		const dir = createTestDir();
 		const configDir = join(dir, "agent-root");
 		const agentsDir = join(configDir, "agents");
@@ -158,18 +159,8 @@ describe("agent definitions and catalog", () => {
 			resolveEffectiveSessionModeForTest({ agent: "tester" }, defs),
 			"lineage-only",
 		);
-		assert.equal(
-			resolveEffectiveSessionModeForTest({ agent: "tester", fork: true }, defs),
-			"lineage-only",
-		);
 		assert.equal(resolveTaskSessionModeForTest(defs), "lineage-only");
 
-		writeFileSync(
-			join(agentsDir, "compat.md"),
-			`---\nname: compat\nfork: true\n---\n\nCompatibility body.`,
-		);
-		const compat = loadAgentDefaults("compat");
-		assert.equal(compat?.sessionMode, "fork");
 		assert.equal(
 			resolveEffectiveSessionModeForTest({ agent: "default" }, null),
 			"lineage-only",
@@ -181,6 +172,34 @@ describe("agent definitions and catalog", () => {
 				noSession: true,
 			}),
 			"fork",
+		);
+	});
+
+	it("ignores the removed fork, blocking, and timeout frontmatter keys", () => {
+		const dir = createTestDir();
+		const configDir = join(dir, "agent-root");
+		const agentsDir = join(configDir, "agents");
+		mkdirSync(agentsDir, { recursive: true });
+		process.env.PI_CODING_AGENT_DIR = configDir;
+
+		writeFileSync(
+			join(agentsDir, "legacy.md"),
+			`---\nname: legacy\nfork: true\nblocking: true\ntimeout: 30\n---\n\nLegacy body.`,
+		);
+
+		const defs = loadAgentDefaults("legacy");
+		assert.ok(defs);
+		assert.equal(defs?.sessionMode, undefined);
+		assert.equal(
+			resolveEffectiveSessionModeForTest({ agent: "legacy" }, defs),
+			"lineage-only",
+		);
+		assert.equal(resolveSubagentBlockingForTest({}, defs), false);
+		assert.equal(
+			Object.keys(defs as Record<string, unknown>).some((key) =>
+				["fork", "blocking", "timeout"].includes(key),
+			),
+			false,
 		);
 	});
 

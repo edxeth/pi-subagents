@@ -34,7 +34,7 @@ writeAgent(ctx.agentsDir, "fm-coordinator", {
   description: "Coordinator for spawning test.",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "true",
 }, [
   "First, run bash with: echo \"DENY=\\$PI_DENY_TOOLS\"",
@@ -47,7 +47,7 @@ writeAgent(ctx.agentsDir, "fm-no-spawn", {
   description: "Non-spawning comparison agent.",
   "auto-exit": "true",
   mode: "background",
-  blocking: "true",
+  async: "false",
   spawning: "false",
 }, [
   "First, run bash with: echo \"DENY=\\$PI_DENY_TOOLS\"",

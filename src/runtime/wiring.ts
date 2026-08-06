@@ -175,9 +175,8 @@ function getBackgroundWatchRuntime(): BackgroundWatchRuntime {
 export async function watchBackgroundSubagent(
 	running: RunningSubagent,
 	signal?: AbortSignal,
-	timeoutMs?: number,
 ) {
-	return watchBackgroundSubagentWithRuntime(running, getBackgroundWatchRuntime(), signal ?? moduleAbortController.signal, timeoutMs);
+	return watchBackgroundSubagentWithRuntime(running, getBackgroundWatchRuntime(), signal ?? moduleAbortController.signal);
 }
 
 function getInteractiveLaunchRuntime(): InteractiveLaunchRuntime {
