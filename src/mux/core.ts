@@ -14,13 +14,7 @@ function hasCommand(command: string): boolean {
 
 function muxPreference(): MuxBackend | null {
 	const pref = (process.env.PI_SUBAGENT_MUX ?? "").trim().toLowerCase();
-	if (
-		pref === "cmux" ||
-		pref === "tmux" ||
-		pref === "zellij" ||
-		pref === "wezterm" ||
-		pref === "herdr"
-	) {
+	if (pref === "cmux" || pref === "tmux" || pref === "zellij" || pref === "wezterm" || pref === "herdr") {
 		return pref;
 	}
 	return null;
@@ -35,10 +29,7 @@ function isTmuxRuntimeAvailable(): boolean {
 }
 
 function isZellijRuntimeAvailable(): boolean {
-	return (
-		!!(process.env.ZELLIJ || process.env.ZELLIJ_SESSION_NAME) &&
-		hasCommand("zellij")
-	);
+	return !!(process.env.ZELLIJ || process.env.ZELLIJ_SESSION_NAME) && hasCommand("zellij");
 }
 
 function isWezTermRuntimeAvailable(): boolean {
@@ -102,9 +93,7 @@ export function muxSetupHint(): string {
 export function requireMuxBackend(): MuxBackend {
 	const backend = getMuxBackend();
 	if (!backend) {
-		throw new Error(
-			`No supported terminal multiplexer found. ${muxSetupHint()}`,
-		);
+		throw new Error(`No supported terminal multiplexer found. ${muxSetupHint()}`);
 	}
 	return backend;
 }
@@ -155,13 +144,8 @@ function zellijActionArgs(args: string[], surface?: string): string[] {
 }
 
 export function zellijActionSync(args: string[], surface?: string): string {
-	return execFileSync(
-		"zellij",
-		["action", ...zellijActionArgs(args, surface)],
-		{
-			encoding: "utf8",
-			env: zellijEnv(surface),
-		},
-	);
+	return execFileSync("zellij", ["action", ...zellijActionArgs(args, surface)], {
+		encoding: "utf8",
+		env: zellijEnv(surface),
+	});
 }
-

@@ -1,12 +1,16 @@
-import { assert, describe, it } from "../support/index.ts";
 import { __pollForExitTest__ } from "../../src/mux/poll.ts";
+import { assert, describe, it } from "../support/index.ts";
 
 describe("interpretExitSidecar", () => {
 	const { interpretExitSidecar } = __pollForExitTest__;
 
 	it("decodes ping payloads", () => {
 		assert.deepEqual(
-			interpretExitSidecar({ type: "ping", name: "Worker", message: "need help" }),
+			interpretExitSidecar({
+				type: "ping",
+				name: "Worker",
+				message: "need help",
+			}),
 			{
 				reason: "ping",
 				exitCode: 0,

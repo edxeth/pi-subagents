@@ -47,8 +47,7 @@ export function parseCommandWords(command: string): string[] {
 	}
 
 	if (escaping) current += "\\";
-	if (quote !== null)
-		throw new Error("PI_SUBAGENT_PI_COMMAND has an unterminated quote");
+	if (quote !== null) throw new Error("PI_SUBAGENT_PI_COMMAND has an unterminated quote");
 	if (current) words.push(current);
 	return words;
 }
@@ -67,7 +66,6 @@ export function getPiInvocation(args: string[]): PiInvocation {
 		return { command: parts[0], args: [...parts.slice(1), ...args] };
 	}
 
-
 	const currentScript = process.argv[1];
 	if (currentScript && existsSync(currentScript)) {
 		return { command: process.execPath, args: [currentScript, ...args] };
@@ -82,10 +80,7 @@ export function getPiInvocation(args: string[]): PiInvocation {
 
 export function getPiShellParts(args: string[]): string[] {
 	const invocation = getPiInvocation(args);
-	return [
-		shellEscape(invocation.command),
-		...invocation.args.map((arg) => shellEscape(arg)),
-	];
+	return [shellEscape(invocation.command), ...invocation.args.map((arg) => shellEscape(arg))];
 }
 
 export function getSubagentChildProcessEnv(

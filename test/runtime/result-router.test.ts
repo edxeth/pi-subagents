@@ -1,14 +1,14 @@
+import { routeSubagentOutcome } from "../../src/runtime/result-router.ts";
+import type { RunningSubagent, SubagentResult } from "../../src/types.ts";
 import {
-	assert,
 	afterEach,
+	assert,
 	describe,
 	getCompletedSubagentResultForTest,
 	it,
 	resetSubagentStateForTest,
 	setRunningSubagentForTest,
 } from "../support/index.ts";
-import { routeSubagentOutcome } from "../../src/runtime/result-router.ts";
-import type { RunningSubagent, SubagentResult } from "../../src/types.ts";
 
 function makeRunning(overrides: Partial<RunningSubagent> = {}): RunningSubagent {
 	return {
@@ -72,7 +72,10 @@ describe("result router", () => {
 		assert.equal(sent[0].message.details.id, running.id);
 		assert.equal(sent[0].message.details.deliveryState, "detached");
 		assert.equal(sent[0].message.details.status, "completed");
-		assert.deepEqual(sent[0].options, { triggerTurn: true, deliverAs: "steer" });
+		assert.deepEqual(sent[0].options, {
+			triggerTurn: true,
+			deliverAs: "steer",
+		});
 	});
 
 	it("appends final child context usage after the session reference", () => {
@@ -153,10 +156,7 @@ describe("result router", () => {
 		assert.match(sent[0].message.content, /Last output before the failure/);
 		assert.match(sent[0].message.content, /Completed the requested implementation\./);
 		assert.doesNotMatch(sent[0].message.content, /did not produce a result/);
-		assert.match(
-			sent[0].message.content,
-			/Sub-agent context: 145K\/200K tokens \(72%\) used at finish\.$/,
-		);
+		assert.match(sent[0].message.content, /Sub-agent context: 145K\/200K tokens \(72%\) used at finish\.$/);
 	});
 
 	it("does not present runtime diagnostics as salvaged child output", () => {
@@ -218,6 +218,9 @@ describe("result router", () => {
 		assert.equal(sent[0].message.details.id, running.id);
 		assert.equal(sent[0].message.details.message, "Need parent input.");
 		assert.match(sent[0].message.content, /Need parent input\./);
-		assert.deepEqual(sent[0].options, { triggerTurn: true, deliverAs: "steer" });
+		assert.deepEqual(sent[0].options, {
+			triggerTurn: true,
+			deliverAs: "steer",
+		});
 	});
 });

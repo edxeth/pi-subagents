@@ -16,8 +16,7 @@ function sentenceCaseSubagentTitle(title: string): string {
 	const plainWords = words.filter((word) => /\p{L}/u.test(word));
 	if (plainWords.length < 2) return title;
 
-	const titleCaseWord =
-		/^["'`([{]*\p{Lu}\p{Ll}+[\p{Ll}\p{N}'’-]*["'`\])},:;]*$/u;
+	const titleCaseWord = /^["'`([{]*\p{Lu}\p{Ll}+[\p{Ll}\p{N}'’-]*["'`\])},:;]*$/u;
 	const titleCasedWords = plainWords.filter((word) => titleCaseWord.test(word));
 	if (titleCasedWords.length / plainWords.length < 0.6) return title;
 
@@ -37,7 +36,7 @@ function sentenceCaseSubagentTitle(title: string): string {
 
 function cleanSubagentSessionTitleDescription(raw: string): string {
 	let title = raw
-		.replace(/^[\'"`]+|[\'"`]+$/g, "")
+		.replace(/^['"`]+|['"`]+$/g, "")
 		.replace(/[\r\n]+/g, " ")
 		.replace(/\s+/g, " ")
 		.replace(/[\p{Cf}]/gu, "")
@@ -76,35 +75,21 @@ function summarizeSubagentTaskForSessionTitle(task: string): string {
 	return cleanSubagentSessionTitleDescription(firstMeaningfulLine);
 }
 
-export function getSubagentDisplayTitle(
-	params: Pick<SubagentParamsInput, "title" | "task">,
-): string {
-	return (
-		cleanSubagentSessionTitleDescription(params.title ?? "") ||
-		summarizeSubagentTaskForSessionTitle(params.task)
-	);
+export function getSubagentDisplayTitle(params: Pick<SubagentParamsInput, "title" | "task">): string {
+	return cleanSubagentSessionTitleDescription(params.title ?? "") || summarizeSubagentTaskForSessionTitle(params.task);
 }
 
-export type SubagentTitleParams = Pick<
-	SubagentParamsInput,
-	"name" | "task" | "title"
-> & { agent?: string };
+export type SubagentTitleParams = Pick<SubagentParamsInput, "name" | "task" | "title"> & { agent?: string };
 
-export function buildSubagentSessionTitle(
-	params: SubagentTitleParams,
-): string | undefined {
+export function buildSubagentSessionTitle(params: SubagentTitleParams): string | undefined {
 	if (areSubagentSessionTitlesDisabled()) return undefined;
 	const agentType = (params.agent ?? params.name).trim();
 	if (!agentType) return undefined;
 	const description = getSubagentDisplayTitle(params);
-	return description
-		? `[${agentType}] ${description}`
-		: `[${agentType}]`;
+	return description ? `[${agentType}] ${description}` : `[${agentType}]`;
 }
 
-export function getTerminalAssistantSummary(
-	entries: SessionEntryLike[],
-): string | null {
+export function getTerminalAssistantSummary(entries: SessionEntryLike[]): string | null {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
 		if (entry.type !== "message") continue;
@@ -112,20 +97,13 @@ export function getTerminalAssistantSummary(
 		if (message?.role !== "assistant") return null;
 		if (message.stopReason === "toolUse") return null;
 		const texts = (message.content ?? [])
-			.filter(
-				(block) =>
-					block.type === "text" &&
-					typeof block.text === "string" &&
-					block.text.trim() !== "",
-			)
+			.filter((block) => block.type === "text" && typeof block.text === "string" && block.text.trim() !== "")
 			.map((block) => block.text as string);
 		return texts.length > 0 ? texts.join("\n") : null;
 	}
 	return null;
 }
 
-export function shouldReapStableTerminalSummary(
-	running: Pick<{ autoExit?: boolean }, "autoExit">,
-): boolean {
+export function shouldReapStableTerminalSummary(running: Pick<{ autoExit?: boolean }, "autoExit">): boolean {
 	return running.autoExit === true;
 }

@@ -10,9 +10,7 @@ export function isChildContextBoundaryDisabled(): boolean {
 export const CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT =
 	"If this session contains a <subagent-boundary> message, treat it as the handoff point from inherited parent context to your active child-subagent task. Follow that boundary message when interpreting prior context and the next user task.";
 
-export function buildChildContextBoundary(
-	options: ChildContextBoundaryOptions,
-): string {
+export function buildChildContextBoundary(options: ChildContextBoundaryOptions): string {
 	const spawningInstruction = options.spawningAllowed
 		? "Subagent-spawning tools may be available in this child session. Use them only if they are actually available to you and your active assignment requires delegation."
 		: "Subagent-spawning tools are not available in this child session. If prior context shows the parent using such tools, do not imitate that; complete your assignment with your available tools.";

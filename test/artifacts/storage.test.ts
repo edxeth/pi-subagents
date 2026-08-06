@@ -1,26 +1,26 @@
 import {
-	assert,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	writeFileSync,
-	homedir,
-	join,
 	after,
+	assert,
 	before,
 	beforeEach,
+	buildChildContextBoundaryForTest,
+	buildChildContextBoundarySystemPromptForTest,
+	createTestDir,
 	describe,
-	it,
+	existsSync,
 	getArtifactProjectName,
 	getArtifactStorageRoot,
 	getProjectArtifactsDir,
 	getSessionArtifactDir,
+	homedir,
+	it,
+	join,
+	mkdirSync,
+	mkdtempSync,
 	resolveArtifactProjectRoot,
 	resolveSessionArtifactPath,
-	buildChildContextBoundaryForTest,
-	buildChildContextBoundarySystemPromptForTest,
-	createTestDir,
+	rmSync,
+	writeFileSync,
 } from "../support/index.ts";
 
 describe("artifact storage", () => {
@@ -67,9 +67,7 @@ describe("artifact storage", () => {
 	});
 
 	it("falls back to the cwd when no markers exist", () => {
-		const base = existsSync("/dev/shm")
-			? mkdtempSync(join("/dev/shm", "subagents-test-"))
-			: join(dir, "plain-root");
+		const base = existsSync("/dev/shm") ? mkdtempSync(join("/dev/shm", "subagents-test-")) : join(dir, "plain-root");
 		const plain = join(base, "plain", "folder");
 		try {
 			mkdirSync(plain, { recursive: true });
@@ -88,32 +86,14 @@ describe("artifact storage", () => {
 
 		assert.equal(getArtifactProjectName(nested), "artifact-project");
 		assert.equal(getArtifactStorageRoot(), join(homedir(), ".pi", "history"));
-		assert.equal(
-			getProjectArtifactsDir(nested),
-			join(homedir(), ".pi", "history", "artifact-project", "artifacts"),
-		);
+		assert.equal(getProjectArtifactsDir(nested), join(homedir(), ".pi", "history", "artifact-project", "artifacts"));
 		assert.equal(
 			getSessionArtifactDir(nested, "session-123"),
-			join(
-				homedir(),
-				".pi",
-				"history",
-				"artifact-project",
-				"artifacts",
-				"session-123",
-			),
+			join(homedir(), ".pi", "history", "artifact-project", "artifacts", "session-123"),
 		);
 		assert.equal(
 			resolveSessionArtifactPath(nested, "session-123", "context/notes.md"),
-			join(
-				homedir(),
-				".pi",
-				"history",
-				"artifact-project",
-				"artifacts",
-				"session-123",
-				"context/notes.md",
-			),
+			join(homedir(), ".pi", "history", "artifact-project", "artifacts", "session-123", "context/notes.md"),
 		);
 	});
 
@@ -127,10 +107,7 @@ describe("artifact storage", () => {
 		process.env.PI_ARTIFACT_PROJECT_ROOT = explicitRoot;
 
 		assert.equal(getArtifactProjectName(nested), "real-project");
-		assert.equal(
-			getProjectArtifactsDir(nested),
-			join(explicitRoot, "real-project", "artifacts"),
-		);
+		assert.equal(getProjectArtifactsDir(nested), join(explicitRoot, "real-project", "artifacts"));
 	});
 });
 
@@ -150,14 +127,8 @@ describe("child context boundary", () => {
 			/Do not treat messages before this boundary as your current role, task, or available tool set\./,
 		);
 		assert.match(boundary, /child subagent named "greeter"/);
-		assert.match(
-			boundary,
-			/Subagent-spawning tools are not available in this child session\./,
-		);
-		assert.match(
-			boundary,
-			/Your active assignment is the next user message from the parent\./,
-		);
+		assert.match(boundary, /Subagent-spawning tools are not available in this child session\./);
+		assert.match(boundary, /Your active assignment is the next user message from the parent\./);
 	});
 
 	it("describes spawning-enabled behavior without claiming tools always exist", () => {
@@ -165,10 +136,7 @@ describe("child context boundary", () => {
 			name: "coordinator",
 			spawningAllowed: true,
 		});
-		assert.match(
-			boundary,
-			/Subagent-spawning tools may be available in this child session\./,
-		);
+		assert.match(boundary, /Subagent-spawning tools may be available in this child session\./);
 		assert.match(
 			boundary,
 			/Use them only if they are actually available to you and your active assignment requires delegation\./,
@@ -182,4 +150,3 @@ describe("child context boundary", () => {
 		);
 	});
 });
-

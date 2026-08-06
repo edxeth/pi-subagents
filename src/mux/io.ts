@@ -11,7 +11,6 @@ import {
 	zellijActionSync,
 	zellijPaneId,
 } from "./core.ts";
-import { closeZellijSurface } from "./zellij-runtime.ts";
 import {
 	closeHerdrPane,
 	readHerdrPaneScreen,
@@ -19,14 +18,12 @@ import {
 	runHerdrPaneCommand,
 	sendHerdrPaneEnter,
 } from "./herdr.ts";
+import { closeZellijSurface } from "./zellij-runtime.ts";
 
 export function sendCommand(surface: string, command: string): void {
 	const backend = requireMuxBackend();
 	if (backend === "cmux") {
-		execSync(
-			`cmux send --surface ${shellEscape(surface)} ${shellEscape(`${command}\n`)}`,
-			{ encoding: "utf8" },
-		);
+		execSync(`cmux send --surface ${shellEscape(surface)} ${shellEscape(`${command}\n`)}`, { encoding: "utf8" });
 		return;
 	}
 	if (backend === "tmux") {
@@ -48,11 +45,9 @@ export function sendCommand(surface: string, command: string): void {
 		return;
 	}
 	if (backend === "wezterm") {
-		execFileSync(
-			"wezterm",
-			["cli", "send-text", "--pane-id", surface, "--no-paste", `${command}\n`],
-			{ encoding: "utf8" },
-		);
+		execFileSync("wezterm", ["cli", "send-text", "--pane-id", surface, "--no-paste", `${command}\n`], {
+			encoding: "utf8",
+		});
 		return;
 	}
 	if (backend === "zellij") {
@@ -71,10 +66,7 @@ export function sendCommand(surface: string, command: string): void {
 function stageShellCommand(command: string): string {
 	const shell = (process.env.SHELL ?? "/bin/sh").trim() || "/bin/sh";
 	const ext = isFishShell() ? ".fish" : ".sh";
-	const scriptPath = join(
-		tmpdir(),
-		`pi-subagent-shell-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`,
-	);
+	const scriptPath = join(tmpdir(), `pi-subagent-shell-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
 	writeFileSync(scriptPath, `#!${shell}\n${command}\n`, "utf8");
 	chmodSync(scriptPath, 0o700);
 	return scriptPath;
@@ -104,17 +96,12 @@ export function sendShellCommand(surface: string, command: string): void {
 export function readScreen(surface: string, lines = 50): string {
 	const backend = requireMuxBackend();
 	if (backend === "cmux") {
-		return execSync(
-			`cmux read-screen --surface ${shellEscape(surface)} --lines ${lines}`,
-			{ encoding: "utf8" },
-		);
+		return execSync(`cmux read-screen --surface ${shellEscape(surface)} --lines ${lines}`, { encoding: "utf8" });
 	}
 	if (backend === "tmux") {
-		return execFileSync(
-			"tmux",
-			["capture-pane", "-p", "-t", surface, "-S", `-${Math.max(1, lines)}`],
-			{ encoding: "utf8" },
-		);
+		return execFileSync("tmux", ["capture-pane", "-p", "-t", surface, "-S", `-${Math.max(1, lines)}`], {
+			encoding: "utf8",
+		});
 	}
 	if (backend === "wezterm") {
 		const raw = execFileSync("wezterm", ["cli", "get-text", "--pane-id", surface], {
@@ -123,11 +110,9 @@ export function readScreen(surface: string, lines = 50): string {
 		return tailLines(raw, lines);
 	}
 	if (backend === "zellij") {
-		const raw = execFileSync(
-			"zellij",
-			["action", "dump-screen", "--pane-id", zellijPaneId(surface)],
-			{ encoding: "utf8" },
-		);
+		const raw = execFileSync("zellij", ["action", "dump-screen", "--pane-id", zellijPaneId(surface)], {
+			encoding: "utf8",
+		});
 		return tailLines(raw, lines);
 	}
 	if (backend === "herdr") return readHerdrPaneScreen(surface, lines);
@@ -137,11 +122,9 @@ export function readScreen(surface: string, lines = 50): string {
 export async function readScreenAsync(surface: string, lines = 50): Promise<string> {
 	const backend = requireMuxBackend();
 	if (backend === "cmux") {
-		const { stdout } = await execFileAsync(
-			"cmux",
-			["read-screen", "--surface", surface, "--lines", String(lines)],
-			{ encoding: "utf8" },
-		);
+		const { stdout } = await execFileAsync("cmux", ["read-screen", "--surface", surface, "--lines", String(lines)], {
+			encoding: "utf8",
+		});
 		return stdout;
 	}
 	if (backend === "tmux") {
@@ -153,19 +136,13 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
 		return stdout;
 	}
 	if (backend === "wezterm") {
-		const { stdout } = await execFileAsync(
-			"wezterm",
-			["cli", "get-text", "--pane-id", surface],
-			{ encoding: "utf8" },
-		);
+		const { stdout } = await execFileAsync("wezterm", ["cli", "get-text", "--pane-id", surface], { encoding: "utf8" });
 		return tailLines(stdout, lines);
 	}
 	if (backend === "zellij") {
-		const { stdout } = await execFileAsync(
-			"zellij",
-			["action", "dump-screen", "--pane-id", zellijPaneId(surface)],
-			{ encoding: "utf8" },
-		);
+		const { stdout } = await execFileAsync("zellij", ["action", "dump-screen", "--pane-id", zellijPaneId(surface)], {
+			encoding: "utf8",
+		});
 		return tailLines(stdout, lines);
 	}
 	if (backend === "herdr") return readHerdrPaneScreenAsync(surface, lines);

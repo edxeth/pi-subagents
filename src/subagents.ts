@@ -1,18 +1,12 @@
-import type {
-	ExtensionAPI,
-	ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
-import type { AgentDefaults } from "./agents/definitions.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentListEntry } from "./agents/agent-list.ts";
 import {
 	getAgentListEntries as getAgentListEntriesFromDefinitions,
 	getAgentListSignature,
 	renderAgentListReminder,
 } from "./agents/agent-list.ts";
-import {
-	loadAgentDefaults as loadAgentDefaultsFromDefinitions,
-} from "./agents/definitions.ts";
-import { getNoSessionSeedMode } from "./launch/seed-child-session.ts";
+import type { AgentDefaults } from "./agents/definitions.ts";
+import { loadAgentDefaults as loadAgentDefaultsFromDefinitions } from "./agents/definitions.ts";
 import {
 	getSubagentAgentOverrideError,
 	getSubagentAgentRequirementError,
@@ -20,15 +14,12 @@ import {
 	resolveSubagentNoSession,
 } from "./launch/policy.ts";
 import { resolveSubagentCwd } from "./launch/runtime-paths.ts";
+import { getNoSessionSeedMode } from "./launch/seed-child-session.ts";
+
 export { resolveSubagentConfigDir } from "./launch/runtime-paths.ts";
 export { buildSkillLaunchPlan as buildSkillLaunchPlanForTest } from "./launch/skills.ts";
-import {
-	resolveEffectiveSessionMode as resolveEffectiveSessionModeFromSessionFiles,
-	resolveTaskSessionMode as resolveTaskSessionModeFromSessionFiles,
-	type SubagentSessionMode,
-} from "./session/session-files.ts";
+
 import { isMuxAvailable, muxSetupHint } from "./mux.ts";
-import type { SubagentParamsInput } from "./types.ts";
 import {
 	formatElapsed,
 	getLaunchedSubagentResult,
@@ -46,12 +37,19 @@ import {
 	widgetManager,
 	wireSubagentSteerBack,
 } from "./runtime/wiring.ts";
-export { getShellReadyDelayMs } from "./runtime/wiring.ts";
+import {
+	resolveEffectiveSessionMode as resolveEffectiveSessionModeFromSessionFiles,
+	resolveTaskSessionMode as resolveTaskSessionModeFromSessionFiles,
+	type SubagentSessionMode,
+} from "./session/session-files.ts";
+import type { SubagentParamsInput } from "./types.ts";
+
 export {
 	getCompletedSubagentResultForTest,
 	getLaunchedSubagentResultForTest,
 	getPiInvocationForTest,
 	getPiShellPartsForTest,
+	getShellReadyDelayMs,
 	getStartedSubagentDetailsForTest,
 	getSubagentChildProcessEnvForTest,
 	renderSubagentWidgetForTest,
@@ -61,26 +59,28 @@ export {
 	shutdownSubagentsForTest,
 	waitForSubagentForTest,
 } from "./runtime/wiring.ts";
+
+import { traceSubagentLaunch } from "./launch/trace.ts";
+import { classifyAssistantMessageForMixedBatch } from "./runtime/batch-classifier.ts";
 import {
 	markSubagentBatchBlocking,
 	requestSubagentBatchStop,
 	resetSubagentBatchStopRequest,
 	stopAfterCurrentSubagentBatch,
 } from "./runtime/state.ts";
-import { classifyAssistantMessageForMixedBatch } from "./runtime/batch-classifier.ts";
-import { ORCHESTRATOR_ALLOWED_TOOL_NAMES, SUBAGENT_TOOL_NAME } from "./tools/tool-names.ts";
-import { registerSubagentCommands } from "./tools/commands.ts";
 import { registerSubagentMessageRenderers } from "./tools/message-renderers.ts";
 import { registerSubagentResumeTool } from "./tools/resume-tool.ts";
 import { markInitialPromptLaunchComplete, registerSubagentCoreTools } from "./tools/subagent-tools.ts";
-import { traceSubagentLaunch } from "./launch/trace.ts";
 import { registerSubagentsView } from "./tools/subagents-view.ts";
+import { ORCHESTRATOR_ALLOWED_TOOL_NAMES, SUBAGENT_TOOL_NAME } from "./tools/tool-names.ts";
 
-export { markSubagentBatchBlocking as markSubagentBatchBlockingForTest } from "./runtime/state.ts";
-export { requestSubagentBatchStop as requestSubagentBatchStopForTest } from "./runtime/state.ts";
-export { getSubagentBatchStopMetadata as getSubagentBatchStopMetadataForTest } from "./runtime/state.ts";
-export { shouldAwaitSubagentLaunch as shouldAwaitSubagentLaunchForTest } from "./runtime/running-registry.ts";
 export { classifyAssistantMessageForMixedBatch as classifyAssistantMessageForMixedBatchForTest } from "./runtime/batch-classifier.ts";
+export { shouldAwaitSubagentLaunch as shouldAwaitSubagentLaunchForTest } from "./runtime/running-registry.ts";
+export {
+	getSubagentBatchStopMetadata as getSubagentBatchStopMetadataForTest,
+	markSubagentBatchBlocking as markSubagentBatchBlockingForTest,
+	requestSubagentBatchStop as requestSubagentBatchStopForTest,
+} from "./runtime/state.ts";
 export * from "./testing/test-helpers.ts";
 
 export function loadAgentDefaults(
@@ -88,17 +88,10 @@ export function loadAgentDefaults(
 	cwdHint?: string | null,
 	baseCwd = process.cwd(),
 ): AgentDefaults | null {
-	return loadAgentDefaultsFromDefinitions(
-		agentName,
-		cwdHint,
-		baseCwd,
-		resolveSubagentCwd,
-	);
+	return loadAgentDefaultsFromDefinitions(agentName, cwdHint, baseCwd, resolveSubagentCwd);
 }
 
-function getAgentListEntries(
-	baseCwd = process.cwd(),
-): AgentListEntry[] {
+function getAgentListEntries(baseCwd = process.cwd()): AgentListEntry[] {
 	return getAgentListEntriesFromDefinitions(baseCwd, resolveTaskSessionMode);
 }
 
@@ -109,14 +102,8 @@ function resolveEffectiveSessionMode(
 	return resolveEffectiveSessionModeFromSessionFiles(params, agentDefs);
 }
 
-function resolveTaskSessionMode(
-	agentDefs: AgentDefaults | null,
-): SubagentSessionMode {
-	return resolveTaskSessionModeFromSessionFiles(
-		agentDefs,
-		resolveSubagentNoSession,
-		getNoSessionSeedMode,
-	);
+function resolveTaskSessionMode(agentDefs: AgentDefaults | null): SubagentSessionMode {
+	return resolveTaskSessionModeFromSessionFiles(agentDefs, resolveSubagentNoSession, getNoSessionSeedMode);
 }
 
 let lastAmbientRosterSignature: string | null = null;
@@ -128,9 +115,10 @@ let pendingAmbientRoster: {
 } | null = null;
 
 function muxUnavailableResult(kind: "subagents" | "tab-title" = "subagents") {
-	const text = kind === "tab-title"
-		? `Terminal multiplexer not available. ${muxSetupHint()}`
-		: `Subagents require a supported terminal multiplexer. ${muxSetupHint()}`;
+	const text =
+		kind === "tab-title"
+			? `Terminal multiplexer not available. ${muxSetupHint()}`
+			: `Subagents require a supported terminal multiplexer. ${muxSetupHint()}`;
 	return {
 		content: [{ type: "text" as const, text }],
 		details: { error: "mux not available" },
@@ -165,9 +153,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// Restrict active tools in orchestrator mode
 		if (ORCHESTRATOR_MODE) {
 			const allTools = pi.getAllTools().map((t: { name: string }) => t.name);
-			const allowed = allTools.filter((t: string) =>
-				ORCHESTRATOR_ALLOWED_TOOLS.has(t),
-			);
+			const allowed = allTools.filter((t: string) => ORCHESTRATOR_ALLOWED_TOOLS.has(t));
 			pi.setActiveTools(allowed);
 		}
 
@@ -237,7 +223,7 @@ When you have sub-agent results and need follow-up work:
 | Verifying code a different agent just wrote | **Spawn fresh** — fresh eyes avoid confirmation bias |
 | First attempt used the wrong approach entirely | **Spawn fresh** — clean slate avoids anchoring |
 
-Think about how much of the sub-agent\'s context overlaps with the next task. High overlap → resume. Low overlap → spawn fresh.
+Think about how much of the sub-agent's context overlaps with the next task. High overlap → resume. Low overlap → spawn fresh.
 
 ### Parallel delegation
 
@@ -269,9 +255,7 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 						details: {
 							entries: pendingAmbientRoster.entries,
 							signature: pendingAmbientRoster.signature,
-							...(pendingAmbientRoster.supersedes
-								? { supersedes: true }
-								: {}),
+							...(pendingAmbientRoster.supersedes ? { supersedes: true } : {}),
 						},
 					},
 				}
@@ -287,9 +271,7 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 
 		// Orchestrator mode: replace system prompt, but preserve user's APPEND_SYSTEM.md
 		const appendPrompt = event.systemPromptOptions?.appendSystemPrompt;
-		const systemPrompt = appendPrompt
-			? `${ORCHESTRATOR_BASE_PROMPT}\n\n${appendPrompt}`
-			: ORCHESTRATOR_BASE_PROMPT;
+		const systemPrompt = appendPrompt ? `${ORCHESTRATOR_BASE_PROMPT}\n\n${appendPrompt}` : ORCHESTRATOR_BASE_PROMPT;
 
 		return {
 			...(rosterResult ?? {}),
@@ -313,9 +295,7 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 		// switch with the existing coordinator-only-turn behavior.
 		const message = event?.message;
 		if (!message) return;
-		classifyAssistantMessageForMixedBatch(message, (agent, cwd) =>
-			agent ? loadAgentDefaults(agent, cwd) : null,
-		);
+		classifyAssistantMessageForMixedBatch(message, (agent, cwd) => (agent ? loadAgentDefaults(agent, cwd) : null));
 	});
 
 	pi.on("tool_call", (event) => {
@@ -323,10 +303,7 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 		const input = event.input as Partial<SubagentParamsInput>;
 		const agentDefs =
 			typeof input.agent === "string"
-				? loadAgentDefaults(
-						input.agent,
-						typeof input.cwd === "string" ? input.cwd : undefined,
-					)
+				? loadAgentDefaults(input.agent, typeof input.cwd === "string" ? input.cwd : undefined)
 				: null;
 		const agentError = getSubagentAgentRequirementError(input, agentDefs);
 		const agentOverrideError = getSubagentAgentOverrideError(input, agentDefs);
@@ -383,7 +360,7 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 	const shouldRegister = (name: string) => !deniedTools.has(name);
 
 	registerSubagentCoreTools(pi, shouldRegister, {
-		loadAgentDefaults: (agentName, cwd) => agentName ? loadAgentDefaults(agentName, undefined, cwd) : null,
+		loadAgentDefaults: (agentName, cwd) => (agentName ? loadAgentDefaults(agentName, undefined, cwd) : null),
 		resolveEffectiveSessionMode,
 		resolveTaskSessionMode,
 		launchBackgroundSubagent,
@@ -414,10 +391,6 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 		},
 	});
 
-	registerSubagentCommands(pi, {
-		stopRunningSubagent,
-	});
-
 	registerSubagentMessageRenderers(pi, formatElapsed);
 
 	registerSubagentsView(pi, {
@@ -432,5 +405,4 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 		pi,
 		wireSubagentSteerBack,
 	});
-
 }

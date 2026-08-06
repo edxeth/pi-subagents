@@ -1,16 +1,13 @@
+import { closeSurfaceAsync } from "../../src/mux/io.ts";
 import {
 	assert,
-	execFileSync,
-	existsSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-	join,
-	describe,
-	it,
 	closeSurface,
 	createSurface,
 	createSurfaceSplit,
+	createTestDir,
+	describe,
+	execFileSync,
+	existsSync,
 	exitStatusVar,
 	getMuxBackend,
 	isCmuxAvailable,
@@ -18,21 +15,24 @@ import {
 	isMuxAvailable,
 	isTmuxAvailable,
 	isZellijAvailable,
+	it,
+	join,
 	muxSetupHint,
+	ORIGINAL_ENV,
 	pollForExit,
+	readFileSync,
 	readScreen,
 	readScreenAsync,
 	renameCurrentTab,
 	renameWorkspace,
+	rmSync,
 	sendCommand,
 	sendShellCommand,
 	shellEscape,
-	createTestDir,
 	sleep,
 	writeExecutable,
-	ORIGINAL_ENV,
+	writeFileSync,
 } from "../support/index.ts";
-import { closeSurfaceAsync } from "../../src/mux/io.ts";
 
 describe("mux.ts", async () => {
 	describe("shellEscape", async () => {
@@ -120,14 +120,10 @@ describe("mux.ts", async () => {
 			writeFileSync(`${sessionFile}.exit`, JSON.stringify({ type: "done" }));
 
 			try {
-				const result = await pollForExit(
-					"ignored",
-					new AbortController().signal,
-					{
-						interval: 10,
-						sessionFile,
-					},
-				);
+				const result = await pollForExit("ignored", new AbortController().signal, {
+					interval: 10,
+					sessionFile,
+				});
 				assert.equal(result.reason, "done");
 				assert.equal(result.exitCode, 0);
 				assert.equal(existsSync(`${sessionFile}.exit`), false);
@@ -150,14 +146,10 @@ describe("mux.ts", async () => {
 			);
 
 			try {
-				const result = await pollForExit(
-					"ignored",
-					new AbortController().signal,
-					{
-						interval: 10,
-						sessionFile,
-					},
-				);
+				const result = await pollForExit("ignored", new AbortController().signal, {
+					interval: 10,
+					sessionFile,
+				});
 				assert.equal(result.reason, "ping");
 				assert.equal(result.exitCode, 0);
 				assert.deepEqual(result.ping, {
@@ -171,164 +163,107 @@ describe("mux.ts", async () => {
 		});
 	});
 
-	const canRunTmuxIntegration =
-		!!ORIGINAL_ENV.TMUX && !!ORIGINAL_ENV.TMUX_PANE && isTmuxAvailable();
+	const canRunTmuxIntegration = !!ORIGINAL_ENV.TMUX && !!ORIGINAL_ENV.TMUX_PANE && isTmuxAvailable();
 
 	describe("tmux integration", async () => {
 		const maybeIt = canRunTmuxIntegration ? it : it.skip;
 
-		maybeIt(
-			"creates panes, sends commands, reads output, and closes them",
-			async () => {
-				let baseSurface: string | undefined;
-				let splitSurface: string | undefined;
-				const marker = `pane-output-${Date.now()}`;
+		maybeIt("creates panes, sends commands, reads output, and closes them", async () => {
+			let baseSurface: string | undefined;
+			let splitSurface: string | undefined;
+			const marker = `pane-output-${Date.now()}`;
 
-				try {
-					baseSurface = await createSurface("Pi Test Base");
-					splitSurface = createSurfaceSplit(
-						"Pi Test Split",
-						"down",
-						baseSurface,
-					);
-					assert.notEqual(baseSurface, splitSurface);
+			try {
+				baseSurface = await createSurface("Pi Test Base");
+				splitSurface = createSurfaceSplit("Pi Test Split", "down", baseSurface);
+				assert.notEqual(baseSurface, splitSurface);
 
-					sendCommand(splitSurface, `printf '${marker}'`);
-					await sleep(250);
+				sendCommand(splitSurface, `printf '${marker}'`);
+				await sleep(250);
 
-					assert.match(
-						readScreen(splitSurface, 20).replace(/\s+/g, ""),
-						new RegExp(marker),
-					);
-					assert.match(
-						(await readScreenAsync(splitSurface, 20)).replace(/\s+/g, ""),
-						new RegExp(marker),
-					);
-				} finally {
-					if (splitSurface) {
-						try {
-							closeSurface(splitSurface);
-						} catch {}
-					}
-					if (baseSurface) {
-						try {
-							closeSurface(baseSurface);
-						} catch {}
-					}
+				assert.match(readScreen(splitSurface, 20).replace(/\s+/g, ""), new RegExp(marker));
+				assert.match((await readScreenAsync(splitSurface, 20)).replace(/\s+/g, ""), new RegExp(marker));
+			} finally {
+				if (splitSurface) {
+					try {
+						closeSurface(splitSurface);
+					} catch {}
 				}
+				if (baseSurface) {
+					try {
+						closeSurface(baseSurface);
+					} catch {}
+				}
+			}
 
-				await sleep(150);
-				const panes = execFileSync(
-					"tmux",
-					["list-panes", "-a", "-F", "#{pane_id}"],
-					{
-						encoding: "utf8",
-					},
-				);
-				if (baseSurface) assert.ok(!panes.includes(baseSurface));
-				if (splitSurface) assert.ok(!panes.includes(splitSurface));
-			},
-		);
+			await sleep(150);
+			const panes = execFileSync("tmux", ["list-panes", "-a", "-F", "#{pane_id}"], {
+				encoding: "utf8",
+			});
+			if (baseSurface) assert.ok(!panes.includes(baseSurface));
+			if (splitSurface) assert.ok(!panes.includes(splitSurface));
+		});
 
 		maybeIt("renames the current tmux window and session", async () => {
 			const paneId = ORIGINAL_ENV.TMUX_PANE!;
-			const windowId = execFileSync(
-				"tmux",
-				["display-message", "-p", "-t", paneId, "#{window_id}"],
-				{
-					encoding: "utf8",
-				},
-			).trim();
-			const sessionId = execFileSync(
-				"tmux",
-				["display-message", "-p", "-t", paneId, "#{session_id}"],
-				{
-					encoding: "utf8",
-				},
-			).trim();
-			const originalWindowName = execFileSync(
-				"tmux",
-				["display-message", "-p", "-t", paneId, "#{window_name}"],
-				{
-					encoding: "utf8",
-				},
-			).trim();
-			const originalSessionName = execFileSync(
-				"tmux",
-				["display-message", "-p", "-t", paneId, "#{session_name}"],
-				{
-					encoding: "utf8",
-				},
-			).trim();
+			const windowId = execFileSync("tmux", ["display-message", "-p", "-t", paneId, "#{window_id}"], {
+				encoding: "utf8",
+			}).trim();
+			const sessionId = execFileSync("tmux", ["display-message", "-p", "-t", paneId, "#{session_id}"], {
+				encoding: "utf8",
+			}).trim();
+			const originalWindowName = execFileSync("tmux", ["display-message", "-p", "-t", paneId, "#{window_name}"], {
+				encoding: "utf8",
+			}).trim();
+			const originalSessionName = execFileSync("tmux", ["display-message", "-p", "-t", paneId, "#{session_name}"], {
+				encoding: "utf8",
+			}).trim();
 
 			try {
 				process.env.PI_SUBAGENT_RENAME_TMUX_WINDOW = "1";
 				renameCurrentTab("Pi Test Window");
 				assert.equal(
-					execFileSync(
-						"tmux",
-						["display-message", "-p", "-t", paneId, "#{window_name}"],
-						{
-							encoding: "utf8",
-						},
-					).trim(),
+					execFileSync("tmux", ["display-message", "-p", "-t", paneId, "#{window_name}"], {
+						encoding: "utf8",
+					}).trim(),
 					"Pi Test Window",
 				);
 
 				process.env.PI_SUBAGENT_RENAME_TMUX_SESSION = "1";
 				renameWorkspace("Pi Test Session");
 				assert.equal(
-					execFileSync(
-						"tmux",
-						["display-message", "-p", "-t", paneId, "#{session_name}"],
-						{
-							encoding: "utf8",
-						},
-					).trim(),
+					execFileSync("tmux", ["display-message", "-p", "-t", paneId, "#{session_name}"], {
+						encoding: "utf8",
+					}).trim(),
 					"Pi Test Session",
 				);
 			} finally {
-				execFileSync(
-					"tmux",
-					["rename-window", "-t", windowId, originalWindowName],
-					{ encoding: "utf8" },
-				);
-				execFileSync(
-					"tmux",
-					["rename-session", "-t", sessionId, originalSessionName],
-					{ encoding: "utf8" },
-				);
+				execFileSync("tmux", ["rename-window", "-t", windowId, originalWindowName], { encoding: "utf8" });
+				execFileSync("tmux", ["rename-session", "-t", sessionId, originalSessionName], { encoding: "utf8" });
 			}
 		});
 
-		maybeIt(
-			"polls until the subagent completion sentinel appears",
-			async () => {
-				const surface = await createSurface("Pi Test Poll");
+		maybeIt("polls until the subagent completion sentinel appears", async () => {
+			const surface = await createSurface("Pi Test Poll");
 
+			try {
+				sendCommand(surface, "sleep 0.1; printf '__SUBAGENT_DONE_7__'");
+				const ticks: number[] = [];
+				const result = await pollForExit(surface, new AbortController().signal, {
+					interval: 50,
+					onTick(elapsed) {
+						ticks.push(elapsed);
+					},
+				});
+
+				assert.equal(result.exitCode, 7);
+				assert.ok(ticks.length >= 0);
+			} finally {
 				try {
-					sendCommand(surface, "sleep 0.1; printf '__SUBAGENT_DONE_7__'");
-					const ticks: number[] = [];
-					const result = await pollForExit(
-						surface,
-						new AbortController().signal,
-						{
-							interval: 50,
-							onTick(elapsed) {
-								ticks.push(elapsed);
-							},
-						},
-					);
-
-					assert.equal(result.exitCode, 7);
-					assert.ok(ticks.length >= 0);
-				} finally {
-					try {
-						closeSurface(surface);
-					} catch {}
-				}
-			},
-		);
+					closeSurface(surface);
+				} catch {}
+			}
+		});
 
 		maybeIt("aborts polling when the caller aborts", async () => {
 			const surface = await createSurface("Pi Test Abort");
@@ -530,9 +465,7 @@ printf '%s\n' "$*" >> "$FAKE_CMUX_LOG"
 				assert.match(log, /pi-subagent-shell-/);
 				assert.match(log, /rm -f/);
 
-				const pathMatch = log.match(
-					/(\/[^\s']*pi-subagent-shell-[^\s']+\.(?:sh|fish))/,
-				);
+				const pathMatch = log.match(/(\/[^\s']*pi-subagent-shell-[^\s']+\.(?:sh|fish))/);
 				assert.ok(pathMatch);
 				stagedPath = pathMatch[1];
 				assert.equal(existsSync(stagedPath), true);
@@ -543,8 +476,7 @@ printf '%s\n' "$*" >> "$FAKE_CMUX_LOG"
 				assert.match(stagedCommand, /pi --session \/tmp\/session\.jsonl/);
 				assert.match(stagedCommand, /__SUBAGENT_DONE_/);
 			} finally {
-				if (stagedPath && existsSync(stagedPath))
-					rmSync(stagedPath, { force: true });
+				if (stagedPath && existsSync(stagedPath)) rmSync(stagedPath, { force: true });
 				rmSync(dir, { recursive: true, force: true });
 			}
 		});

@@ -1,14 +1,14 @@
 import {
-	assert,
-	mkdirSync,
-	writeFileSync,
-	join,
 	afterEach,
+	assert,
 	describe,
 	it,
+	join,
+	mkdirSync,
 	readSubagentLaunchMetadataForTest,
-	writeSubagentLaunchMetadataEntryForTest,
 	resetSubagentStateForTest,
+	writeFileSync,
+	writeSubagentLaunchMetadataEntryForTest,
 } from "../support/index.ts";
 
 describe("auto-exit persistence (no headless override leakage)", () => {
@@ -22,13 +22,16 @@ describe("auto-exit persistence (no headless override leakage)", () => {
 		const sessionFile = join(dir, "child.jsonl");
 
 		// Write minimal session header
-		writeFileSync(sessionFile, JSON.stringify({
-			type: "session",
-			version: 3,
-			id: "test-session",
-			timestamp: new Date().toISOString(),
-			cwd: dir,
-		}) + "\n");
+		writeFileSync(
+			sessionFile,
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "test-session",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
+		);
 
 		// Write metadata with auto-exit: false (as the agent file specifies)
 		await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
@@ -68,13 +71,16 @@ describe("auto-exit persistence (no headless override leakage)", () => {
 		const sessionFile = join(dir, "child.jsonl");
 
 		// Session header
-		writeFileSync(sessionFile, JSON.stringify({
-			type: "session",
-			version: 3,
-			id: "test-session-2",
-			timestamp: new Date().toISOString(),
-			cwd: dir,
-		}) + "\n");
+		writeFileSync(
+			sessionFile,
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "test-session-2",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
+		);
 
 		// Write metadata as it would be persisted after the fix
 		await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
@@ -107,8 +113,7 @@ describe("auto-exit persistence (no headless override leakage)", () => {
 		assert.equal(resumedAutoExit, false, "resume should honor auto-exit: false");
 
 		// Verify model params are also preserved
-		assert.equal(metadata!.modelRef, "zai-messages/glm-5-turbo:low",
-			"modelRef with thinking should be preserved");
+		assert.equal(metadata!.modelRef, "zai-messages/glm-5-turbo:low", "modelRef with thinking should be preserved");
 	});
 
 	it("handles missing auto-exit field gracefully (no agent default)", async () => {
@@ -116,13 +121,16 @@ describe("auto-exit persistence (no headless override leakage)", () => {
 		mkdirSync(dir, { recursive: true });
 		const sessionFile = join(dir, "child.jsonl");
 
-		writeFileSync(sessionFile, JSON.stringify({
-			type: "session",
-			version: 3,
-			id: "test-session-3",
-			timestamp: new Date().toISOString(),
-			cwd: dir,
-		}) + "\n");
+		writeFileSync(
+			sessionFile,
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "test-session-3",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
+		);
 
 		// Metadata without autoExit field
 		await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
@@ -153,13 +161,16 @@ describe("auto-exit persistence (no headless override leakage)", () => {
 		mkdirSync(dir, { recursive: true });
 		const sessionFile = join(dir, "child.jsonl");
 
-		writeFileSync(sessionFile, JSON.stringify({
-			type: "session",
-			version: 3,
-			id: "test-session-4",
-			timestamp: new Date().toISOString(),
-			cwd: dir,
-		}) + "\n");
+		writeFileSync(
+			sessionFile,
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "test-session-4",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
+		);
 
 		await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 			version: 1,

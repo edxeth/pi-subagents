@@ -1,23 +1,19 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Editor, matchesKey, Key, type Component, type EditorTheme } from "@earendil-works/pi-tui";
+import { type Component, Editor, type EditorTheme, Key, matchesKey } from "@earendil-works/pi-tui";
+import { type ResumeServiceRuntime, resumeSubagentSession } from "../../runtime/resume-service.ts";
 import { completedSubagentResults } from "../../runtime/state.ts";
-import { resumeSubagentSession, type ResumeServiceRuntime } from "../../runtime/resume-service.ts";
 import type { RunningSubagent, SubagentResult } from "../../types.ts";
+import { buildAgentItems, buildCompletedItems, buildRunningItems } from "./data.ts";
+import { getMaxScroll, renderDetail } from "./render-detail.ts";
+import { getFooterHints, renderFooter, renderHeader } from "./render-frame.ts";
+import { fitLine } from "./render-helpers.ts";
+import { getItemRowCount, renderList } from "./render-list.ts";
 import type { OverlayContext, OverlayItem, OverlayState, OverlayTui, TabId, Theme } from "./render-types.ts";
 import { TABS } from "./render-types.ts";
-import { renderHeader, renderFooter, getFooterHints } from "./render-frame.ts";
-import { getItemRowCount, renderList } from "./render-list.ts";
-import { renderDetail, getMaxScroll } from "./render-detail.ts";
-import { buildRunningItems, buildCompletedItems, buildAgentItems } from "./data.ts";
-import { fitLine } from "./render-helpers.ts";
 
 export interface OverlayRuntime extends ResumeServiceRuntime {
 	pi: ExtensionAPI;
-	wireSubagentSteerBack: (
-		pi: ExtensionAPI,
-		r: RunningSubagent,
-		p: Promise<SubagentResult>,
-	) => void;
+	wireSubagentSteerBack: (pi: ExtensionAPI, r: RunningSubagent, p: Promise<SubagentResult>) => void;
 }
 
 const TAB_ORDER: TabId[] = ["running", "completed", "agents"];
@@ -114,10 +110,22 @@ export class SubagentsOverlayController implements Component {
 			this.close();
 			return;
 		}
-		if (matchesKey(data, Key.left)) return this.switchTab(-1);
-		if (matchesKey(data, Key.right)) return this.switchTab(1);
-		if (matchesKey(data, Key.up)) return this.moveSelection(-1);
-		if (matchesKey(data, Key.down)) return this.moveSelection(1);
+		if (matchesKey(data, Key.left)) {
+			this.switchTab(-1);
+			return;
+		}
+		if (matchesKey(data, Key.right)) {
+			this.switchTab(1);
+			return;
+		}
+		if (matchesKey(data, Key.up)) {
+			this.moveSelection(-1);
+			return;
+		}
+		if (matchesKey(data, Key.down)) {
+			this.moveSelection(1);
+			return;
+		}
 
 		const item = this.selectedItem();
 		if (!item) return;
@@ -144,10 +152,16 @@ export class SubagentsOverlayController implements Component {
 		const item = this.state.view.item;
 		const maxScroll = getMaxScroll(item, this.tui.terminal?.columns ?? 80, this.bodyHeight());
 		if ((matchesKey(data, Key.down) || matchesKey(data, "j")) && this.state.view.scroll < maxScroll) {
-			this.state.view = { ...this.state.view, scroll: this.state.view.scroll + 1 };
+			this.state.view = {
+				...this.state.view,
+				scroll: this.state.view.scroll + 1,
+			};
 		}
 		if ((matchesKey(data, Key.up) || matchesKey(data, "k")) && this.state.view.scroll > 0) {
-			this.state.view = { ...this.state.view, scroll: this.state.view.scroll - 1 };
+			this.state.view = {
+				...this.state.view,
+				scroll: this.state.view.scroll - 1,
+			};
 		}
 	}
 
@@ -224,10 +238,7 @@ export class SubagentsOverlayController implements Component {
 	}
 
 	private moveSelection(direction: -1 | 1): void {
-		this.state.selectedIndex = Math.max(
-			0,
-			Math.min(this.state.items.length - 1, this.state.selectedIndex + direction),
-		);
+		this.state.selectedIndex = Math.max(0, Math.min(this.state.items.length - 1, this.state.selectedIndex + direction));
 		this.keepSelectionVisible();
 	}
 
@@ -282,7 +293,10 @@ export class SubagentsOverlayController implements Component {
 		let next = current;
 		if (start < current) next = start;
 		else if (end > current + height) next = Math.max(0, end - height);
-		this.state.listScroll = { ...this.state.listScroll, [this.state.activeTab]: next };
+		this.state.listScroll = {
+			...this.state.listScroll,
+			[this.state.activeTab]: next,
+		};
 	}
 
 	private bodyHeight(): number {
@@ -309,7 +323,12 @@ export class SubagentsOverlayController implements Component {
 	private async doResume(item: OverlayItem, message: string): Promise<void> {
 		try {
 			const running = await resumeSubagentSession(
-				{ sessionFile: item.sessionFile!, task: message, name: item.name, agent: item.agent },
+				{
+					sessionFile: item.sessionFile!,
+					task: message,
+					name: item.name,
+					agent: item.agent,
+				},
 				this.runtime,
 			);
 			if (running.completionPromise) {

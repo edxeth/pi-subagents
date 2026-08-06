@@ -1,25 +1,25 @@
 import {
-	assert,
-	mkdirSync,
-	writeFileSync,
-	join,
 	afterEach,
+	assert,
+	createTestDir,
 	describe,
-	it,
-	subagentsExtension,
 	getAgentListEntriesForTest,
+	getAgentListSignatureForTest,
 	getEffectiveAgentDefinitionsForTest,
 	getExtensionLaunchArgsForTest,
-	getAgentListSignatureForTest,
-	renderAgentListReminderForTest,
+	it,
+	join,
 	loadAgentDefaults,
+	mkdirSync,
+	renderAgentListReminderForTest,
 	resetSubagentStateForTest,
 	resolveDenyToolsForTest,
 	resolveEffectiveSessionModeForTest,
 	resolveSubagentBlockingForTest,
 	resolveSubagentExtensionsForTest,
 	resolveTaskSessionModeForTest,
-	createTestDir,
+	subagentsExtension,
+	writeFileSync,
 } from "../support/index.ts";
 
 describe("agent definitions and catalog", () => {
@@ -39,32 +39,23 @@ describe("agent definitions and catalog", () => {
 		process.env.PI_CODING_AGENT_DIR = configDir;
 
 		const defs = loadAgentDefaults("tester");
-		assert.equal(
-			defs?.extensions,
-			"./extensions/caveman.ts, npm:@foo/bar, https://example.com/ext.ts",
-		);
+		assert.equal(defs?.extensions, "./extensions/caveman.ts, npm:@foo/bar, https://example.com/ext.ts");
 		assert.deepEqual(resolveSubagentExtensionsForTest(defs), [
 			join(configDir, "extensions", "caveman.ts"),
 			"npm:@foo/bar",
 			"https://example.com/ext.ts",
 		]);
-		assert.deepEqual(
-			getExtensionLaunchArgsForTest(
-				resolveSubagentExtensionsForTest(defs),
-				"/tmp/subagent-done.ts",
-			),
-			[
-				"--no-extensions",
-				"-e",
-				"/tmp/subagent-done.ts",
-				"-e",
-				join(configDir, "extensions", "caveman.ts"),
-				"-e",
-				"npm:@foo/bar",
-				"-e",
-				"https://example.com/ext.ts",
-			],
-		);
+		assert.deepEqual(getExtensionLaunchArgsForTest(resolveSubagentExtensionsForTest(defs), "/tmp/subagent-done.ts"), [
+			"--no-extensions",
+			"-e",
+			"/tmp/subagent-done.ts",
+			"-e",
+			join(configDir, "extensions", "caveman.ts"),
+			"-e",
+			"npm:@foo/bar",
+			"-e",
+			"https://example.com/ext.ts",
+		]);
 	});
 
 	it("allows extensions none to launch child with only mandatory internal extension", () => {
@@ -81,13 +72,11 @@ describe("agent definitions and catalog", () => {
 		const defs = loadAgentDefaults("tester");
 		assert.equal(defs?.extensions, "none");
 		assert.deepEqual(resolveSubagentExtensionsForTest(defs), []);
-		assert.deepEqual(
-			getExtensionLaunchArgsForTest(
-				resolveSubagentExtensionsForTest(defs),
-				"/tmp/subagent-done.ts",
-			),
-			["--no-extensions", "-e", "/tmp/subagent-done.ts"],
-		);
+		assert.deepEqual(getExtensionLaunchArgsForTest(resolveSubagentExtensionsForTest(defs), "/tmp/subagent-done.ts"), [
+			"--no-extensions",
+			"-e",
+			"/tmp/subagent-done.ts",
+		]);
 	});
 
 	it("treats extensions all as the default extension set", () => {
@@ -95,22 +84,16 @@ describe("agent definitions and catalog", () => {
 		const configDir = join(dir, "agent-root");
 		const agentsDir = join(configDir, "agents");
 		mkdirSync(agentsDir, { recursive: true });
-		writeFileSync(
-			join(agentsDir, "tester.md"),
-			`---\nname: tester\nextensions: all\n---\n\nYou are the tester.`,
-		);
+		writeFileSync(join(agentsDir, "tester.md"), `---\nname: tester\nextensions: all\n---\n\nYou are the tester.`);
 		process.env.PI_CODING_AGENT_DIR = configDir;
 
 		const defs = loadAgentDefaults("tester");
 		assert.equal(defs?.extensions, "all");
 		assert.equal(resolveSubagentExtensionsForTest(defs), undefined);
-		assert.deepEqual(
-			getExtensionLaunchArgsForTest(
-				resolveSubagentExtensionsForTest(defs),
-				"/tmp/subagent-done.ts",
-			),
-			["-e", "/tmp/subagent-done.ts"],
-		);
+		assert.deepEqual(getExtensionLaunchArgsForTest(resolveSubagentExtensionsForTest(defs), "/tmp/subagent-done.ts"), [
+			"-e",
+			"/tmp/subagent-done.ts",
+		]);
 	});
 
 	it("rejects legacy extensions disable aliases", () => {
@@ -155,16 +138,10 @@ describe("agent definitions and catalog", () => {
 
 		const defs = loadAgentDefaults("tester");
 		assert.equal(defs?.sessionMode, "lineage-only");
-		assert.equal(
-			resolveEffectiveSessionModeForTest({ agent: "tester" }, defs),
-			"lineage-only",
-		);
+		assert.equal(resolveEffectiveSessionModeForTest({ agent: "tester" }, defs), "lineage-only");
 		assert.equal(resolveTaskSessionModeForTest(defs), "lineage-only");
 
-		assert.equal(
-			resolveEffectiveSessionModeForTest({ agent: "default" }, null),
-			"lineage-only",
-		);
+		assert.equal(resolveEffectiveSessionModeForTest({ agent: "default" }, null), "lineage-only");
 		assert.equal(resolveTaskSessionModeForTest(null), "lineage-only");
 		assert.equal(
 			resolveTaskSessionModeForTest({
@@ -190,15 +167,10 @@ describe("agent definitions and catalog", () => {
 		const defs = loadAgentDefaults("legacy");
 		assert.ok(defs);
 		assert.equal(defs?.sessionMode, undefined);
-		assert.equal(
-			resolveEffectiveSessionModeForTest({ agent: "legacy" }, defs),
-			"lineage-only",
-		);
+		assert.equal(resolveEffectiveSessionModeForTest({ agent: "legacy" }, defs), "lineage-only");
 		assert.equal(resolveSubagentBlockingForTest({}, defs), false);
 		assert.equal(
-			Object.keys(defs as Record<string, unknown>).some((key) =>
-				["fork", "blocking", "timeout"].includes(key),
-			),
+			Object.keys(defs as Record<string, unknown>).some((key) => ["fork", "blocking", "timeout"].includes(key)),
 			false,
 		);
 	});
@@ -326,14 +298,8 @@ describe("agent definitions and catalog", () => {
 		);
 
 		const defs = getEffectiveAgentDefinitionsForTest(dir);
-		assert.equal(
-			defs.find((entry) => entry.name === "project-agent")?.description,
-			"Project description",
-		);
-		assert.equal(
-			defs.find((entry) => entry.name === "global-agent")?.description,
-			"Use the global route",
-		);
+		assert.equal(defs.find((entry) => entry.name === "project-agent")?.description, "Project description");
+		assert.equal(defs.find((entry) => entry.name === "global-agent")?.description, "Use the global route");
 		assert.equal(
 			defs.some((entry) => entry.name === "disabled"),
 			false,
@@ -348,26 +314,11 @@ describe("agent definitions and catalog", () => {
 			ambient.map((entry) => entry.name),
 			["description-only", "global-agent", "lenient-enabled", "project-agent"],
 		);
-		assert.equal(
-			ambient.find((entry) => entry.name === "project-agent")?.description,
-			"Project description",
-		);
-		assert.equal(
-			ambient.find((entry) => entry.name === "description-only")?.description,
-			"Fallback description",
-		);
-		assert.equal(
-			ambient.find((entry) => entry.name === "description-only")?.sessionMode,
-			"lineage-only",
-		);
-		assert.equal(
-			ambient.find((entry) => entry.name === "global-agent")?.sessionMode,
-			"fork",
-		);
-		assert.equal(
-			ambient.find((entry) => entry.name === "project-agent")?.sessionMode,
-			"lineage-only",
-		);
+		assert.equal(ambient.find((entry) => entry.name === "project-agent")?.description, "Project description");
+		assert.equal(ambient.find((entry) => entry.name === "description-only")?.description, "Fallback description");
+		assert.equal(ambient.find((entry) => entry.name === "description-only")?.sessionMode, "lineage-only");
+		assert.equal(ambient.find((entry) => entry.name === "global-agent")?.sessionMode, "fork");
+		assert.equal(ambient.find((entry) => entry.name === "project-agent")?.sessionMode, "lineage-only");
 		assert.equal(
 			ambient.some((entry) => entry.name === "hidden-agent"),
 			false,
@@ -397,7 +348,7 @@ describe("agent definitions and catalog", () => {
 		const reminder = renderAgentListReminderForTest(entries);
 		assert.match(reminder, /default_model: zai-messages\/glm-5\.1:high/);
 		assert.match(reminder, /models: zai-messages\/glm-5\.1:high \| openai-ws\/gpt-5\.5:low \| nahcrof\/glm-5\.1:off/);
-		assert.match(reminder, /- `scout`: Inspect files\n(?:  .+\n){4,5}  models: any model ref/);
+		assert.match(reminder, /- `scout`: Inspect files\n(?: {2}.+\n){4,5} {2}models: any model ref/);
 		assert.match(reminder, /`models:` lists accepted overrides/);
 
 		const firstSignature = getAgentListSignatureForTest(entries);
@@ -439,7 +390,7 @@ describe("agent definitions and catalog", () => {
 		);
 
 		const reminder = renderAgentListReminderForTest(getAgentListEntriesForTest(dir));
-		assert.doesNotMatch(reminder, /\n  models:/);
+		assert.doesNotMatch(reminder, /\n {2}models:/);
 		assert.match(reminder, /no `models:` line ignores model and thinking overrides/);
 	});
 
@@ -450,10 +401,7 @@ describe("agent definitions and catalog", () => {
 		mkdirSync(agentsDir, { recursive: true });
 		process.env.PI_CODING_AGENT_DIR = configDir;
 
-		writeFileSync(
-			join(agentsDir, "worker.md"),
-			`---\nname: worker\ndescription: Do focused work\n---\n\nWorker body.`,
-		);
+		writeFileSync(join(agentsDir, "worker.md"), `---\nname: worker\ndescription: Do focused work\n---\n\nWorker body.`);
 		writeFileSync(
 			join(agentsDir, "coordinator.md"),
 			`---\nname: coordinator\ndescription: Coordinate work\nspawning: true\n---\n\nCoordinator body.`,
@@ -464,10 +412,7 @@ describe("agent definitions and catalog", () => {
 		const coordinator = defs.find((entry) => entry.name === "coordinator");
 		assert.equal(worker?.spawning, false);
 		assert.equal(coordinator?.spawning, true);
-		assert.deepEqual([...resolveDenyToolsForTest(worker ?? null)].sort(), [
-			"subagent",
-			"subagent_resume",
-		]);
+		assert.deepEqual([...resolveDenyToolsForTest(worker ?? null)].sort(), ["subagent", "subagent_resume"]);
 		assert.deepEqual([...resolveDenyToolsForTest(coordinator ?? null)], []);
 	});
 
@@ -485,10 +430,7 @@ describe("agent definitions and catalog", () => {
 
 		const first = getAgentListEntriesForTest(dir);
 		const second = getAgentListEntriesForTest(dir);
-		assert.equal(
-			getAgentListSignatureForTest(first),
-			getAgentListSignatureForTest(second),
-		);
+		assert.equal(getAgentListSignatureForTest(first), getAgentListSignatureForTest(second));
 
 		writeFileSync(
 			join(agentsDir, "reviewer.md"),
@@ -496,10 +438,7 @@ describe("agent definitions and catalog", () => {
 		);
 
 		const changed = getAgentListEntriesForTest(dir);
-		assert.notEqual(
-			getAgentListSignatureForTest(first),
-			getAgentListSignatureForTest(changed),
-		);
+		assert.notEqual(getAgentListSignatureForTest(first), getAgentListSignatureForTest(changed));
 	});
 
 	it("registers conservative delegation guidance on the subagent tool", () => {
@@ -519,31 +458,16 @@ describe("agent definitions and catalog", () => {
 		const tool = tools.get("subagent");
 		assert.ok(tool);
 		assert.match(tool.description, /named helper agents from the subagent roster/);
-		assert.match(
-			tool.promptSnippet,
-			/separate helper processes you can launch to do work outside this chat turn/,
-		);
+		assert.match(tool.promptSnippet, /separate helper processes you can launch to do work outside this chat turn/);
 		assert.match(
 			tool.promptSnippet,
 			/Use exact agent names and behavior fields from the subagent roster when present; field meanings are defined in <subagent-rules>/,
 		);
 		assert.match(tool.promptSnippet, /make one subagent call with children/);
-		assert.match(
-			tool.promptSnippet,
-			/include each named agent exactly once/,
-		);
-		assert.match(
-			tool.promptSnippet,
-			/Do not substitute one agent for another/,
-		);
-		assert.match(
-			tool.promptSnippet,
-			/Translate the user.s request into each helper.s task/,
-		);
-		assert.match(
-			tool.promptSnippet,
-			/do not change the work just because of the agent name/,
-		);
+		assert.match(tool.promptSnippet, /include each named agent exactly once/);
+		assert.match(tool.promptSnippet, /Do not substitute one agent for another/);
+		assert.match(tool.promptSnippet, /Translate the user.s request into each helper.s task/);
+		assert.match(tool.promptSnippet, /do not change the work just because of the agent name/);
 		assert.match(
 			tool.promptSnippet,
 			/write readable Markdown with objective, scope, relevant files\/facts, constraints, and requested output/,
@@ -552,26 +476,14 @@ describe("agent definitions and catalog", () => {
 			tool.promptSnippet,
 			/Do small direct work yourself: quick answers, simple file reads, and tiny one-shot edits/,
 		);
-		assert.match(
-			tool.promptSnippet,
-			/Do not redo delegated work/,
-		);
-		assert.match(
-			tool.promptSnippet,
-			/do not claim the helper's findings before its later message appears/,
-		);
+		assert.match(tool.promptSnippet, /Do not redo delegated work/);
+		assert.match(tool.promptSnippet, /do not claim the helper's findings before its later message appears/);
 		assert.match(
 			tool.promptSnippet,
 			/For helpers with tool_return=later_message, the runtime may stop after this tool batch/,
 		);
-		assert.match(
-			tool.promptSnippet,
-			/Do not redo delegated work or claim results before the later report appears/,
-		);
-		assert.doesNotMatch(
-			tool.promptSnippet,
-			/PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN/,
-		);
+		assert.match(tool.promptSnippet, /Do not redo delegated work or claim results before the later report appears/);
+		assert.doesNotMatch(tool.promptSnippet, /PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN/);
 	});
 
 	it("registers opt-out delegation guidance when coordinator-only turn stop is disabled", () => {
@@ -596,10 +508,6 @@ describe("agent definitions and catalog", () => {
 			/You may continue with non-overlapping work after launching a tool_return=later_message helper/,
 		);
 		assert.match(tool.promptSnippet, /Do not redo delegated work/);
-		assert.doesNotMatch(
-			tool.promptSnippet,
-			/For helpers with tool_return=later_message, the runtime may stop/,
-		);
+		assert.doesNotMatch(tool.promptSnippet, /For helpers with tool_return=later_message, the runtime may stop/);
 	});
-
 });

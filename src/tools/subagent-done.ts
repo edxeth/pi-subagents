@@ -11,24 +11,13 @@ import {
 	shouldAutoExitOnAgentEnd,
 	shouldMarkUserTookOver,
 } from "../auto-exit.ts";
-import { ProviderErrorRecoveryController, resolveProviderRecoveryDelaysMs } from "./provider-error-recovery.ts";
 import { PI_SUBAGENT_APPEND_SYSTEM_PROMPT } from "../launch/append-system.ts";
 import { writeSubagentExitSidecar } from "../session/exit-sidecar.ts";
-import {
-	CALLER_PING_TOOL_NAME,
-	SUBAGENT_DONE_TOOL_NAME,
-} from "./tool-names.ts";
-import {
-	registerSetTabTitleTool,
-	shouldRegisterSetTabTitleTool,
-} from "./set-tab-title.ts";
-import {
-	installSubagentContextReminders,
-} from "./context-reminders.ts";
-import {
-	getFinalContextSnapshot,
-	type FinalContextSnapshot,
-} from "./final-context-snapshot.ts";
+import { installSubagentContextReminders } from "./context-reminders.ts";
+import { type FinalContextSnapshot, getFinalContextSnapshot } from "./final-context-snapshot.ts";
+import { ProviderErrorRecoveryController, resolveProviderRecoveryDelaysMs } from "./provider-error-recovery.ts";
+import { registerSetTabTitleTool, shouldRegisterSetTabTitleTool } from "./set-tab-title.ts";
+import { CALLER_PING_TOOL_NAME, SUBAGENT_DONE_TOOL_NAME } from "./tool-names.ts";
 
 const require = createRequire(import.meta.url);
 const TOOL_BOUNDARY_RECOVERY_NUDGE = "continue";
@@ -47,21 +36,16 @@ function endedAtToolUseBoundary(messages: unknown[] | undefined): boolean {
 
 function isMissingOptionalDependency(error: unknown, id: string): boolean {
 	const maybeError = error as { code?: unknown; message?: unknown } | null;
-	const message =
-		typeof maybeError?.message === "string" ? maybeError.message : "";
+	const message = typeof maybeError?.message === "string" ? maybeError.message : "";
 	const code = maybeError?.code;
 	return (
 		(code === "MODULE_NOT_FOUND" || code == null) &&
-		(message.includes("Cannot find module") ||
-			message.includes("Cannot find package")) &&
+		(message.includes("Cannot find module") || message.includes("Cannot find package")) &&
 		message.includes(id)
 	);
 }
 
-export function isMissingOptionalDependencyForTest(
-	error: unknown,
-	id: string,
-): boolean {
+export function isMissingOptionalDependencyForTest(error: unknown, id: string): boolean {
 	return isMissingOptionalDependency(error, id);
 }
 
@@ -76,10 +60,7 @@ function optionalRequire(id: string): unknown | null {
 	}
 }
 
-export function getDeniedToolNames(
-	autoExit: boolean,
-	deniedEnv = process.env.PI_DENY_TOOLS ?? "",
-): string[] {
+export function getDeniedToolNames(autoExit: boolean, deniedEnv = process.env.PI_DENY_TOOLS ?? ""): string[] {
 	const denied = deniedEnv
 		.split(",")
 		.map((s) => s.trim())
@@ -90,10 +71,7 @@ export function getDeniedToolNames(
 	return denied;
 }
 
-export function filterToolNames(
-	toolNames: string[],
-	deniedTools: string[],
-): string[] {
+export function filterToolNames(toolNames: string[], deniedTools: string[]): string[] {
 	const denied = new Set(deniedTools);
 	const seen = new Set<string>();
 	return toolNames.filter((name) => {
@@ -103,21 +81,14 @@ export function filterToolNames(
 	});
 }
 
-export function shouldRegisterSubagentDone(
-	autoExit: boolean,
-	deniedTools: string[],
-	isInteractive = false,
-): boolean {
+export function shouldRegisterSubagentDone(autoExit: boolean, deniedTools: string[], isInteractive = false): boolean {
 	if (deniedTools.includes(SUBAGENT_DONE_TOOL_NAME)) return false;
 	if (autoExit) return false;
 	if (isInteractive) return false;
 	return true;
 }
 
-type ToolControlAPI = Pick<
-	ExtensionAPI,
-	"getAllTools" | "getActiveTools" | "setActiveTools" | "registerTool"
->;
+type ToolControlAPI = Pick<ExtensionAPI, "getAllTools" | "getActiveTools" | "setActiveTools" | "registerTool">;
 
 type WidgetThemeLike = {
 	bg(tone: string, text: string): string;
@@ -198,17 +169,10 @@ export default function (pi: ExtensionAPI) {
 		}, 0);
 	}
 
-	function writeExitSignal(
-		payload: object,
-		opts?: { supersede?: boolean },
-	) {
+	function writeExitSignal(payload: object, opts?: { supersede?: boolean }) {
 		const sessionFile = process.env.PI_SUBAGENT_SESSION;
 		if (!sessionFile) return;
-		writeSubagentExitSidecar(
-			sessionFile,
-			{ ...payload, ...finalContextUsage },
-			opts,
-		);
+		writeSubagentExitSidecar(sessionFile, { ...payload, ...finalContextUsage }, opts);
 	}
 
 	const subagentName = process.env.PI_SUBAGENT_NAME ?? "";
@@ -239,8 +203,10 @@ export default function (pi: ExtensionAPI) {
 	// failure when the process is about to exit before a delayed nudge can fire
 	// (notably `pi -p` background children, which exit as soon as Pi's own retries
 	// finish).
-	let pendingProviderError: { errorMessage: string; stopReason: "error" } | null =
-		null;
+	let pendingProviderError: {
+		errorMessage: string;
+		stopReason: "error";
+	} | null = null;
 	type PendingPiRecovery = {
 		token: number;
 		errorMessage: string;
@@ -312,9 +278,7 @@ export default function (pi: ExtensionAPI) {
 					const avail = Math.max(1, ((_tui as { terminal?: { columns?: number } })?.terminal?.columns ?? 80) - 1);
 
 					// Build visible text first, truncate BEFORE ANSI wrapping
-					const visibleLabel = subagentAgent
-						? `${subagentName} (${subagentAgent})`
-						: subagentName;
+					const visibleLabel = subagentAgent ? `${subagentName} (${subagentAgent})` : subagentName;
 					const visiblePrefix = "▸ Agent ";
 
 					let displayLabel = visibleLabel;
@@ -326,13 +290,9 @@ export default function (pi: ExtensionAPI) {
 					// Split truncated label into name and suffix for different styling
 					const nameLen = Math.min(subagentName.length, displayLabel.length);
 					const styledName = theme.bold(displayLabel.slice(0, nameLen));
-					const styledSuffix =
-						nameLen < displayLabel.length
-							? theme.fg("muted", displayLabel.slice(nameLen))
-							: "";
+					const styledSuffix = nameLen < displayLabel.length ? theme.fg("muted", displayLabel.slice(nameLen)) : "";
 
-					const line =
-						`${theme.fg("accent", "▸")} ${theme.fg("accent", "Agent")} ${styledName}${styledSuffix}`;
+					const line = `${theme.fg("accent", "▸")} ${theme.fg("accent", "Agent")} ${styledName}${styledSuffix}`;
 					return [line];
 				},
 				invalidate: () => {},
@@ -343,8 +303,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("before_agent_start", (event) => {
 		enforceDeniedTools();
-		const appendSystemPrompt =
-			process.env[PI_SUBAGENT_APPEND_SYSTEM_PROMPT]?.trim();
+		const appendSystemPrompt = process.env[PI_SUBAGENT_APPEND_SYSTEM_PROMPT]?.trim();
 		if (!appendSystemPrompt) return;
 		return {
 			systemPrompt: `${event.systemPrompt}\n\n${appendSystemPrompt}`,
@@ -387,11 +346,7 @@ export default function (pi: ExtensionAPI) {
 		if (!pending) return;
 		if (event.reason !== "overflow" || !event.willRetry) return;
 		armPiRecoveryFailureTimer(piRecoveryCompactionTimeoutMs);
-		event.signal.addEventListener(
-			"abort",
-			() => failPendingPiRecovery(pending.token),
-			{ once: true },
-		);
+		event.signal.addEventListener("abort", () => failPendingPiRecovery(pending.token), { once: true });
 	});
 
 	pi.on("session_compact", (event) => {
@@ -452,9 +407,7 @@ export default function (pi: ExtensionAPI) {
 		});
 
 		pi.on("agent_end", (event, ctx) => {
-			const messages = event.messages as Parameters<
-				typeof shouldAutoExitOnAgentEnd
-			>[0];
+			const messages = event.messages as Parameters<typeof shouldAutoExitOnAgentEnd>[0];
 			const shouldExit = shouldAutoExitOnAgentEnd(messages);
 			if (!shouldExit || operatorInputQueuedThisRun) {
 				// Agent turn was aborted (Escape), or the operator sent a queued
@@ -462,17 +415,11 @@ export default function (pi: ExtensionAPI) {
 				// autonomous recovery action.
 				if (!shouldExit && isInteractive) {
 					autoExitDisabledByOperator = true;
-					ctx.ui.setStatus(
-						AUTO_EXIT_STATUS_KEY,
-						"Auto-exit disabled — close manually or /auto-exit to re-enable",
-					);
+					ctx.ui.setStatus(AUTO_EXIT_STATUS_KEY, "Auto-exit disabled — close manually or /auto-exit to re-enable");
 					ctx.ui.notify("Auto-exit disabled \u2014 close manually or /auto-exit to re-enable", "warning");
 				}
 				if (operatorInputQueuedThisRun && autoExitDisabledByOperator && isInteractive) {
-					ctx.ui.setStatus(
-						AUTO_EXIT_STATUS_KEY,
-						"Auto-exit disabled — close manually or /auto-exit to re-enable",
-					);
+					ctx.ui.setStatus(AUTO_EXIT_STATUS_KEY, "Auto-exit disabled — close manually or /auto-exit to re-enable");
 				}
 				providerErrorRecovery.cancelPendingRecovery(operatorInputQueuedThisRun);
 				cancelPendingPiRecovery();
@@ -484,8 +431,7 @@ export default function (pi: ExtensionAPI) {
 			// so background children do not exit before a delayed retry can fire, but
 			// bound the retries so a persistently broken provider cannot loop forever.
 			const intentionallyTerminatedToolBatch =
-				toolExecutionsThisTurn > 0 &&
-				toolExecutionsThisTurn === terminatingToolExecutionsThisTurn;
+				toolExecutionsThisTurn > 0 && toolExecutionsThisTurn === terminatingToolExecutionsThisTurn;
 			if (endedAtToolUseBoundary(messages) && !intentionallyTerminatedToolBatch) {
 				pendingProviderError = null;
 				providerErrorRecovery.cancelPendingRecovery();
@@ -580,30 +526,31 @@ export default function (pi: ExtensionAPI) {
 				"The launching chat can later send follow-up instructions to continue this helper.",
 			parameters: callerPingParams,
 			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const sessionFile = process.env.PI_SUBAGENT_SESSION;
-			if (!sessionFile) {
-				throw new Error(
-					"caller_ping is only available in subagent contexts. " +
-						"PI_SUBAGENT_SESSION environment variable is not set.",
-				);
-			}
+				const sessionFile = process.env.PI_SUBAGENT_SESSION;
+				if (!sessionFile) {
+					throw new Error(
+						"caller_ping is only available in subagent contexts. " +
+							"PI_SUBAGENT_SESSION environment variable is not set.",
+					);
+				}
 
-			writeExitSignal({
-				type: "ping",
-				name: process.env.PI_SUBAGENT_NAME ?? "subagent",
-				message: params.message,
-				outputTokens,
-			}, { supersede: true });
-			requestShutdown(ctx);
-			return {
-				content: [
-					{ type: "text", text: "Ping sent. Parent will be notified." },
-				],
-				details: {},
-			};
-		},
-	});
-}
+				writeExitSignal(
+					{
+						type: "ping",
+						name: process.env.PI_SUBAGENT_NAME ?? "subagent",
+						message: params.message,
+						outputTokens,
+					},
+					{ supersede: true },
+				);
+				requestShutdown(ctx);
+				return {
+					content: [{ type: "text", text: "Ping sent. Parent will be notified." }],
+					details: {},
+				};
+			},
+		});
+	}
 
 	if (shouldRegisterSubagentDone(autoExit, denied, isInteractive)) {
 		pi.registerTool({
@@ -625,7 +572,7 @@ export default function (pi: ExtensionAPI) {
 		});
 	}
 
-	// set_tab_title is a child-side protocol tool (see SUBAGENT_PROTOCOL_TOOL_NAMES).
+	// set_tab_title is a child-side protocol tool.
 	// The mandatory child extension registers it under the same opt-in as the
 	// parent so the declared contract holds even when `extensions: none` strips
 	// the main pi-subagents extension from the child.

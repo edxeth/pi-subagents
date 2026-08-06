@@ -12,12 +12,10 @@ const SET_TAB_TITLE_DESCRIPTION =
  * Whether the optional set_tab_title tool should be registered for the given
  * denied-tool set. Gated on the PI_SUBAGENT_ENABLE_SET_TAB_TITLE opt-in and on
  * the tool not being denied. Shared by the parent extension and the mandatory
- * child extension so the SUBAGENT_PROTOCOL_TOOL_NAMES contract actually holds
- * even under `extensions: none`.
+ * child extension so the child-side protocol tool contract actually holds even
+ * under `extensions: none`.
  */
-export function shouldRegisterSetTabTitleTool(
-	deniedTools: ReadonlySet<string>,
-): boolean {
+export function shouldRegisterSetTabTitleTool(deniedTools: ReadonlySet<string>): boolean {
 	return isSetTabTitleToolEnabled() && !deniedTools.has(SET_TAB_TITLE_TOOL_NAME);
 }
 
@@ -55,9 +53,7 @@ export function registerSetTabTitleTool(pi: ExtensionAPI): void {
 				renameCurrentTab(params.title);
 				renameWorkspace(params.title);
 				return asSubagentToolResult({
-					content: [
-						{ type: "text" as const, text: `Title set to: ${params.title}` },
-					],
+					content: [{ type: "text" as const, text: `Title set to: ${params.title}` }],
 					details: { title: params.title },
 				});
 			} catch (err: unknown) {

@@ -1,4 +1,8 @@
-import type { ChildContextBoundaryOptions, PersistedSubagentLaunchMetadata, SubagentSessionMode } from "./session-files.ts";
+import type {
+	ChildContextBoundaryOptions,
+	PersistedSubagentLaunchMetadata,
+	SubagentSessionMode,
+} from "./session-files.ts";
 import {
 	readSubagentExtensionEntry,
 	readSubagentLaunchMetadata,
@@ -46,10 +50,7 @@ export class ChildSessionStorage {
 		writeSubagentModelStateEntries(this.path, metadata);
 	}
 
-	async writeLaunchMetadataWhenReady(
-		metadata: PersistedSubagentLaunchMetadata,
-		timeoutMs = 5000,
-	): Promise<void> {
+	async writeLaunchMetadataWhenReady(metadata: PersistedSubagentLaunchMetadata, timeoutMs = 5000): Promise<void> {
 		await writeSubagentLaunchMetadataEntryWhenReady(this.path, metadata, timeoutMs);
 	}
 

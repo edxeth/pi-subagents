@@ -1,19 +1,19 @@
 import {
-	assert,
-	mkdirSync,
-	writeFileSync,
-	join,
 	afterEach,
+	assert,
+	createTestDir,
 	describe,
-	it,
 	getBaseSubagentEnvVarsForTest,
+	it,
+	join,
 	loadAgentDefaults,
+	mkdirSync,
 	parseEnvStringForTest,
 	readSubagentLaunchMetadataForTest,
 	resetSubagentStateForTest,
 	resolveSubagentRuntimePathsForTest,
+	writeFileSync,
 	writeSubagentLaunchMetadataEntryForTest,
-	createTestDir,
 } from "../support/index.ts";
 
 describe("env frontmatter field", () => {
@@ -22,7 +22,10 @@ describe("env frontmatter field", () => {
 	});
 
 	it("parses block KEY=VALUE pairs without splitting commas or equals in values", () => {
-		assert.deepEqual(parseEnvStringForTest("FOO=bar\nBAZ=qux"), { FOO: "bar", BAZ: "qux" });
+		assert.deepEqual(parseEnvStringForTest("FOO=bar\nBAZ=qux"), {
+			FOO: "bar",
+			BAZ: "qux",
+		});
 		assert.deepEqual(parseEnvStringForTest("FOO=value,with,commas\nTOKEN=a=b=c"), {
 			FOO: "value,with,commas",
 			TOKEN: "a=b=c",
@@ -78,7 +81,10 @@ describe("env frontmatter field", () => {
 
 		assert.equal(paths.localAgentConfigDir, childConfigDir);
 		assert.equal(paths.effectiveAgentConfigDir, childConfigDir);
-		assert.equal(paths.sessionDir, join(childConfigDir, "sessions", `--${dir.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`));
+		assert.equal(
+			paths.sessionDir,
+			join(childConfigDir, "sessions", `--${dir.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`),
+		);
 	});
 
 	it("returns empty env record when no env field is set", () => {

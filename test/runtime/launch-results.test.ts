@@ -1,22 +1,22 @@
 import {
-	assert,
-	mkdirSync,
-	writeFileSync,
-	join,
 	afterEach,
+	assert,
+	createTestDir,
 	describe,
-	it,
-	subagentsExtension,
+	getAgentListSignatureForTest,
 	getCompletedSubagentResultForTest,
 	getLaunchedSubagentResultForTest,
+	it,
+	join,
 	markSubagentBatchBlockingForTest,
-	getAgentListSignatureForTest,
+	mkdirSync,
 	renderAgentListReminderForTest,
 	resetSubagentStateForTest,
 	routeDetachedSubagentCompletionForTest,
 	setRunningSubagentForTest,
+	subagentsExtension,
 	waitForSubagentForTest,
-	createTestDir,
+	writeFileSync,
 } from "../support/index.ts";
 
 describe("subagent launch result delivery", () => {
@@ -39,9 +39,7 @@ describe("subagent launch result delivery", () => {
 			sessionFile: "/tmp/child-terminate.jsonl",
 		};
 
-		const result = (await getLaunchedSubagentResultForTest(
-			running as any,
-		)) as any;
+		const result = (await getLaunchedSubagentResultForTest(running as any)) as any;
 		assert.equal((result.details as any).status, "started");
 		assert.equal(result.terminate, true);
 	});
@@ -62,9 +60,7 @@ describe("subagent launch result delivery", () => {
 			sessionFile: "/tmp/child-no-terminate-opt-out.jsonl",
 		};
 
-		const result = (await getLaunchedSubagentResultForTest(
-			running as any,
-		)) as any;
+		const result = (await getLaunchedSubagentResultForTest(running as any)) as any;
 		assert.equal((result.details as any).status, "started");
 		assert.equal((result.details as any).async, true);
 		assert.equal(result.terminate, undefined);
@@ -88,9 +84,7 @@ describe("subagent launch result delivery", () => {
 		};
 
 		setRunningSubagentForTest(running as any);
-		const asyncResult = (await getLaunchedSubagentResultForTest(
-			running as any,
-		)) as any;
+		const asyncResult = (await getLaunchedSubagentResultForTest(running as any)) as any;
 		routeDetachedSubagentCompletionForTest(
 			{
 				sendMessage(message: any, options: any) {
@@ -130,9 +124,7 @@ describe("subagent launch result delivery", () => {
 		};
 
 		setRunningSubagentForTest(running as any);
-		const asyncResult = (await getLaunchedSubagentResultForTest(
-			running as any,
-		)) as any;
+		const asyncResult = (await getLaunchedSubagentResultForTest(running as any)) as any;
 		routeDetachedSubagentCompletionForTest(
 			{
 				sendMessage(message: any, options: any) {
@@ -153,10 +145,7 @@ describe("subagent launch result delivery", () => {
 		assert.equal(asyncResult.terminate, true);
 		assert.equal(sent.length, 1);
 		assert.equal(sent[0].options.deliverAs, "nextTurn");
-		assert.equal(
-			getCompletedSubagentResultForTest(running.id)?.deliveredTo,
-			"steer",
-		);
+		assert.equal(getCompletedSubagentResultForTest(running.id)?.deliveredTo, "steer");
 	});
 
 	it("awaits async children when the current subagent batch has a sync child", async () => {
@@ -184,17 +173,12 @@ describe("subagent launch result delivery", () => {
 		};
 
 		setRunningSubagentForTest(asyncRunning as any);
-		const asyncResult = (await getLaunchedSubagentResultForTest(
-			asyncRunning as any,
-		)) as any;
+		const asyncResult = (await getLaunchedSubagentResultForTest(asyncRunning as any)) as any;
 		assert.equal((asyncResult.details as any).status, "completed");
 		assert.equal((asyncResult.details as any).deliveryState, "awaited");
 		assert.equal((asyncResult.details as any).async, true);
 		assert.equal(asyncResult.terminate, undefined);
-		assert.equal(
-			getCompletedSubagentResultForTest(asyncRunning.id)?.deliveredTo,
-			"wait",
-		);
+		assert.equal(getCompletedSubagentResultForTest(asyncRunning.id)?.deliveredTo, "wait");
 	});
 
 	it("does not mark mixed async and sync launch results as terminating when coordinator-only turn stop is disabled", async () => {
@@ -236,12 +220,8 @@ describe("subagent launch result delivery", () => {
 
 		setRunningSubagentForTest(asyncRunning as any);
 		setRunningSubagentForTest(syncRunning as any);
-		const asyncResult = (await getLaunchedSubagentResultForTest(
-			asyncRunning as any,
-		)) as any;
-		const syncResult = (await getLaunchedSubagentResultForTest(
-			syncRunning as any,
-		)) as any;
+		const asyncResult = (await getLaunchedSubagentResultForTest(asyncRunning as any)) as any;
+		const syncResult = (await getLaunchedSubagentResultForTest(syncRunning as any)) as any;
 		assert.equal(asyncResult.terminate, undefined);
 		assert.equal((syncResult.details as any).status, "completed");
 		assert.equal(syncResult.terminate, undefined);
@@ -271,9 +251,7 @@ describe("subagent launch result delivery", () => {
 		};
 
 		setRunningSubagentForTest(running as any);
-		const result = (await getLaunchedSubagentResultForTest(
-			running as any,
-		)) as any;
+		const result = (await getLaunchedSubagentResultForTest(running as any)) as any;
 		assert.equal((result.details as any).status, "completed");
 		assert.equal(result.terminate, undefined);
 	});
@@ -302,10 +280,7 @@ describe("subagent launch result delivery", () => {
 		setRunningSubagentForTest(running);
 		const waited = await waitForSubagentForTest({ id: "Child" });
 		assert.equal((waited.details as any).status, "completed");
-		assert.equal(
-			getCompletedSubagentResultForTest(running.id)?.deliveredTo,
-			"wait",
-		);
+		assert.equal(getCompletedSubagentResultForTest(running.id)?.deliveredTo, "wait");
 	});
 
 	it("injects one hidden startup catalog for top-level actionable sessions", () => {
@@ -357,15 +332,9 @@ describe("subagent launch result delivery", () => {
 		assert.equal(message.customType, "subagent_roster");
 		assert.equal(message.display, false);
 		assert.equal((message.details as any).entries[0].name, "reviewer");
-		assert.equal(
-			(message.details as any).signature,
-			getAgentListSignatureForTest((message.details as any).entries),
-		);
+		assert.equal((message.details as any).signature, getAgentListSignatureForTest((message.details as any).entries));
 		assert.match(message.content, /^<system-reminder>\nYou can launch separate helper agents/);
-		assert.match(
-			message.content,
-			/`reviewer`: Review changes for regressions[\s\S]*?tool_return: later_message/m,
-		);
+		assert.match(message.content, /`reviewer`: Review changes for regressions[\s\S]*?tool_return: later_message/m);
 		assert.match(message.content, /\n<\/subagent-roster>\n<subagent-rules>\n/);
 		assert.match(
 			message.content,
@@ -375,15 +344,9 @@ describe("subagent launch result delivery", () => {
 			message.content,
 			/context=fresh_chat_needs_full_brief means write a self-contained task with objective, files, constraints, and expected output/,
 		);
-		assert.match(
-			message.content,
-			/context=copy_of_this_chat means the helper starts from this conversation/,
-		);
+		assert.match(message.content, /context=copy_of_this_chat means the helper starts from this conversation/);
 		assert.match(message.content, /\n<\/subagent-rules>\n<\/system-reminder>$/);
-		assert.equal(
-			renderAgentListReminderForTest((message.details as any).entries),
-			message.content,
-		);
+		assert.equal(renderAgentListReminderForTest((message.details as any).entries), message.content);
 		assert.equal(
 			handlers.get("before_agent_start")({
 				type: "before_agent_start",
@@ -430,10 +393,7 @@ describe("subagent launch result delivery", () => {
 			sendMessage() {},
 		} as any);
 
-		handlers.get("session_start")(
-			{ type: "session_start", reason: "startup" },
-			ctx,
-		);
+		handlers.get("session_start")({ type: "session_start", reason: "startup" }, ctx);
 		const startup = handlers.get("before_agent_start")({
 			type: "before_agent_start",
 			prompt: "start",
@@ -447,10 +407,7 @@ describe("subagent launch result delivery", () => {
 			`---\nname: researcher\ndescription: Investigate open-ended questions\nmode: background\n---\n\nResearcher body.`,
 		);
 
-		handlers.get("session_start")(
-			{ type: "session_start", reason: "reload" },
-			ctx,
-		);
+		handlers.get("session_start")({ type: "session_start", reason: "reload" }, ctx);
 		const reloaded = handlers.get("before_agent_start")({
 			type: "before_agent_start",
 			prompt: "continue",
@@ -463,10 +420,7 @@ describe("subagent launch result delivery", () => {
 			/`researcher`: Investigate open-ended questions[\s\S]*?tool_return: later_message[\s\S]*?runs_as: hidden_process[\s\S]*?context: fresh_chat_needs_full_brief[\s\S]*?completion: exits_automatically/,
 		);
 
-		handlers.get("session_start")(
-			{ type: "session_start", reason: "reload" },
-			ctx,
-		);
+		handlers.get("session_start")({ type: "session_start", reason: "reload" }, ctx);
 		assert.equal(
 			handlers.get("before_agent_start")({
 				type: "before_agent_start",
@@ -476,5 +430,4 @@ describe("subagent launch result delivery", () => {
 			undefined,
 		);
 	});
-
 });

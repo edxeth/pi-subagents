@@ -1,11 +1,21 @@
-import { runningSubagents, completedSubagentResults } from "../../runtime/state.ts";
-import { getEffectiveAgentDefinitions, loadAgentDefaults, type AgentDefaults } from "../../agents/definitions.ts";
-import { readSubagentLaunchMetadata, getSubagentActivityStartIndex, type PersistedSubagentLaunchMetadata } from "../../session/session-files.ts";
-import { getEntries } from "../../session/session.ts";
+import { type AgentDefaults, getEffectiveAgentDefinitions, loadAgentDefaults } from "../../agents/definitions.ts";
+import { completedSubagentResults, runningSubagents } from "../../runtime/state.ts";
 import { stopRunningSubagent } from "../../runtime/wiring.ts";
-import type { CompletedSubagentResult, RunningSubagent, SessionContentBlock, SessionMessageLike, SessionUsage } from "../../types.ts";
-import type { DetailSection, OverlayContext, OverlayItem } from "./render-types.ts";
+import { getEntries } from "../../session/session.ts";
+import {
+	getSubagentActivityStartIndex,
+	type PersistedSubagentLaunchMetadata,
+	readSubagentLaunchMetadata,
+} from "../../session/session-files.ts";
+import type {
+	CompletedSubagentResult,
+	RunningSubagent,
+	SessionContentBlock,
+	SessionMessageLike,
+	SessionUsage,
+} from "../../types.ts";
 import { compactCount, firstLine, formatElapsed, formatElapsedSeconds } from "./render-helpers.ts";
+import type { DetailSection, OverlayContext, OverlayItem } from "./render-types.ts";
 
 // ─── Section building ───────────────────────────────────────────────────────
 
@@ -33,7 +43,16 @@ const SECTION_FIELDS = [
 	},
 	{
 		title: "Capabilities",
-		fields: ["tools", "deny-tools", "extensions", "skills", "inject-skills", "spawning", "no-context-files", "inherit-append-system"],
+		fields: [
+			"tools",
+			"deny-tools",
+			"extensions",
+			"skills",
+			"inject-skills",
+			"spawning",
+			"no-context-files",
+			"inherit-append-system",
+		],
 	},
 ];
 
@@ -45,10 +64,7 @@ function inherited(value?: string | null): string {
 	return value && value.trim() ? value : "default";
 }
 
-function buildSections(
-	defs: AgentDetailDefaults | null,
-	meta?: PersistedSubagentLaunchMetadata,
-): DetailSection[] {
+function buildSections(defs: AgentDetailDefaults | null, meta?: PersistedSubagentLaunchMetadata): DetailSection[] {
 	const fields: Array<{ label: string; value: string }> = [];
 	const name = meta?.name ?? defs?.name ?? "—";
 
@@ -61,19 +77,37 @@ function buildSections(
 			value: meta.timestamp ? new Date(meta.timestamp).toLocaleString() : "—",
 		});
 	}
-	fields.push({ label: "model", value: inherited(meta?.definitionModel ?? defs?.model ?? meta?.model) });
-	fields.push({ label: "thinking", value: inherited(meta?.definitionThinking ?? defs?.thinking ?? meta?.thinking) });
+	fields.push({
+		label: "model",
+		value: inherited(meta?.definitionModel ?? defs?.model ?? meta?.model),
+	});
+	fields.push({
+		label: "thinking",
+		value: inherited(meta?.definitionThinking ?? defs?.thinking ?? meta?.thinking),
+	});
 	if (meta?.modelRef) {
 		fields.push({ label: "resolved", value: meta.modelRef });
 	}
-	fields.push({ label: "allow-model-override", value: String(meta ? meta.allowModelOverride === true : defs?.allowModelOverride === true) });
+	fields.push({
+		label: "allow-model-override",
+		value: String(meta ? meta.allowModelOverride === true : defs?.allowModelOverride === true),
+	});
 	if (meta?.modelSource === "launch-override" || meta?.modelSource === "resume-override") {
 		fields.push({ label: "override-model", value: inherited(meta.model) });
-		fields.push({ label: "override-thinking", value: inherited(meta.thinking) });
+		fields.push({
+			label: "override-thinking",
+			value: inherited(meta.thinking),
+		});
 	}
-	fields.push({ label: "mode", value: meta?.mode ?? defs?.mode ?? "interactive" });
+	fields.push({
+		label: "mode",
+		value: meta?.mode ?? defs?.mode ?? "interactive",
+	});
 	fields.push({ label: "cwd", value: meta?.cwd ?? defs?.cwd ?? "parent cwd" });
-	fields.push({ label: "trust-project", value: String(meta ? (meta.trustProject ?? false) : (defs?.trustProject ?? false)) });
+	fields.push({
+		label: "trust-project",
+		value: String(meta ? (meta.trustProject ?? false) : (defs?.trustProject ?? false)),
+	});
 	fields.push({ label: "flags", value: none(meta?.flags ?? defs?.flags) });
 	fields.push({ label: "env", value: none(meta?.env ?? defs?.env) });
 	fields.push({ label: "tools", value: meta?.tools ?? defs?.tools ?? "all" });
@@ -82,8 +116,14 @@ function buildSections(
 		label: "extensions",
 		value: meta?.extensions?.length ? meta.extensions.join(", ") : "all",
 	});
-	fields.push({ label: "skills", value: meta?.skills ?? defs?.skills ?? "all" });
-	fields.push({ label: "inject-skills", value: none(meta?.injectSkills ?? defs?.injectSkills) });
+	fields.push({
+		label: "skills",
+		value: meta?.skills ?? defs?.skills ?? "all",
+	});
+	fields.push({
+		label: "inject-skills",
+		value: none(meta?.injectSkills ?? defs?.injectSkills),
+	});
 	fields.push({ label: "spawning", value: String(defs?.spawning ?? false) });
 	fields.push({
 		label: "no-context-files",
@@ -93,11 +133,26 @@ function buildSections(
 		label: "inherit-append-system",
 		value: String(meta ? (meta.inheritAppendSystem ?? false) : (defs?.inheritAppendSystem ?? false)),
 	});
-	fields.push({ label: "async", value: String(meta ? meta.async : (defs?.async ?? true)) });
-	fields.push({ label: "auto-exit", value: String(meta ? (meta.autoExit ?? false) : (defs?.autoExit ?? false)) });
-	fields.push({ label: "session-mode", value: (meta?.sessionMode ?? defs?.sessionMode ?? "lineage-only") as string });
-	fields.push({ label: "parent-close", value: (meta?.parentClosePolicy ?? defs?.parentClosePolicy ?? "terminate") as string });
-	fields.push({ label: "no-session", value: String(meta ? meta.noSession : (defs?.noSession ?? false)) });
+	fields.push({
+		label: "async",
+		value: String(meta ? meta.async : (defs?.async ?? true)),
+	});
+	fields.push({
+		label: "auto-exit",
+		value: String(meta ? (meta.autoExit ?? false) : (defs?.autoExit ?? false)),
+	});
+	fields.push({
+		label: "session-mode",
+		value: (meta?.sessionMode ?? defs?.sessionMode ?? "lineage-only") as string,
+	});
+	fields.push({
+		label: "parent-close",
+		value: (meta?.parentClosePolicy ?? defs?.parentClosePolicy ?? "terminate") as string,
+	});
+	fields.push({
+		label: "no-session",
+		value: String(meta ? meta.noSession : (defs?.noSession ?? false)),
+	});
 
 	return SECTION_FIELDS.map((section) => ({
 		title: section.title,
@@ -134,11 +189,17 @@ function buildRuntimeSection(isRunning: boolean, r: RunningSubagent | CompletedS
 	const ctxUsed = running.contextTokens ?? 0;
 	const ctxW = running.modelContextWindow;
 	if (ctxUsed > 0 && ctxW) {
-		fields.push({ label: "context", value: `${compactCount(ctxUsed)}/${compactCount(ctxW)}` });
+		fields.push({
+			label: "context",
+			value: `${compactCount(ctxUsed)}/${compactCount(ctxW)}`,
+		});
 	} else if (running.contextLabel) {
 		fields.push({ label: "context", value: running.contextLabel });
 	} else if ((running.contextTokens ?? 0) > 0) {
-		fields.push({ label: "tokens", value: compactCount(running.contextTokens ?? 0) });
+		fields.push({
+			label: "tokens",
+			value: compactCount(running.contextTokens ?? 0),
+		});
 	}
 
 	if (running.activity) fields.push({ label: "activity", value: running.activity });
@@ -152,21 +213,31 @@ function buildRuntimeSection(isRunning: boolean, r: RunningSubagent | CompletedS
 // ─── Safe helpers ───────────────────────────────────────────────────────────
 
 function safeMeta(f: string): PersistedSubagentLaunchMetadata | undefined {
-	try { return readSubagentLaunchMetadata(f); } catch { return undefined; }
+	try {
+		return readSubagentLaunchMetadata(f);
+	} catch {
+		return undefined;
+	}
 }
 
 function safeDefs(a: string, cwd: string): AgentDetailDefaults | null {
-	try { return loadAgentDefaults(a, undefined, cwd, (_h, b) => b); } catch { return null; }
+	try {
+		return loadAgentDefaults(a, undefined, cwd, (_h, b) => b);
+	} catch {
+		return null;
+	}
 }
 
 function usageTotal(usage: SessionUsage): number {
-	return usage.totalTokens ?? (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+	return (
+		usage.totalTokens ?? (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)
+	);
 }
 
 function getSessionMessage(entry: { [key: string]: unknown }): SessionMessageLike | undefined {
 	if (entry.type !== "message") return undefined;
 	const message = entry.message;
-	return typeof message === "object" && message !== null ? message as SessionMessageLike : undefined;
+	return typeof message === "object" && message !== null ? (message as SessionMessageLike) : undefined;
 }
 
 function readCompletedSessionStats(sessionFile?: string): CompletedSessionStats | undefined {
@@ -180,7 +251,9 @@ function readCompletedSessionStats(sessionFile?: string): CompletedSessionStats 
 		let model: string | undefined;
 		let provider: string | undefined;
 
-		const entries = getEntries(sessionFile) as Array<{ [key: string]: unknown }>;
+		const entries = getEntries(sessionFile) as Array<{
+			[key: string]: unknown;
+		}>;
 		// Skip inherited parent history in forked child sessions; count only
 		// entries after this subagent's launch marker.
 		const startIndex = getSubagentActivityStartIndex(entries);
@@ -203,11 +276,21 @@ function readCompletedSessionStats(sessionFile?: string): CompletedSessionStats 
 				outputTokens += message.usage.output ?? 0;
 			}
 			if (Array.isArray(message.content)) {
-				toolUses += message.content.filter((block: SessionContentBlock) => block.type === "toolCall" || block.type === "toolUse").length;
+				toolUses += message.content.filter(
+					(block: SessionContentBlock) => block.type === "toolCall" || block.type === "toolUse",
+				).length;
 			}
 		}
 
-		return { messages, toolUses, contextTokens, inputTokens, outputTokens, model, provider };
+		return {
+			messages,
+			toolUses,
+			contextTokens,
+			inputTokens,
+			outputTokens,
+			model,
+			provider,
+		};
 	} catch {
 		return undefined;
 	}
@@ -237,10 +320,26 @@ function completedRuntimeSection(args: {
 	if (args.exitCode != null) fields.push({ label: "exit", value: `${args.exitCode}` });
 	if (args.stats?.messages) fields.push({ label: "messages", value: `${args.stats.messages}` });
 	if (args.stats?.toolUses) fields.push({ label: "tool calls", value: `${args.stats.toolUses}` });
-	if (args.stats?.contextTokens) fields.push({ label: "context tokens", value: compactCount(args.stats.contextTokens) });
-	if (args.stats?.inputTokens) fields.push({ label: "input tokens", value: compactCount(args.stats.inputTokens) });
-	if (args.stats?.outputTokens) fields.push({ label: "output tokens", value: compactCount(args.stats.outputTokens) });
-	else if (args.outputTokens) fields.push({ label: "output tokens", value: compactCount(args.outputTokens) });
+	if (args.stats?.contextTokens)
+		fields.push({
+			label: "context tokens",
+			value: compactCount(args.stats.contextTokens),
+		});
+	if (args.stats?.inputTokens)
+		fields.push({
+			label: "input tokens",
+			value: compactCount(args.stats.inputTokens),
+		});
+	if (args.stats?.outputTokens)
+		fields.push({
+			label: "output tokens",
+			value: compactCount(args.stats.outputTokens),
+		});
+	else if (args.outputTokens)
+		fields.push({
+			label: "output tokens",
+			value: compactCount(args.outputTokens),
+		});
 	if (args.sessionFile) fields.push({ label: "session", value: args.sessionFile });
 	return { title: "Execution", fields };
 }
@@ -262,7 +361,7 @@ function getEntryDetails(entry: { [key: string]: unknown }): Record<string, unkn
 	const message = entry.message;
 	if (typeof message !== "object" || message === null) return undefined;
 	const details = (message as { details?: unknown }).details;
-	return typeof details === "object" && details !== null ? details as Record<string, unknown> : undefined;
+	return typeof details === "object" && details !== null ? (details as Record<string, unknown>) : undefined;
 }
 
 function recoverResultDetails(entry: { [key: string]: unknown }): RecoveredResultDetails | undefined {
@@ -272,9 +371,12 @@ function recoverResultDetails(entry: { [key: string]: unknown }): RecoveredResul
 	const name = typeof details.name === "string" ? details.name : undefined;
 	const id = typeof details.id === "string" ? details.id : name;
 	const rawStatus = typeof details.status === "string" ? details.status : undefined;
-	const status = rawStatus === "completed" || rawStatus === "cancelled" || rawStatus === "failed"
-		? rawStatus
-		: details.exitCode === 0 ? "completed" : "failed";
+	const status =
+		rawStatus === "completed" || rawStatus === "cancelled" || rawStatus === "failed"
+			? rawStatus
+			: details.exitCode === 0
+				? "completed"
+				: "failed";
 	if (!id || !name) return undefined;
 	return {
 		id,
@@ -372,14 +474,16 @@ export async function buildCompletedItems(ctx: OverlayContext): Promise<OverlayI
 		const meta = r.sessionFile ? safeMeta(r.sessionFile) : undefined;
 		const defs = r.agent ? safeDefs(r.agent, ctx.cwd) : null;
 		const sections = buildSections(defs, meta);
-		sections.push(completedRuntimeSection({
-			status: r.status,
-			elapsed: r.elapsed,
-			exitCode: r.exitCode,
-			outputTokens: r.outputTokens,
-			sessionFile: r.sessionFile,
-			stats: sessionStats,
-		}));
+		sections.push(
+			completedRuntimeSection({
+				status: r.status,
+				elapsed: r.elapsed,
+				exitCode: r.exitCode,
+				outputTokens: r.outputTokens,
+				sessionFile: r.sessionFile,
+				stats: sessionStats,
+			}),
+		);
 
 		items.push({
 			id: r.id,
@@ -405,21 +509,30 @@ export async function buildCompletedItems(ctx: OverlayContext): Promise<OverlayI
 			const entries = getEntries(sf) as Array<{ [key: string]: unknown }>;
 			for (const entry of entries) {
 				const recovered = recoverResultDetails(entry);
-				if (!recovered?.sessionFile || seen.has(recovered.sessionFile) || runningSessionFiles.has(recovered.sessionFile)) continue;
+				if (
+					!recovered?.sessionFile ||
+					seen.has(recovered.sessionFile) ||
+					runningSessionFiles.has(recovered.sessionFile)
+				)
+					continue;
 				seen.add(recovered.sessionFile);
 				const visual = statusVisuals(recovered.status);
-				const summary = recovered.errorMessage ? `error: ${firstLine(recovered.errorMessage, 80)}` : recoverSummary(entry);
+				const summary = recovered.errorMessage
+					? `error: ${firstLine(recovered.errorMessage, 80)}`
+					: recoverSummary(entry);
 				const sessionStats = readCompletedSessionStats(recovered.sessionFile);
 				const meta = safeMeta(recovered.sessionFile);
 				const defs = recovered.agent ? safeDefs(recovered.agent, ctx.cwd) : null;
 				const sections = buildSections(defs, meta);
-				sections.push(completedRuntimeSection({
-					status: recovered.status,
-					elapsed: recovered.elapsed,
-					exitCode: recovered.exitCode,
-					sessionFile: recovered.sessionFile,
-					stats: sessionStats,
-				}));
+				sections.push(
+					completedRuntimeSection({
+						status: recovered.status,
+						elapsed: recovered.elapsed,
+						exitCode: recovered.exitCode,
+						sessionFile: recovered.sessionFile,
+						stats: sessionStats,
+					}),
+				);
 
 				items.push({
 					id: recovered.id,
@@ -441,7 +554,9 @@ export async function buildCompletedItems(ctx: OverlayContext): Promise<OverlayI
 					sessionFile: recovered.sessionFile,
 				});
 			}
-		} catch { /* ignore */ }
+		} catch {
+			/* ignore */
+		}
 	}
 
 	return items;

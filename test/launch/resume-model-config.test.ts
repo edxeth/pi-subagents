@@ -1,8 +1,8 @@
 import {
 	assert,
 	describe,
-	it,
 	getPersistedSessionParityArgsForTest,
+	it,
 	resolveAvailableModelRefForTest,
 	resolveResumeLaunchMetadataForInvocationForTest,
 } from "../support/index.ts";
@@ -35,10 +35,7 @@ describe("resume model launch configuration", () => {
 		assert.equal(ignored?.modelRef, "provider/default:low");
 		assert.equal(ignored?.ignoredModelOverride, "provider/requested:high");
 
-		const overridden = resolveResumeLaunchMetadataForInvocationForTest(
-			base,
-			"provider/requested:high",
-		);
+		const overridden = resolveResumeLaunchMetadataForInvocationForTest(base, "provider/requested:high");
 		assert.equal(overridden?.modelRef, "provider/requested:high");
 		assert.equal(overridden?.modelSource, "resume-override");
 
@@ -72,39 +69,24 @@ describe("resume model launch configuration", () => {
 		};
 
 		assert.throws(
-			() => resolveResumeLaunchMetadataForInvocationForTest(
-				base,
-				"openai-ws/gpt-5.5:low",
-				{
+			() =>
+				resolveResumeLaunchMetadataForInvocationForTest(base, "openai-ws/gpt-5.5:low", {
 					getAvailable: () => [
 						{ provider: "zai-messages", id: "glm-5.1" },
 						{ provider: "openai-ws", id: "gpt-5.5" },
 					],
-				},
-			),
+				}),
 			/Model 'openai-ws\/gpt-5\.5:low' is not allowed for agent 'code-review'/,
 		);
 
-		const defaultAllowed = resolveResumeLaunchMetadataForInvocationForTest(
-			base,
-			"zai-messages/glm-5.1:high",
-			{
-				getAvailable: () => [
-					{ provider: "zai-messages", id: "glm-5.1" },
-				],
-			},
-		);
+		const defaultAllowed = resolveResumeLaunchMetadataForInvocationForTest(base, "zai-messages/glm-5.1:high", {
+			getAvailable: () => [{ provider: "zai-messages", id: "glm-5.1" }],
+		});
 		assert.equal(defaultAllowed?.modelRef, "zai-messages/glm-5.1:high");
 
-		const extraAllowed = resolveResumeLaunchMetadataForInvocationForTest(
-			base,
-			"nahcrof/glm-5.1:off",
-			{
-				getAvailable: () => [
-					{ provider: "nahcrof", id: "glm-5.1" },
-				],
-			},
-		);
+		const extraAllowed = resolveResumeLaunchMetadataForInvocationForTest(base, "nahcrof/glm-5.1:off", {
+			getAvailable: () => [{ provider: "nahcrof", id: "glm-5.1" }],
+		});
 		assert.equal(extraAllowed?.modelRef, "nahcrof/glm-5.1:off");
 	});
 
@@ -132,11 +114,16 @@ describe("resume model launch configuration", () => {
 			boundarySystemPrompt: true,
 		};
 
-		const defaultAllowed = resolveResumeLaunchMetadataForInvocationForTest(
-			base,
-			"openai-cpa/gpt-5.5:xhigh",
-			{ getAvailable: () => [{ provider: "openai-cpa", id: "gpt-5.5", reasoning: true, thinkingLevelMap: { xhigh: "xhigh" } }] },
-		);
+		const defaultAllowed = resolveResumeLaunchMetadataForInvocationForTest(base, "openai-cpa/gpt-5.5:xhigh", {
+			getAvailable: () => [
+				{
+					provider: "openai-cpa",
+					id: "gpt-5.5",
+					reasoning: true,
+					thinkingLevelMap: { xhigh: "xhigh" },
+				},
+			],
+		});
 		assert.equal(defaultAllowed?.modelRef, "openai-cpa/gpt-5.5:xhigh");
 	});
 
@@ -161,7 +148,15 @@ describe("resume model launch configuration", () => {
 				boundarySystemPrompt: true,
 			},
 			"zai-messages/glm-5.2:max",
-			{ getAvailable: () => [{ provider: "zai-messages", id: "glm-5.2", thinkingLevelMap: { max: "max" } }] },
+			{
+				getAvailable: () => [
+					{
+						provider: "zai-messages",
+						id: "glm-5.2",
+						thinkingLevelMap: { max: "max" },
+					},
+				],
+			},
 		);
 
 		assert.equal(overridden?.model, "zai-messages/glm-5.2");
@@ -195,8 +190,16 @@ describe("resume model launch configuration", () => {
 			"zai-messages/glm-5-turbo",
 			{
 				getAvailable: () => [
-					{ provider: "zai-messages", id: "glm-5.1", thinkingLevelMap: { high: "high" } },
-					{ provider: "zai-messages", id: "glm-5-turbo", thinkingLevelMap: { high: null } },
+					{
+						provider: "zai-messages",
+						id: "glm-5.1",
+						thinkingLevelMap: { high: "high" },
+					},
+					{
+						provider: "zai-messages",
+						id: "glm-5-turbo",
+						thinkingLevelMap: { high: null },
+					},
 				],
 			},
 		);
@@ -236,7 +239,11 @@ describe("resume model launch configuration", () => {
 			"zai-messages/glm-5-turbo",
 			{
 				getAvailable: () => [
-					{ provider: "zai-messages", id: "glm-5-turbo", thinkingLevelMap: { medium: "medium" } },
+					{
+						provider: "zai-messages",
+						id: "glm-5-turbo",
+						thinkingLevelMap: { medium: "medium" },
+					},
 				],
 			},
 			"off",
@@ -284,36 +291,37 @@ describe("resume model launch configuration", () => {
 
 	it("rejects thinking-only resume overrides without a persisted model", () => {
 		assert.throws(
-			() => resolveResumeLaunchMetadataForInvocationForTest(
-				{
-					version: 1,
-					timestamp: "2026-05-08T00:00:00.000Z",
-					name: "legacy",
-					mode: "background",
-					sessionMode: "lineage-only",
-					parentClosePolicy: "terminate",
-					async: true,
-					allowModelOverride: true,
-					denyTools: [],
-					noContextFiles: false,
-					noSession: false,
-					agentConfigDir: "/tmp",
-					cwd: "/tmp",
-					boundarySystemPrompt: true,
-				},
-				undefined,
-				undefined,
-				"off",
-			),
+			() =>
+				resolveResumeLaunchMetadataForInvocationForTest(
+					{
+						version: 1,
+						timestamp: "2026-05-08T00:00:00.000Z",
+						name: "legacy",
+						mode: "background",
+						sessionMode: "lineage-only",
+						parentClosePolicy: "terminate",
+						async: true,
+						allowModelOverride: true,
+						denyTools: [],
+						noContextFiles: false,
+						noSession: false,
+						agentConfigDir: "/tmp",
+						cwd: "/tmp",
+						boundarySystemPrompt: true,
+					},
+					undefined,
+					undefined,
+					"off",
+				),
 			/Cannot apply thinking override without a persisted model/,
 		);
 	});
 
 	it("validates model override names and drops unsupported inherited thinking", () => {
-		assert.deepEqual(
-			resolveAvailableModelRefForTest("glm-5.1", "low", false, "zai-messages/glm-5-turbo"),
-			{ model: "zai-messages/glm-5.1", thinking: "low" },
-		);
+		assert.deepEqual(resolveAvailableModelRefForTest("glm-5.1", "low", false, "zai-messages/glm-5-turbo"), {
+			model: "zai-messages/glm-5.1",
+			thinking: "low",
+		});
 
 		assert.throws(
 			() => resolveAvailableModelRefForTest("zai-messages/glm-5-turbo", "high", true),

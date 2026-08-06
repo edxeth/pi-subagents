@@ -3,11 +3,11 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { RunningSubagent } from "../../src/types.ts";
 import { SubagentWidgetManager } from "../../src/runtime/widget.ts";
+import type { RunningSubagent } from "../../src/types.ts";
 
 function stripAnsi(text: string): string {
-	return text.replace(/\u001b\[[0-9;]*m/g, "");
+	return text.replace(new RegExp("\\x1b\\[[0-9;]*m", "g"), "");
 }
 
 function makeRunningSubagent(index: number): RunningSubagent {
@@ -77,8 +77,7 @@ describe("widget manager direct module tests", () => {
 			name: "Research",
 			agent: "researcher",
 			task: "Inspect a module with a deliberately long description for truncation.",
-			title:
-				"A deliberately long title that should be truncated inside padded width",
+			title: "A deliberately long title that should be truncated inside padded width",
 			mode: "background",
 			executionState: "running",
 			deliveryState: "detached",
@@ -87,8 +86,7 @@ describe("widget manager direct module tests", () => {
 			async: true,
 			startTime: Date.now(),
 			sessionFile: "/tmp/child-1.jsonl",
-			activity:
-				"reading a very long module path and summarizing relevant details",
+			activity: "reading a very long module path and summarizing relevant details",
 		};
 
 		const widget = new SubagentWidgetManager(() => [running]);
@@ -99,9 +97,7 @@ describe("widget manager direct module tests", () => {
 	});
 
 	it("shows a singular overflow hint with the subagent TUI shortcut", () => {
-		const agents = Array.from({ length: 3 }, (_, index) =>
-			makeRunningSubagent(index + 1),
-		);
+		const agents = Array.from({ length: 3 }, (_, index) => makeRunningSubagent(index + 1));
 		const widget = new SubagentWidgetManager(() => agents);
 		const lines = widget.renderForTest();
 
@@ -110,9 +106,7 @@ describe("widget manager direct module tests", () => {
 	});
 
 	it("shows a plural overflow hint with the hidden subagent count", () => {
-		const agents = Array.from({ length: 7 }, (_, index) =>
-			makeRunningSubagent(index + 1),
-		);
+		const agents = Array.from({ length: 7 }, (_, index) => makeRunningSubagent(index + 1));
 		const widget = new SubagentWidgetManager(() => agents);
 		const lines = widget.renderForTest();
 
@@ -170,9 +164,7 @@ describe("widget manager direct module tests", () => {
 					provider: "openai",
 					model: "openai/parent",
 					usage: { totalTokens: 1_000_000 },
-					content: [
-						{ type: "toolCall", id: "parent-call", name: "bash" },
-					],
+					content: [{ type: "toolCall", id: "parent-call", name: "bash" }],
 				},
 			},
 			{
@@ -199,10 +191,7 @@ describe("widget manager direct module tests", () => {
 				},
 			},
 		];
-		writeFileSync(
-			sessionFile,
-			entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
-		);
+		writeFileSync(sessionFile, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
 
 		const running: RunningSubagent = {
 			id: "forked-child",

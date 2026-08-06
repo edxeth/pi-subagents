@@ -5,23 +5,13 @@ import { getAgentConfigDir } from "../agents/definitions.ts";
 import type { SubagentParamsInput } from "../types.ts";
 import { getEnvAgentConfigDir } from "./env.ts";
 
-export function resolveSubagentCwd(
-	rawCwd: string | null,
-	baseCwd = process.cwd(),
-): string {
+export function resolveSubagentCwd(rawCwd: string | null, baseCwd = process.cwd()): string {
 	if (!rawCwd) return baseCwd;
 	return rawCwd.startsWith("/") ? rawCwd : join(baseCwd, rawCwd);
 }
 
-export function resolveSubagentConfigDir(
-	rawCwd: string | null,
-	baseCwd = process.cwd(),
-): string | null {
-	const localAgentDir = join(
-		resolveSubagentCwd(rawCwd, baseCwd),
-		".pi",
-		"agent",
-	);
+export function resolveSubagentConfigDir(rawCwd: string | null, baseCwd = process.cwd()): string | null {
+	const localAgentDir = join(resolveSubagentCwd(rawCwd, baseCwd), ".pi", "agent");
 	return existsSync(localAgentDir) ? localAgentDir : null;
 }
 

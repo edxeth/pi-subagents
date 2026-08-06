@@ -1,10 +1,7 @@
-export const PI_SUBAGENT_CONTEXT_WARN_THRESHOLD =
-	"PI_SUBAGENT_CONTEXT_WARN_THRESHOLD";
-export const PI_SUBAGENT_CONTEXT_WARN_STEP =
-	"PI_SUBAGENT_CONTEXT_WARN_STEP";
+export const PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = "PI_SUBAGENT_CONTEXT_WARN_THRESHOLD";
+export const PI_SUBAGENT_CONTEXT_WARN_STEP = "PI_SUBAGENT_CONTEXT_WARN_STEP";
 
-export const SUBAGENT_CONTEXT_REMINDER_ENTRY =
-	"pi-subagent-context-reminders";
+export const SUBAGENT_CONTEXT_REMINDER_ENTRY = "pi-subagent-context-reminders";
 
 const DEFAULT_CONTEXT_WARN_STEP = 5;
 
@@ -25,9 +22,7 @@ export interface SelectedContextReminder {
  * `off`, an empty value, and invalid values disable reminders. Values above
  * 90 are rejected so all three reminders can fire before 100% usage.
  */
-export function parseContextWarnThreshold(
-	raw: string | undefined,
-): number | null {
+export function parseContextWarnThreshold(raw: string | undefined): number | null {
 	if (!raw) return null;
 	const normalized = raw.trim().toLowerCase();
 	if (!normalized || normalized === "off") return null;
@@ -51,15 +46,10 @@ export function parseContextWarnStep(raw: string | undefined): number {
 	return step >= 1 && step <= 99 ? step : DEFAULT_CONTEXT_WARN_STEP;
 }
 
-export function getContextReminderThresholds(
-	startingThreshold: number,
-	step: number,
-): number[] {
-	const scheduled = [
-		startingThreshold,
-		startingThreshold + step,
-		startingThreshold + 2 * step,
-	].map((threshold) => Math.min(threshold, 99));
+export function getContextReminderThresholds(startingThreshold: number, step: number): number[] {
+	const scheduled = [startingThreshold, startingThreshold + step, startingThreshold + 2 * step].map((threshold) =>
+		Math.min(threshold, 99),
+	);
 	const unique: number[] = [];
 	for (const threshold of scheduled) {
 		if (!unique.includes(threshold)) unique.push(threshold);
@@ -83,10 +73,7 @@ function formatUsage(usage: SubagentContextUsage): string {
 	)} tokens (${usage.percent.toFixed(1)}%)`;
 }
 
-function getReminderMessage(
-	stage: number,
-	usage: SubagentContextUsage,
-): string {
+function getReminderMessage(stage: number, usage: SubagentContextUsage): string {
 	const currentUsage = formatUsage(usage);
 	if (stage === 0) {
 		return (
@@ -119,9 +106,7 @@ export function selectContextReminder(
 ): SelectedContextReminder | null {
 	if (startingThreshold === null) return null;
 	const thresholds = getContextReminderThresholds(startingThreshold, step);
-	const crossed = thresholds.filter(
-		(threshold) => usage.percent >= threshold && !sentThresholds.has(threshold),
-	);
+	const crossed = thresholds.filter((threshold) => usage.percent >= threshold && !sentThresholds.has(threshold));
 	if (crossed.length === 0) return null;
 
 	const threshold = crossed.at(-1)!;
@@ -140,12 +125,8 @@ export function selectContextReminder(
 
 /** Install the context monitor inside the child Pi process. */
 export function installSubagentContextReminders(pi: ExtensionAPI): void {
-	const startingThreshold = parseContextWarnThreshold(
-		process.env[PI_SUBAGENT_CONTEXT_WARN_THRESHOLD],
-	);
-	const step = parseContextWarnStep(
-		process.env[PI_SUBAGENT_CONTEXT_WARN_STEP],
-	);
+	const startingThreshold = parseContextWarnThreshold(process.env[PI_SUBAGENT_CONTEXT_WARN_THRESHOLD]);
+	const step = parseContextWarnStep(process.env[PI_SUBAGENT_CONTEXT_WARN_STEP]);
 	const sentThresholds = new Set<number>();
 	const pendingThresholds = new Set<number>();
 	const pendingMessages = new Map<string, number[]>();
@@ -239,15 +220,10 @@ export function installSubagentContextReminders(pi: ExtensionAPI): void {
 	});
 
 	pi.on("agent_end", (event, ctx) => {
-		const assistant = [...event.messages]
-			.reverse()
-			.find((message) => message.role === "assistant") as
+		const assistant = [...event.messages].reverse().find((message) => message.role === "assistant") as
 			| { stopReason?: unknown }
 			| undefined;
-		if (
-			assistant?.stopReason === "error" ||
-			assistant?.stopReason === "aborted"
-		) {
+		if (assistant?.stopReason === "error" || assistant?.stopReason === "aborted") {
 			pendingThresholds.clear();
 			pendingMessages.clear();
 			return;
@@ -256,7 +232,5 @@ export function installSubagentContextReminders(pi: ExtensionAPI): void {
 		queueReminder(ctx);
 	});
 }
-import type {
-	ExtensionAPI,
-	ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";

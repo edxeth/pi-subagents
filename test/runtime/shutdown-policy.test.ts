@@ -1,18 +1,18 @@
 import { shutdownSubagentsForParentExit } from "../../src/runtime/shutdown.ts";
 import {
-	assert,
-	existsSync,
-	writeFileSync,
-	join,
 	afterEach,
+	assert,
+	createTestDir,
 	describe,
-	it,
+	existsSync,
 	getCompletedSubagentResultForTest,
+	it,
+	join,
 	resetSubagentStateForTest,
 	routeDetachedSubagentCompletionForTest,
 	setRunningSubagentForTest,
 	shutdownSubagentsForTest,
-	createTestDir,
+	writeFileSync,
 } from "../support/index.ts";
 
 describe("subagent shutdown policy", () => {
@@ -65,10 +65,7 @@ describe("subagent shutdown policy", () => {
 
 		const terminateAbort = new AbortController();
 		let terminateAbortCount = 0;
-		terminateAbort.signal.addEventListener(
-			"abort",
-			() => terminateAbortCount++,
-		);
+		terminateAbort.signal.addEventListener("abort", () => terminateAbortCount++);
 
 		const terminate = {
 			id: "child-close-1",

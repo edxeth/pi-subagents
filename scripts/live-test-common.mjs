@@ -16,17 +16,17 @@
 
 import { execFileSync } from "node:child_process";
 import {
-  copyFileSync,
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
 } from "node:fs";
-import { tmpdir, homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Find the extension source and repo root from this script's location
@@ -36,9 +36,9 @@ const extensionSource = join(repoRoot, "src", "index.ts");
 
 // Default live test model
 const LIVE_TEST_MODEL = (() => {
-  const model = process.env.PI_SUBAGENT_LIVE_MODEL;
-  if (!model) throw new Error("PI_SUBAGENT_LIVE_MODEL must be set to run frontmatter live tests");
-  return model;
+	const model = process.env.PI_SUBAGENT_LIVE_MODEL;
+	if (!model) throw new Error("PI_SUBAGENT_LIVE_MODEL must be set to run frontmatter live tests");
+	return model;
 })();
 
 /**
@@ -61,53 +61,51 @@ const LIVE_TEST_MODEL = (() => {
  * }}
  */
 export function setup(label, options = {}) {
-  const tmpRoot = mkdtempSync(join(tmpdir(), `pi-fm-${label}-`));
-  const configDir = join(tmpRoot, "agent");
-  const agentsDir = join(configDir, "agents");
-  const extensionsDir = join(configDir, "extensions");
-  const sessionDir = join(tmpRoot, "sessions");
-  const snapshotsDir = join(tmpRoot, "snapshots");
-  const envConfigDir = process.env.PI_CODING_AGENT_DIR;
-  const sourceConfigDir =
-    envConfigDir && existsSync(join(envConfigDir, "auth.json"))
-      ? envConfigDir
-      : join(homedir(), ".pi", "agent");
-  const keepTmp = process.env.PI_SUBAGENT_KEEP_E2E_TMP === "1";
-  const model = options.modelOverride ?? LIVE_TEST_MODEL;
+	const tmpRoot = mkdtempSync(join(tmpdir(), `pi-fm-${label}-`));
+	const configDir = join(tmpRoot, "agent");
+	const agentsDir = join(configDir, "agents");
+	const extensionsDir = join(configDir, "extensions");
+	const sessionDir = join(tmpRoot, "sessions");
+	const snapshotsDir = join(tmpRoot, "snapshots");
+	const envConfigDir = process.env.PI_CODING_AGENT_DIR;
+	const sourceConfigDir =
+		envConfigDir && existsSync(join(envConfigDir, "auth.json")) ? envConfigDir : join(homedir(), ".pi", "agent");
+	const keepTmp = process.env.PI_SUBAGENT_KEEP_E2E_TMP === "1";
+	const model = options.modelOverride ?? LIVE_TEST_MODEL;
 
-  mkdirSync(sessionDir, { recursive: true });
-  mkdirSync(agentsDir, { recursive: true });
-  mkdirSync(extensionsDir, { recursive: true });
-  mkdirSync(snapshotsDir, { recursive: true });
+	mkdirSync(sessionDir, { recursive: true });
+	mkdirSync(agentsDir, { recursive: true });
+	mkdirSync(extensionsDir, { recursive: true });
+	mkdirSync(snapshotsDir, { recursive: true });
 
-  for (const name of ["auth.json", "settings.json", "models.json", "mcp.json"]) {
-    const source = join(sourceConfigDir, name);
-    if (existsSync(source)) {
-      copyFileSync(source, join(configDir, name));
-    }
-  }
+	for (const name of ["auth.json", "settings.json", "models.json", "mcp.json"]) {
+		const source = join(sourceConfigDir, name);
+		if (existsSync(source)) {
+			copyFileSync(source, join(configDir, name));
+		}
+	}
 
-  function cleanup() {
-    if (keepTmp) {
-      console.error(`kept temp dir: ${tmpRoot}`);
-      return;
-    }
-    try {
-      rmSync(tmpRoot, { recursive: true, force: true });
-    } catch {}
-  }
+	function cleanup() {
+		if (keepTmp) {
+			console.error(`kept temp dir: ${tmpRoot}`);
+			return;
+		}
+		try {
+			rmSync(tmpRoot, { recursive: true, force: true });
+		} catch {}
+	}
 
-  return {
-    tmpRoot,
-    configDir,
-    agentsDir,
-    extensionsDir,
-    sessionDir,
-    snapshotsDir,
-    model,
-    cleanup,
-    keepTmp,
-  };
+	return {
+		tmpRoot,
+		configDir,
+		agentsDir,
+		extensionsDir,
+		sessionDir,
+		snapshotsDir,
+		model,
+		cleanup,
+		keepTmp,
+	};
 }
 
 /**
@@ -118,15 +116,11 @@ export function setup(label, options = {}) {
  * @param {string} body - Agent body/instructions
  */
 export function writeAgent(agentsDir, name, frontmatter, body) {
-  const fmLines = Object.entries(frontmatter)
-    .filter(([, value]) => value !== undefined && value !== null)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join("\n");
-  writeFileSync(
-    join(agentsDir, `${name}.md`),
-    `---\n${fmLines}\n---\n\n${body}`,
-    "utf8",
-  );
+	const fmLines = Object.entries(frontmatter)
+		.filter(([, value]) => value !== undefined && value !== null)
+		.map(([key, value]) => `${key}: ${value}`)
+		.join("\n");
+	writeFileSync(join(agentsDir, `${name}.md`), `---\n${fmLines}\n---\n\n${body}`, "utf8");
 }
 
 /**
@@ -138,9 +132,9 @@ export function writeAgent(agentsDir, name, frontmatter, body) {
  * @param {string} snapshotsDir - Where to write snapshot JSON files
  */
 export function writeSnapshotExtension(path, snapshotsDir) {
-  writeFileSync(
-    path,
-    `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+	writeFileSync(
+		path,
+		`import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -207,8 +201,8 @@ export default function (pi: ExtensionAPI) {
   });
 }
 `,
-    "utf8",
-  );
+		"utf8",
+	);
 }
 
 /**
@@ -220,40 +214,30 @@ export default function (pi: ExtensionAPI) {
  * @returns {string} stdout from pi
  */
 export function runPi(ctx, prompt, extraEnv = {}) {
-  const envOverride = {
-    ...process.env,
-    PI_PACKAGE_DIR: "",
-    PI_CODING_AGENT_DIR: ctx.configDir,
-    PI_SUBAGENT_AGENT: "",
-    PI_SUBAGENT_NAME: "",
-    PI_SUBAGENT_AUTO_EXIT: "",
-    PI_SUBAGENT_DISABLE_AMBIENT_AWARENESS: "1",
-    PI_SUBAGENT_EXTENSIONS: "",
-    PI_DENY_TOOLS: "",
-    PI_ARTIFACT_PROJECT_ROOT: "",
-    ...extraEnv,
-  };
+	const envOverride = {
+		...process.env,
+		PI_PACKAGE_DIR: "",
+		PI_CODING_AGENT_DIR: ctx.configDir,
+		PI_SUBAGENT_AGENT: "",
+		PI_SUBAGENT_NAME: "",
+		PI_SUBAGENT_AUTO_EXIT: "",
+		PI_SUBAGENT_DISABLE_AMBIENT_AWARENESS: "1",
+		PI_SUBAGENT_EXTENSIONS: "",
+		PI_DENY_TOOLS: "",
+		PI_ARTIFACT_PROJECT_ROOT: "",
+		...extraEnv,
+	};
 
-  return execFileSync(
-    "pi",
-    [
-      "-p",
-      "--model",
-      ctx.model,
-      "--no-extensions",
-      "-e",
-      extensionSource,
-      "--session-dir",
-      ctx.sessionDir,
-      prompt,
-    ],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env: envOverride,
-    },
-  );
+	return execFileSync(
+		"pi",
+		["-p", "--model", ctx.model, "--no-extensions", "-e", extensionSource, "--session-dir", ctx.sessionDir, prompt],
+		{
+			cwd: repoRoot,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+			env: envOverride,
+		},
+	);
 }
 
 /**
@@ -262,108 +246,70 @@ export function runPi(ctx, prompt, extraEnv = {}) {
  * @returns {Array<object>}
  */
 export function parseJsonl(file) {
-  if (!existsSync(file)) return [];
-  const events = [];
-  for (const line of readFileSync(file, "utf8").split("\n")) {
-    if (!line) continue;
-    try {
-      events.push(JSON.parse(line));
-    } catch {}
-  }
-  return events;
+	if (!existsSync(file)) return [];
+	const events = [];
+	for (const line of readFileSync(file, "utf8").split("\n")) {
+		if (!line) continue;
+		try {
+			events.push(JSON.parse(line));
+		} catch {}
+	}
+	return events;
 }
 
 /**
  * Recursively list .jsonl files in a directory.
  */
 export function listJsonlFiles(dir) {
-  const files = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...listJsonlFiles(fullPath));
-      continue;
-    }
-    if (entry.isFile() && fullPath.endsWith(".jsonl")) files.push(fullPath);
-  }
-  return files;
-}
-
-/**
- * Find the parent session file that contains the given marker text in user messages.
- */
-function findParentSession(sessionDir, marker) {
-  for (const file of listJsonlFiles(sessionDir)) {
-    const events = parseJsonl(file);
-    const userText = getUserText(events);
-    if (userText.includes(marker)) return { file, events };
-  }
-  return null;
+	const files = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const fullPath = join(dir, entry.name);
+		if (entry.isDirectory()) {
+			files.push(...listJsonlFiles(fullPath));
+			continue;
+		}
+		if (entry.isFile() && fullPath.endsWith(".jsonl")) files.push(fullPath);
+	}
+	return files;
 }
 
 /**
  * Get all user text from session events.
  */
 export function getUserText(events) {
-  return events
-    .filter((e) => e.type === "message" && e.message?.role === "user")
-    .flatMap((e) => e.message.content ?? [])
-    .filter((p) => p.type === "text")
-    .map((p) => p.text)
-    .join("\n");
+	return events
+		.filter((e) => e.type === "message" && e.message?.role === "user")
+		.flatMap((e) => e.message.content ?? [])
+		.filter((p) => p.type === "text")
+		.map((p) => p.text)
+		.join("\n");
 }
 
 /**
  * Get all assistant text from session events.
  */
 export function getAssistantTexts(events) {
-  return events
-    .filter((e) => e.type === "message" && e.message?.role === "assistant")
-    .flatMap((e) => e.message.content ?? [])
-    .filter((p) => p.type === "text")
-    .map((p) => p.text.trim());
+	return events
+		.filter((e) => e.type === "message" && e.message?.role === "assistant")
+		.flatMap((e) => e.message.content ?? [])
+		.filter((p) => p.type === "text")
+		.map((p) => p.text.trim());
 }
 
 /**
  * Get all tool results for a given tool name.
  */
 export function getToolResults(events, toolName) {
-  return events
-    .filter(
-      (e) =>
-        e.type === "message" &&
-        e.message?.role === "toolResult" &&
-        e.message.toolName === toolName,
-    )
-    .map((e) => e.message);
+	return events
+		.filter((e) => e.type === "message" && e.message?.role === "toolResult" && e.message.toolName === toolName)
+		.map((e) => e.message);
 }
 
 /**
  * Get the session header entry from events.
  */
 export function getSessionHeader(events) {
-  return events.find((e) => e.type === "session");
-}
-
-/**
- * Get subagent tool result details by agent name.
- * Handles both individual and batch result formats.
- */
-function getSubagentResultByAgent(events, agentName) {
-  const results = getToolResults(events, "subagent");
-  for (const r of results) {
-    const d = r.details ?? {};
-    // Batch format
-    if (d.status === "batch" && Array.isArray(d.children)) {
-      const child = d.children.find(c => c.name === agentName || c.agent === agentName);
-      if (child) return { ...child, _source: "batch" };
-    }
-    // Individual format
-    if (d.agent === agentName || d.name === agentName) {
-      return { ...d, _source: "individual" };
-    }
-  }
-  return null;
+	return events.find((e) => e.type === "session");
 }
 
 /**
@@ -371,25 +317,15 @@ function getSubagentResultByAgent(events, agentName) {
  * Returns an array of child detail objects.
  */
 export function getAllSubagentChildren(events) {
-  const results = getToolResults(events, "subagent");
-  const children = [];
-  for (const r of results) {
-    const d = r.details ?? {};
-    if (d.status === "batch" && Array.isArray(d.children)) {
-      children.push(...d.children);
-    } else if (d.name || d.agent) {
-      children.push(d);
-    }
-  }
-  return children;
-}
-
-/**
- * Assert that a marker string appears in assistant texts of the given events.
- */
-function assertAssistantContains(events, marker, label) {
-  const texts = getAssistantTexts(events);
-  if (!texts.some((t) => t.includes(marker))) {
-    throw new Error(`${label}: expected assistant to contain "${marker}", got: ${JSON.stringify(texts)}`);
-  }
+	const results = getToolResults(events, "subagent");
+	const children = [];
+	for (const r of results) {
+		const d = r.details ?? {};
+		if (d.status === "batch" && Array.isArray(d.children)) {
+			children.push(...d.children);
+		} else if (d.name || d.agent) {
+			children.push(d);
+		}
+	}
+	return children;
 }

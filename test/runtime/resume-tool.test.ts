@@ -1,30 +1,30 @@
 import { spawn } from "node:child_process";
-import {
-	assert,
-	writeFileSync,
-	join,
-	afterEach,
-	describe,
-	it,
-	createTestDir,
-	readSubagentLaunchMetadataForTest,
-	writeResumeTaskArtifactForTest,
-	writeSubagentLaunchMetadataEntryForTest,
-	resolveResumeLaunchMetadataForTest,
-	resetSubagentStateForTest,
-	requestSubagentBatchStopForTest,
-	getSubagentBatchStopMetadataForTest,
-	writeExecutable,
-	readFileSync,
-	mkdirSync,
-	existsSync,
-} from "../support/index.ts";
 import { resolve } from "node:path";
 import {
 	resolveResumeHerdrPlacementPolicy,
 	resolveResumeZellijPlacementPolicy,
 	resumeSubagentSession,
 } from "../../src/runtime/resume-service.ts";
+import {
+	afterEach,
+	assert,
+	createTestDir,
+	describe,
+	existsSync,
+	getSubagentBatchStopMetadataForTest,
+	it,
+	join,
+	mkdirSync,
+	readFileSync,
+	readSubagentLaunchMetadataForTest,
+	requestSubagentBatchStopForTest,
+	resetSubagentStateForTest,
+	resolveResumeLaunchMetadataForTest,
+	writeExecutable,
+	writeFileSync,
+	writeResumeTaskArtifactForTest,
+	writeSubagentLaunchMetadataEntryForTest,
+} from "../support/index.ts";
 
 async function readNonEmptyFileEventually(path: string): Promise<string> {
 	let lastText = "";
@@ -55,9 +55,7 @@ describe("subagent_resume Herdr placement", () => {
 	it("lets the current parent default override a persisted operator policy", () => {
 		assert.equal(
 			resolveResumeHerdrPlacementPolicy(
-				{ herdrPlacementPolicy: "down-stack" } as Parameters<
-					typeof resolveResumeHerdrPlacementPolicy
-				>[0],
+				{ herdrPlacementPolicy: "down-stack" } as Parameters<typeof resolveResumeHerdrPlacementPolicy>[0],
 				"tab",
 			),
 			"tab",
@@ -78,18 +76,13 @@ describe("subagent_resume Herdr placement", () => {
 	});
 
 	it("uses the current parent default when old metadata has no persisted policy", () => {
-		assert.equal(
-			resolveResumeHerdrPlacementPolicy(undefined, "right-stack"),
-			"right-stack",
-		);
+		assert.equal(resolveResumeHerdrPlacementPolicy(undefined, "right-stack"), "right-stack");
 	});
 
 	it("treats an empty current parent value as an explicit auto override", () => {
 		assert.equal(
 			resolveResumeHerdrPlacementPolicy(
-				{ herdrPlacementPolicy: "tab" } as Parameters<
-					typeof resolveResumeHerdrPlacementPolicy
-				>[0],
+				{ herdrPlacementPolicy: "tab" } as Parameters<typeof resolveResumeHerdrPlacementPolicy>[0],
 				"",
 			),
 			"auto",
@@ -114,9 +107,7 @@ describe("subagent_resume Zellij placement", () => {
 	it("lets the current parent default override a persisted operator policy", () => {
 		assert.equal(
 			resolveResumeZellijPlacementPolicy(
-				{ zellijPlacementPolicy: "down-stack" } as Parameters<
-					typeof resolveResumeZellijPlacementPolicy
-				>[0],
+				{ zellijPlacementPolicy: "down-stack" } as Parameters<typeof resolveResumeZellijPlacementPolicy>[0],
 				"floating",
 			),
 			"floating",
@@ -137,18 +128,13 @@ describe("subagent_resume Zellij placement", () => {
 	});
 
 	it("uses the current parent default when old metadata has no persisted policy", () => {
-		assert.equal(
-			resolveResumeZellijPlacementPolicy(undefined, "right-stack"),
-			"right-stack",
-		);
+		assert.equal(resolveResumeZellijPlacementPolicy(undefined, "right-stack"), "right-stack");
 	});
 
 	it("treats an empty current parent value as an explicit auto override", () => {
 		assert.equal(
 			resolveResumeZellijPlacementPolicy(
-				{ zellijPlacementPolicy: "down-stack" } as Parameters<
-					typeof resolveResumeZellijPlacementPolicy
-				>[0],
+				{ zellijPlacementPolicy: "down-stack" } as Parameters<typeof resolveResumeZellijPlacementPolicy>[0],
 				"",
 			),
 			"auto",
@@ -202,7 +188,13 @@ describe("subagent_resume name identity", () => {
 		const sessionFile = join(dir, "child.jsonl");
 		writeFileSync(
 			sessionFile,
-			JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "s",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
 		);
 
 		await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
@@ -240,7 +232,13 @@ describe("subagent_resume name identity", () => {
 		const sessionFile = join(dir, "empty-child.jsonl");
 		writeFileSync(
 			sessionFile,
-			JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "s",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
 		);
 
 		const launchMetadata = readSubagentLaunchMetadataForTest(sessionFile);
@@ -287,8 +285,7 @@ describe("subagent_resume coordinator-only-turn", () => {
 		// the resume tool must agree with the runtime that the parent should
 		// wait. shouldAwaitSubagentLaunch is the shared predicate both the
 		// subagent and subagent_resume tools route through.
-		const { shouldAwaitSubagentLaunchForTest, markSubagentBatchBlockingForTest } =
-			await import("../support/index.ts");
+		const { shouldAwaitSubagentLaunchForTest, markSubagentBatchBlockingForTest } = await import("../support/index.ts");
 		const asyncRunning = { blocking: false, async: true };
 
 		// Without the blocking flag, an async resume should not await.
@@ -305,8 +302,20 @@ describe("subagent_resume approval args", () => {
 		return {
 			isMuxAvailable: () => true,
 			getShellReadyDelayMs: () => 0,
-			watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
-			watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
+			watchBackgroundSubagent: async () => ({
+				name: "",
+				task: "",
+				summary: "",
+				exitCode: 0,
+				elapsed: 0,
+			}),
+			watchSubagent: async () => ({
+				name: "",
+				task: "",
+				summary: "",
+				exitCode: 0,
+				elapsed: 0,
+			}),
 			getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
 			startWidgetRefresh: () => {},
 			getContextWindow: () => undefined,
@@ -323,18 +332,18 @@ describe("subagent_resume approval args", () => {
 			const sessionFile = join(dir, "child.jsonl");
 			writeFileSync(
 				sessionFile,
-				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "s",
+					timestamp: new Date().toISOString(),
+					cwd: dir,
+				}) + "\n",
 			);
 
-			const running = await resumeSubagentSession(
-				{ sessionFile, mode: "background" },
-				createResumeRuntime(),
-			);
+			const running = await resumeSubagentSession({ sessionFile, mode: "background" }, createResumeRuntime());
 
-			assert.equal(
-				running.childProcess?.spawnargs.includes("--no-approve"),
-				true,
-			);
+			assert.equal(running.childProcess?.spawnargs.includes("--no-approve"), true);
 		} finally {
 			if (originalCommand == null) delete process.env.PI_SUBAGENT_PI_COMMAND;
 			else process.env.PI_SUBAGENT_PI_COMMAND = originalCommand;
@@ -355,7 +364,13 @@ describe("subagent_resume approval args", () => {
 			const sessionFile = join(dir, "context-aware-child.jsonl");
 			writeFileSync(
 				sessionFile,
-				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "s",
+					timestamp: new Date().toISOString(),
+					cwd: dir,
+				}) + "\n",
 			);
 			await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 				version: 1,
@@ -393,7 +408,13 @@ describe("subagent_resume approval args", () => {
 			const sessionFile = join(dir, "quiet-context-child.jsonl");
 			writeFileSync(
 				sessionFile,
-				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "s",
+					timestamp: new Date().toISOString(),
+					cwd: dir,
+				}) + "\n",
 			);
 			await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 				version: 1,
@@ -413,10 +434,7 @@ describe("subagent_resume approval args", () => {
 				reportContextUsage: false,
 			});
 
-			const running = await resumeSubagentSession(
-				{ sessionFile },
-				createResumeRuntime(),
-			);
+			const running = await resumeSubagentSession({ sessionFile }, createResumeRuntime());
 
 			assert.equal(running.reportContextUsage, false);
 		} finally {
@@ -434,7 +452,13 @@ describe("subagent_resume approval args", () => {
 			const sessionFile = join(dir, "child.jsonl");
 			writeFileSync(
 				sessionFile,
-				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "s",
+					timestamp: new Date().toISOString(),
+					cwd: dir,
+				}) + "\n",
 			);
 			await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 				version: 1,
@@ -454,13 +478,9 @@ describe("subagent_resume approval args", () => {
 				boundarySystemPrompt: false,
 			});
 
-			const running = await resumeSubagentSession(
-				{ sessionFile },
-				createResumeRuntime(),
-			);
-			const approvalArgs = running.childProcess?.spawnargs.filter(
-				(arg) => arg === "--approve" || arg === "--no-approve",
-			) ?? [];
+			const running = await resumeSubagentSession({ sessionFile }, createResumeRuntime());
+			const approvalArgs =
+				running.childProcess?.spawnargs.filter((arg) => arg === "--approve" || arg === "--no-approve") ?? [];
 
 			assert.deepEqual(approvalArgs, ["--no-approve"]);
 		} finally {
@@ -478,7 +498,13 @@ describe("subagent_resume approval args", () => {
 			const sessionFile = join(dir, "child.jsonl");
 			writeFileSync(
 				sessionFile,
-				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "s",
+					timestamp: new Date().toISOString(),
+					cwd: dir,
+				}) + "\n",
 			);
 			await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 				version: 1,
@@ -500,13 +526,9 @@ describe("subagent_resume approval args", () => {
 
 			// Persisted metadata (background) wins over the explicit interactive
 			// mode argument, so the resume stays background and uses --no-approve.
-			const running = await resumeSubagentSession(
-				{ sessionFile, mode: "interactive" },
-				createResumeRuntime(),
-			);
-			const approvalArgs = running.childProcess?.spawnargs.filter(
-				(arg) => arg === "--approve" || arg === "--no-approve",
-			) ?? [];
+			const running = await resumeSubagentSession({ sessionFile, mode: "interactive" }, createResumeRuntime());
+			const approvalArgs =
+				running.childProcess?.spawnargs.filter((arg) => arg === "--approve" || arg === "--no-approve") ?? [];
 
 			assert.equal(running.mode, "background");
 			assert.deepEqual(approvalArgs, ["--no-approve"]);
@@ -522,8 +544,20 @@ describe("subagent_resume extension parity", () => {
 		return {
 			isMuxAvailable: () => true,
 			getShellReadyDelayMs: () => 0,
-			watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
-			watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
+			watchBackgroundSubagent: async () => ({
+				name: "",
+				task: "",
+				summary: "",
+				exitCode: 0,
+				elapsed: 0,
+			}),
+			watchSubagent: async () => ({
+				name: "",
+				task: "",
+				summary: "",
+				exitCode: 0,
+				elapsed: 0,
+			}),
 			getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
 			startWidgetRefresh: () => {},
 			getContextWindow: () => undefined,
@@ -540,7 +574,13 @@ describe("subagent_resume extension parity", () => {
 			const sessionFile = join(dir, "child.jsonl");
 			writeFileSync(
 				sessionFile,
-				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "s",
+					timestamp: new Date().toISOString(),
+					cwd: dir,
+				}) + "\n",
 			);
 			await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 				version: 1,
@@ -559,10 +599,7 @@ describe("subagent_resume extension parity", () => {
 				boundarySystemPrompt: false,
 			});
 
-			const running = await resumeSubagentSession(
-				{ sessionFile },
-				createResumeRuntime(),
-			);
+			const running = await resumeSubagentSession({ sessionFile }, createResumeRuntime());
 
 			assert.equal(running.childProcess?.spawnargs.includes("--no-extensions"), false);
 		} finally {
@@ -580,13 +617,16 @@ describe("subagent_resume extension parity", () => {
 			const sessionFile = join(dir, "legacy-child.jsonl");
 			writeFileSync(
 				sessionFile,
-				JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "s",
+					timestamp: new Date().toISOString(),
+					cwd: dir,
+				}) + "\n",
 			);
 
-			const running = await resumeSubagentSession(
-				{ sessionFile, mode: "background" },
-				createResumeRuntime(),
-			);
+			const running = await resumeSubagentSession({ sessionFile, mode: "background" }, createResumeRuntime());
 
 			assert.equal(running.childProcess?.spawnargs.includes("--no-extensions"), true);
 		} finally {
@@ -602,12 +642,16 @@ describe("subagent_resume prompt delivery", () => {
 		const binDir = join(dir, "bin");
 		mkdirSync(binDir, { recursive: true });
 		const logFile = join(dir, "tmux.log");
-		writeExecutable(binDir, "tmux", `#!/usr/bin/env bash
+		writeExecutable(
+			binDir,
+			"tmux",
+			`#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_TMUX_LOG"
 case "$1" in
   new-window) printf '%%42\\n' ;;
 esac
-`);
+`,
+		);
 		const originalPath = process.env.PATH;
 		const originalMux = process.env.PI_SUBAGENT_MUX;
 		const originalTmux = process.env.TMUX;
@@ -625,7 +669,13 @@ esac
 			const sessionFile = join(dir, "child.jsonl");
 			writeFileSync(
 				sessionFile,
-				JSON.stringify({ type: "session", version: 3, id: "child-session", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "child-session",
+					timestamp: new Date().toISOString(),
+					cwd: dir,
+				}) + "\n",
 			);
 			await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 				version: 1,
@@ -652,8 +702,20 @@ esac
 				{
 					isMuxAvailable: () => true,
 					getShellReadyDelayMs: () => 0,
-					watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
-					watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
+					watchBackgroundSubagent: async () => ({
+						name: "",
+						task: "",
+						summary: "",
+						exitCode: 0,
+						elapsed: 0,
+					}),
+					watchSubagent: async () => ({
+						name: "",
+						task: "",
+						summary: "",
+						exitCode: 0,
+						elapsed: 0,
+					}),
 					getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
 					startWidgetRefresh: () => {},
 					getContextWindow: () => undefined,
@@ -665,7 +727,9 @@ esac
 			const commandMatch = log.match(/send-keys -t %42 -l ([\s\S]*?)\nsend-keys -t %42 Enter/);
 			assert.ok(commandMatch?.[1], "expected tmux to receive a shell command");
 
-			const shell = spawn("/bin/sh", [], { stdio: ["pipe", "ignore", "ignore"] });
+			const shell = spawn("/bin/sh", [], {
+				stdio: ["pipe", "ignore", "ignore"],
+			});
 			try {
 				shell.stdin.write(`${commandMatch[1]}\n`);
 				const sentinel = await readNonEmptyFileEventually(running.doneSentinelFile!);
@@ -694,7 +758,13 @@ esac
 		const sessionFile = join(dir, "child.jsonl");
 		writeFileSync(
 			sessionFile,
-			JSON.stringify({ type: "session", version: 3, id: "child-session", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "child-session",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
 		);
 
 		const task = "  preserve leading space\n\nand trailing space  \n";
@@ -709,7 +779,13 @@ esac
 		const sessionFile = join(dir, "child.jsonl");
 		writeFileSync(
 			sessionFile,
-			JSON.stringify({ type: "session", version: 3, id: "../../evil/session", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "../../evil/session",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
 		);
 
 		const artifactPath = writeResumeTaskArtifactForTest("resume-child", "safe", sessionFile, dir);
@@ -723,12 +799,16 @@ esac
 		const binDir = join(dir, "bin");
 		mkdirSync(binDir, { recursive: true });
 		const logFile = join(dir, "tmux.log");
-		writeExecutable(binDir, "tmux", `#!/usr/bin/env bash
+		writeExecutable(
+			binDir,
+			"tmux",
+			`#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_TMUX_LOG"
 case "$1" in
   new-window) printf '%%42\\n' ;;
 esac
-`);
+`,
+		);
 		process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
 		process.env.PI_SUBAGENT_MUX = "tmux";
 		process.env.TMUX = "fake-tmux-socket";
@@ -737,7 +817,13 @@ esac
 		const sessionFile = join(dir, "child.jsonl");
 		writeFileSync(
 			sessionFile,
-			JSON.stringify({ type: "session", version: 3, id: "child-session", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "child-session",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
 		);
 		await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 			version: 1,
@@ -763,8 +849,20 @@ esac
 			{
 				isMuxAvailable: () => true,
 				getShellReadyDelayMs: () => 0,
-				watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
-				watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
+				watchBackgroundSubagent: async () => ({
+					name: "",
+					task: "",
+					summary: "",
+					exitCode: 0,
+					elapsed: 0,
+				}),
+				watchSubagent: async () => ({
+					name: "",
+					task: "",
+					summary: "",
+					exitCode: 0,
+					elapsed: 0,
+				}),
 				getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
 				startWidgetRefresh: () => {},
 				getContextWindow: () => undefined,
@@ -783,16 +881,26 @@ esac
 	it("expands follow-up task placeholders for background resumes", async () => {
 		const dir = createTestDir();
 		const stdinLog = join(dir, "stdin.log");
-		const bin = writeExecutable(dir, "capture-pi", `#!/usr/bin/env bash
+		const bin = writeExecutable(
+			dir,
+			"capture-pi",
+			`#!/usr/bin/env bash
 cat > '${stdinLog}'
-`);
+`,
+		);
 		const originalCommand = process.env.PI_SUBAGENT_PI_COMMAND;
 		process.env.PI_SUBAGENT_PI_COMMAND = bin;
 		try {
 			const sessionFile = join(dir, "child.jsonl");
 			writeFileSync(
 				sessionFile,
-				JSON.stringify({ type: "session", version: 3, id: "child-session", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "child-session",
+					timestamp: new Date().toISOString(),
+					cwd: dir,
+				}) + "\n",
 			);
 			await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 				version: 1,
@@ -818,8 +926,20 @@ cat > '${stdinLog}'
 				{
 					isMuxAvailable: () => true,
 					getShellReadyDelayMs: () => 0,
-					watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
-					watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
+					watchBackgroundSubagent: async () => ({
+						name: "",
+						task: "",
+						summary: "",
+						exitCode: 0,
+						elapsed: 0,
+					}),
+					watchSubagent: async () => ({
+						name: "",
+						task: "",
+						summary: "",
+						exitCode: 0,
+						elapsed: 0,
+					}),
 					getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
 					startWidgetRefresh: () => {},
 					getContextWindow: () => undefined,
@@ -841,12 +961,16 @@ cat > '${stdinLog}'
 		const binDir = join(dir, "bin");
 		mkdirSync(binDir, { recursive: true });
 		const logFile = join(dir, "tmux.log");
-		writeExecutable(binDir, "tmux", `#!/usr/bin/env bash
+		writeExecutable(
+			binDir,
+			"tmux",
+			`#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_TMUX_LOG"
 case "$1" in
   new-window) printf '%%42\\n' ;;
 esac
-`);
+`,
+		);
 		process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
 		process.env.PI_SUBAGENT_MUX = "tmux";
 		process.env.TMUX = "fake-tmux-socket";
@@ -855,7 +979,13 @@ esac
 		const sessionFile = join(dir, "child.jsonl");
 		writeFileSync(
 			sessionFile,
-			JSON.stringify({ type: "session", version: 3, id: "child-session", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "child-session",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
 		);
 		await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 			version: 1,
@@ -881,8 +1011,20 @@ esac
 			{
 				isMuxAvailable: () => true,
 				getShellReadyDelayMs: () => 0,
-				watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
-				watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
+				watchBackgroundSubagent: async () => ({
+					name: "",
+					task: "",
+					summary: "",
+					exitCode: 0,
+					elapsed: 0,
+				}),
+				watchSubagent: async () => ({
+					name: "",
+					task: "",
+					summary: "",
+					exitCode: 0,
+					elapsed: 0,
+				}),
 				getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
 				startWidgetRefresh: () => {},
 				getContextWindow: () => undefined,
@@ -902,7 +1044,13 @@ describe("subagent_resume same-session guard", () => {
 		const sessionFile = join(dir, "child.jsonl");
 		writeFileSync(
 			sessionFile,
-			JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "s",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
 		);
 		await writeSubagentLaunchMetadataEntryForTest(sessionFile, {
 			version: 1,
@@ -934,25 +1082,38 @@ describe("subagent_resume same-session guard", () => {
 		});
 
 		await assert.rejects(
-			() => resumeSubagentSession(
-				{ sessionFile, model: "zai-messages/glm-5-turbo", thinking: "off" },
-				{
-					isMuxAvailable: () => true,
-					getShellReadyDelayMs: () => 0,
-					watchBackgroundSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
-					watchSubagent: async () => ({ name: "", task: "", summary: "", exitCode: 0, elapsed: 0 }),
-					getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
-					startWidgetRefresh: () => {},
-					getContextWindow: () => undefined,
-					runningSubagents,
-					modelRegistry: {
-						getAvailable: () => [
-							{ provider: "zai-messages", id: "glm-5-turbo" },
-							{ provider: "zai-messages", id: "glm-5.1" },
-						],
+			() =>
+				resumeSubagentSession(
+					{ sessionFile, model: "zai-messages/glm-5-turbo", thinking: "off" },
+					{
+						isMuxAvailable: () => true,
+						getShellReadyDelayMs: () => 0,
+						watchBackgroundSubagent: async () => ({
+							name: "",
+							task: "",
+							summary: "",
+							exitCode: 0,
+							elapsed: 0,
+						}),
+						watchSubagent: async () => ({
+							name: "",
+							task: "",
+							summary: "",
+							exitCode: 0,
+							elapsed: 0,
+						}),
+						getWatcherSignal: (_running: any, controller: AbortController) => controller.signal,
+						startWidgetRefresh: () => {},
+						getContextWindow: () => undefined,
+						runningSubagents,
+						modelRegistry: {
+							getAvailable: () => [
+								{ provider: "zai-messages", id: "glm-5-turbo" },
+								{ provider: "zai-messages", id: "glm-5.1" },
+							],
+						},
 					},
-				},
-			),
+				),
 			/already running/,
 		);
 
@@ -967,7 +1128,13 @@ describe("subagent_resume same-session guard", () => {
 		const sessionFile = join(dir, "child.jsonl");
 		writeFileSync(
 			sessionFile,
-			JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "s",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
 		);
 
 		const runningSubagents = new Map<string, any>();
@@ -1002,11 +1169,7 @@ describe("subagent_resume same-session guard", () => {
 		assert.ok(guardResult, "Guard should have triggered");
 		assert.equal(guardResult!.name, "magician");
 		assert.equal(guardResult!.id, existingId);
-		assert.match(
-			guardResult!.content,
-			/existing-001/,
-			"Should reference the existing running subagent id",
-		);
+		assert.match(guardResult!.content, /existing-001/, "Should reference the existing running subagent id");
 	});
 
 	it("does not trigger guard when sessionFile differs", () => {

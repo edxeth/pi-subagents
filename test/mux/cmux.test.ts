@@ -1,11 +1,5 @@
 import assert from "node:assert/strict";
-import {
-	chmodSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -96,12 +90,7 @@ describe("cmux surface creation", async () => {
 			assert.ok(identifyIdx >= 0, "expected identify --json call");
 			assert.ok(splitIdx >= 0, "expected new-split call");
 			assert.ok(
-				!calls.some(
-					(args) =>
-						args[0] === "new-split" &&
-						args.includes("--focus") &&
-						args.includes("true"),
-				),
+				!calls.some((args) => args[0] === "new-split" && args.includes("--focus") && args.includes("true")),
 				"should NOT use --focus true",
 			);
 		} finally {
@@ -121,9 +110,7 @@ describe("cmux surface creation", async () => {
 				calls.some((args) => args[0] === "new-split"),
 				false,
 			);
-			assert.ok(
-				surfaceCalls.every((args) => !args.includes("--focus")),
-			);
+			assert.ok(surfaceCalls.every((args) => !args.includes("--focus")));
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

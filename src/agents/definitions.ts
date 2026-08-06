@@ -106,10 +106,7 @@ function parseAgentDefinition(
 		enabled: enabledRaw != null ? enabledRaw === "true" : undefined,
 		model: get("model"),
 		allowedModels: get("allowed-models"),
-		allowModelOverride:
-			allowModelOverrideRaw != null
-				? allowModelOverrideRaw === "true"
-				: undefined,
+		allowModelOverride: allowModelOverrideRaw != null ? allowModelOverrideRaw === "true" : undefined,
 		tools: get("tools"),
 		skills: get("skills"),
 		injectSkills: injectSkillsRaw,
@@ -118,53 +115,35 @@ function parseAgentDefinition(
 		denyTools: get("deny-tools"),
 		spawning: spawningRaw != null ? spawningRaw === "true" : false,
 		autoExit: autoExitRaw != null ? autoExitRaw === "true" : undefined,
-		systemPromptMode:
-			systemPromptRaw === "append" || systemPromptRaw === "replace"
-				? systemPromptRaw
-				: undefined,
+		systemPromptMode: systemPromptRaw === "append" || systemPromptRaw === "replace" ? systemPromptRaw : undefined,
 		cwd: get("cwd"),
 		cwdBase,
 		body: body || undefined,
 		sessionMode:
-			sessionModeRaw === "standalone" ||
-			sessionModeRaw === "lineage-only" ||
-			sessionModeRaw === "fork"
+			sessionModeRaw === "standalone" || sessionModeRaw === "lineage-only" || sessionModeRaw === "fork"
 				? sessionModeRaw
 				: undefined,
 		async: asyncRaw != null ? asyncRaw === "true" : undefined,
-		noContextFiles:
-			noContextFilesRaw != null ? noContextFilesRaw === "true" : undefined,
+		noContextFiles: noContextFilesRaw != null ? noContextFilesRaw === "true" : undefined,
 		inheritAppendSystem: inheritAppendSystemRaw === "true",
 		noSession: noSessionRaw != null ? noSessionRaw === "true" : undefined,
-		trustProject:
-			trustProjectRaw != null ? trustProjectRaw === "true" : undefined,
-		mode:
-			modeRaw === "background" || modeRaw === "interactive"
-				? modeRaw
-				: undefined,
+		trustProject: trustProjectRaw != null ? trustProjectRaw === "true" : undefined,
+		mode: modeRaw === "background" || modeRaw === "interactive" ? modeRaw : undefined,
 		taskExpansion: taskExpansionRaw === "shell" ? "shell" : undefined,
 		contextWarnThreshold: contextWarnThresholdRaw,
 		contextWarnStep: contextWarnStepRaw,
-		reportContextUsage:
-			reportContextUsageRaw != null
-				? reportContextUsageRaw === "true"
-				: undefined,
+		reportContextUsage: reportContextUsageRaw != null ? reportContextUsageRaw === "true" : undefined,
 
 		flags: flagsRaw,
 		env: getBlock("env"),
 		parentClosePolicy:
-			parentClosePolicyRaw === "terminate" ||
-			parentClosePolicyRaw === "continue"
-				? parentClosePolicyRaw
-				: undefined,
+			parentClosePolicyRaw === "terminate" || parentClosePolicyRaw === "continue" ? parentClosePolicyRaw : undefined,
 	};
 }
 
 export type ResolveAgentCwd = (cwdHint: string | null, baseCwd: string) => string;
 
-export function getEffectiveAgentDefinitions(
-	baseCwd = process.cwd(),
-): ResolvedAgentDefinition[] {
+export function getEffectiveAgentDefinitions(baseCwd = process.cwd()): ResolvedAgentDefinition[] {
 	const configDir = getAgentConfigDir();
 	const agents = new Map<string, ResolvedAgentDefinition>();
 	const dirs = [
@@ -199,9 +178,5 @@ export function loadAgentDefaults(
 	resolveAgentCwd: ResolveAgentCwd,
 ): AgentDefaults | null {
 	const resolvedBaseCwd = resolveAgentCwd(cwdHint ?? null, baseCwd);
-	return (
-		getEffectiveAgentDefinitions(resolvedBaseCwd).find(
-			(agent) => agent.name === agentName,
-		) ?? null
-	);
+	return getEffectiveAgentDefinitions(resolvedBaseCwd).find((agent) => agent.name === agentName) ?? null;
 }

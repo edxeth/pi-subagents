@@ -1,5 +1,5 @@
-import { assert, describe, it } from "../support/index.ts";
 import { MuxRuntimeProbe } from "../../src/mux/runtime-probe.ts";
+import { assert, describe, it } from "../support/index.ts";
 
 describe("mux runtime probe", () => {
 	it("caches command availability per PATH and re-probes after PATH changes", () => {

@@ -1,6 +1,6 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { DetailField, DetailSection, OverlayItem, Theme } from "./render-types.ts";
 import { fitLine, renderScrollbar, wrapPlainText } from "./render-helpers.ts";
+import type { DetailField, DetailSection, OverlayItem, Theme } from "./render-types.ts";
 
 export function renderDetail(
 	item: OverlayItem,
@@ -75,7 +75,10 @@ function renderSection(section: DetailSection, theme: Theme, width: number): str
 }
 
 function renderSectionTitle(title: string, theme: Theme, width: number): string {
-	const text = title.replace(/^──\s*/, "").replace(/\s*──$/, "").trim();
+	const text = title
+		.replace(/^──\s*/, "")
+		.replace(/\s*──$/, "")
+		.trim();
 	const label = ` ${text} `;
 	const side = Math.max(2, Math.floor((width - visibleWidth(label)) / 2));
 	return theme.fg("accent", `${"─".repeat(side)}${label}${"─".repeat(side)}`);
@@ -83,8 +86,9 @@ function renderSectionTitle(title: string, theme: Theme, width: number): string 
 
 function renderField(field: DetailField, labelWidth: number, valueWidth: number, theme: Theme): string[] {
 	if (!field.label) {
-		return wrapPlainText(field.value, labelWidth + valueWidth + 2, Number.MAX_SAFE_INTEGER)
-			.map((line) => `   ${theme.fg("muted", line)}`);
+		return wrapPlainText(field.value, labelWidth + valueWidth + 2, Number.MAX_SAFE_INTEGER).map(
+			(line) => `   ${theme.fg("muted", line)}`,
+		);
 	}
 
 	const label = field.label.padEnd(labelWidth);

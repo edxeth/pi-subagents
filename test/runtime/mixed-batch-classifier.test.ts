@@ -1,10 +1,7 @@
-import { assert, describe, it, beforeEach } from "../support/index.ts";
-import {
-	isSubagentBatchBlocking,
-	resetSubagentBatchStopRequest,
-} from "../../src/runtime/state.ts";
-import { classifyAssistantMessageForMixedBatch } from "../../src/runtime/batch-classifier.ts";
 import type { AgentDefaults } from "../../src/agents/definitions.ts";
+import { classifyAssistantMessageForMixedBatch } from "../../src/runtime/batch-classifier.ts";
+import { isSubagentBatchBlocking, resetSubagentBatchStopRequest } from "../../src/runtime/state.ts";
+import { assert, beforeEach, describe, it } from "../support/index.ts";
 
 type ToolCallLike = {
 	type: "toolCall";
@@ -27,7 +24,12 @@ function blockingAgentDefs(name = "blocker"): AgentDefaults {
 }
 
 function call(name: string, args: Record<string, unknown> = {}): ToolCallLike {
-	return { type: "toolCall", id: `id-${name}-${Math.random()}`, name, arguments: args };
+	return {
+		type: "toolCall",
+		id: `id-${name}-${Math.random()}`,
+		name,
+		arguments: args,
+	};
 }
 
 function message(...calls: ToolCallLike[]): AssistantMessageLike {
@@ -47,52 +49,31 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 	it("does not mark a pure async subagent batch as blocking", () => {
 		const msg = message(call("subagent", { agent: "scout" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), false);
 	});
 
 	it("marks a mixed async subagent + bash batch as blocking", () => {
-		const msg = message(
-			call("subagent", { agent: "scout" }),
-			call("bash", { command: "ls" }),
-		);
+		const msg = message(call("subagent", { agent: "scout" }), call("bash", { command: "ls" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), true);
 	});
 
 	it("does not mark a pure non-subagent batch as blocking", () => {
-		const msg = message(
-			call("bash", { command: "ls" }),
-			call("read", { path: "x" }),
-		);
+		const msg = message(call("bash", { command: "ls" }), call("read", { path: "x" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(null),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(null));
 
 		assert.equal(isSubagentBatchBlocking(), false);
 	});
 
 	it("does not mark a blocking subagent + bash batch (already sync via frontmatter)", () => {
-		const msg = message(
-			call("subagent", { agent: "blocker" }),
-			call("bash", { command: "ls" }),
-		);
+		const msg = message(call("subagent", { agent: "blocker" }), call("bash", { command: "ls" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(blockingAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(blockingAgentDefs()));
 
 		// Existing batch barrier already covers this; we should not double-mark.
 		// markSubagentBatchBlocking is idempotent so even if we did, no harm.
@@ -101,15 +82,9 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 	});
 
 	it("marks an async subagent_resume + bash batch as blocking", () => {
-		const msg = message(
-			call("subagent_resume", { sessionFile: "/tmp/x.jsonl" }),
-			call("bash", { command: "ls" }),
-		);
+		const msg = message(call("subagent_resume", { sessionFile: "/tmp/x.jsonl" }), call("bash", { command: "ls" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(null),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(null));
 
 		assert.equal(isSubagentBatchBlocking(), true);
 	});
@@ -129,24 +104,15 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 			call("bash", { command: "ls" }),
 		);
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(null),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(null));
 
 		assert.equal(isSubagentBatchBlocking(), false);
 	});
 
 	it("does not mark a multi-async-subagent-only batch as blocking", () => {
-		const msg = message(
-			call("subagent", { agent: "scout" }),
-			call("subagent", { agent: "scout" }),
-		);
+		const msg = message(call("subagent", { agent: "scout" }), call("subagent", { agent: "scout" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), false);
 	});
@@ -158,25 +124,16 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 			call("bash", { command: "ls" }),
 		);
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), true);
 	});
 
 	it("does not mark when PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN=1", () => {
 		process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN = "1";
-		const msg = message(
-			call("subagent", { agent: "scout" }),
-			call("bash", { command: "ls" }),
-		);
+		const msg = message(call("subagent", { agent: "scout" }), call("bash", { command: "ls" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), false);
 	});
@@ -184,16 +141,10 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 	it("ignores tool calls inside non-assistant messages", () => {
 		const msg = {
 			role: "user",
-			content: [
-				call("subagent", { agent: "scout" }),
-				call("bash", { command: "ls" }),
-			],
+			content: [call("subagent", { agent: "scout" }), call("bash", { command: "ls" })],
 		};
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), false);
 	});
@@ -204,24 +155,15 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 			content: [{ type: "text", text: "hi" }],
 		};
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), false);
 	});
 
 	it("does not mark when the only subagent call has an unknown agent (no defs)", () => {
-		const msg = message(
-			call("subagent", { agent: "missing" }),
-			call("bash", { command: "ls" }),
-		);
+		const msg = message(call("subagent", { agent: "missing" }), call("bash", { command: "ls" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(null),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(null));
 
 		// Unknown agent: existing tool_call validation will surface the error.
 		// Classifier conservatively does not treat it as a launch.
@@ -229,15 +171,9 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 	});
 
 	it("marks the batch regardless of tool order (bash before subagent)", () => {
-		const msg = message(
-			call("bash", { command: "ls" }),
-			call("subagent", { agent: "scout" }),
-		);
+		const msg = message(call("bash", { command: "ls" }), call("subagent", { agent: "scout" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), true);
 	});
@@ -248,15 +184,9 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 		// the parent to await — the original race condition does not apply
 		// because there is no side-effecting sibling competing for the
 		// parent's attention.
-		const msg = message(
-			call("subagent", { agent: "scout" }),
-			call("set_tab_title", { title: "Sticky test" }),
-		);
+		const msg = message(call("subagent", { agent: "scout" }), call("set_tab_title", { title: "Sticky test" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), false);
 	});
@@ -264,15 +194,9 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 	it("does not mark a subagent + subagent_kill batch as blocking", () => {
 		// subagent_kill is a pi-subagents-internal control tool. Same logic:
 		// no side-effecting sibling work, no race to prevent.
-		const msg = message(
-			call("subagent", { agent: "scout" }),
-			call("subagent_kill", { id: "child-1" }),
-		);
+		const msg = message(call("subagent", { agent: "scout" }), call("subagent_kill", { id: "child-1" }));
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), false);
 	});
@@ -292,10 +216,7 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 			call("bash", { command: "ls" }),
 		);
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), true);
 	});
@@ -310,10 +231,7 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 			}),
 		);
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 
 		assert.equal(isSubagentBatchBlocking(), false);
 	});
@@ -329,10 +247,7 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 			call("bash", { command: "ls" }),
 		);
 
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(blockingAgentDefs()),
-		);
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(blockingAgentDefs()));
 
 		// Each child resolves to blocking via frontmatter; the existing barrier
 		// already covers that. The mixed-async barrier should not fire.
@@ -369,19 +284,11 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 		// at result-shape time. So launch metadata still records async: true,
 		// and a later subagent_resume reads async: true from that metadata and
 		// resumes async (subject to its own batch composition at resume time).
-		const { enforceAgentFrontmatterForTest } = await import(
-			"../support/index.ts"
-		);
+		const { enforceAgentFrontmatterForTest } = await import("../support/index.ts");
 
 		// Mixed batch fires the barrier.
-		const msg = message(
-			call("subagent", { agent: "scout" }),
-			call("bash", { command: "ls" }),
-		);
-		classifyAssistantMessageForMixedBatch(
-			msg as never,
-			loaderForAgent(asyncAgentDefs()),
-		);
+		const msg = message(call("subagent", { agent: "scout" }), call("bash", { command: "ls" }));
+		classifyAssistantMessageForMixedBatch(msg as never, loaderForAgent(asyncAgentDefs()));
 		assert.equal(isSubagentBatchBlocking(), true);
 
 		// enforceAgentFrontmatter still resolves async: true for an async agent.
@@ -391,10 +298,7 @@ describe("classifyAssistantMessageForMixedBatch", () => {
 			title: "Run",
 			agent: "scout",
 		};
-		const effective = enforceAgentFrontmatterForTest(
-			params as never,
-			asyncAgentDefs(),
-		);
+		const effective = enforceAgentFrontmatterForTest(params as never, asyncAgentDefs());
 
 		// The agent identity (what gets persisted in launch metadata via
 		// `params.async ?? !(params.blocking ?? false)`) is async, regardless

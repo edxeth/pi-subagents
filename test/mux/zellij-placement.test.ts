@@ -43,49 +43,14 @@ describe("zellij placement", () => {
 		assert.equal(resolveZellijPlacementPolicy("down-stack"), "down-stack");
 		assert.equal(resolveZellijPlacementPolicy("floating"), "floating");
 		assert.equal(resolveZellijPlacementPolicy("tab-stack"), "tab-stack");
-		assert.throws(
-			() => resolveZellijPlacementPolicy("largest-pane"),
-			/PI_SUBAGENT_ZELLIJ_PLACEMENT.*largest-pane/,
-		);
+		assert.throws(() => resolveZellijPlacementPolicy("largest-pane"), /PI_SUBAGENT_ZELLIJ_PLACEMENT.*largest-pane/);
 	});
 
 	it("checks explicit split directions against Pi's usable minimum", () => {
-		assert.equal(
-			canSplitZellijPaneInDirection(
-				pane({ pane_rows: 20, pane_columns: 100 }),
-				"right",
-				50,
-				10,
-			),
-			true,
-		);
-		assert.equal(
-			canSplitZellijPaneInDirection(
-				pane({ pane_rows: 20, pane_columns: 99 }),
-				"right",
-				50,
-				10,
-			),
-			false,
-		);
-		assert.equal(
-			canSplitZellijPaneInDirection(
-				pane({ pane_rows: 20, pane_columns: 50 }),
-				"down",
-				50,
-				10,
-			),
-			true,
-		);
-		assert.equal(
-			canSplitZellijPaneInDirection(
-				pane({ pane_rows: 19, pane_columns: 50 }),
-				"down",
-				50,
-				10,
-			),
-			false,
-		);
+		assert.equal(canSplitZellijPaneInDirection(pane({ pane_rows: 20, pane_columns: 100 }), "right", 50, 10), true);
+		assert.equal(canSplitZellijPaneInDirection(pane({ pane_rows: 20, pane_columns: 99 }), "right", 50, 10), false);
+		assert.equal(canSplitZellijPaneInDirection(pane({ pane_rows: 20, pane_columns: 50 }), "down", 50, 10), true);
+		assert.equal(canSplitZellijPaneInDirection(pane({ pane_rows: 19, pane_columns: 50 }), "down", 50, 10), false);
 	});
 
 	it("places the first right-stack child beside the parent, never a foreign pane", () => {
@@ -104,15 +69,12 @@ describe("zellij placement", () => {
 
 	it("supports down-stack and automatic parent-only direction selection", () => {
 		const tallParent = pane({ id: 10, pane_rows: 60, pane_columns: 100 });
-		assert.deepEqual(
-			selectZellijFirstPlacement([tallParent], 10, "down-stack"),
-			{
-				mode: "split",
-				parentPaneId: 10,
-				tabId: 1,
-				direction: "down",
-			},
-		);
+		assert.deepEqual(selectZellijFirstPlacement([tallParent], 10, "down-stack"), {
+			mode: "split",
+			parentPaneId: 10,
+			tabId: 1,
+			direction: "down",
+		});
 		assert.deepEqual(selectZellijFirstPlacement([tallParent], 10, "auto"), {
 			mode: "split",
 			parentPaneId: 10,
@@ -123,14 +85,8 @@ describe("zellij placement", () => {
 
 	it("falls back to a dedicated tab when the requested split is too small", () => {
 		const smallParent = pane({ id: 10, pane_rows: 18, pane_columns: 90 });
-		assert.deepEqual(
-			selectZellijFirstPlacement([smallParent], 10, "right-stack"),
-			{ mode: "tab" },
-		);
-		assert.deepEqual(
-			selectZellijFirstPlacement([smallParent], 10, "down-stack"),
-			{ mode: "tab" },
-		);
+		assert.deepEqual(selectZellijFirstPlacement([smallParent], 10, "right-stack"), { mode: "tab" });
+		assert.deepEqual(selectZellijFirstPlacement([smallParent], 10, "down-stack"), { mode: "tab" });
 		assert.deepEqual(selectZellijFirstPlacement([smallParent], 10, "auto"), {
 			mode: "tab",
 		});

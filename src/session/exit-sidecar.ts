@@ -8,11 +8,7 @@ export function clearSubagentExitSidecar(sessionFile: string): void {
 	rmSync(getSubagentExitSidecarPath(sessionFile), { force: true });
 }
 
-export function writeSubagentExitSidecar(
-	sessionFile: string,
-	payload: object,
-	opts?: { supersede?: boolean },
-): void {
+export function writeSubagentExitSidecar(sessionFile: string, payload: object, opts?: { supersede?: boolean }): void {
 	const exitFile = getSubagentExitSidecarPath(sessionFile);
 	if (existsSync(exitFile)) {
 		if (!opts?.supersede) return;

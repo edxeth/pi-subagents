@@ -1,15 +1,10 @@
-import type { FooterHint, OverlayState, TabDef, Theme } from "./render-types.ts";
 import { fitLine } from "./render-helpers.ts";
+import type { FooterHint, OverlayState, TabDef, Theme } from "./render-types.ts";
 
 /**
  * Render the overlay header: accent border, title, tab bar.
  */
-export function renderHeader(
-	state: OverlayState,
-	tabs: TabDef[],
-	theme: Theme,
-	width: number,
-): string[] {
+export function renderHeader(state: OverlayState, tabs: TabDef[], theme: Theme, width: number): string[] {
 	const lines: string[] = [];
 
 	// Top border
@@ -26,11 +21,7 @@ export function renderHeader(
 /**
  * Render the overlay footer: context-sensitive keymaps + bottom border.
  */
-export function renderFooter(
-	hints: FooterHint[],
-	theme: Theme,
-	width: number,
-): string[] {
+export function renderFooter(hints: FooterHint[], theme: Theme, width: number): string[] {
 	const lines: string[] = [];
 	lines.push(" ".repeat(width));
 
@@ -90,12 +81,7 @@ export function getFooterHints(state: OverlayState): FooterHint[] {
 	return hints;
 }
 
-function renderTabBar(
-	activeTab: string,
-	tabs: TabDef[],
-	theme: Theme,
-	width: number,
-): string {
+function renderTabBar(activeTab: string, tabs: TabDef[], theme: Theme, width: number): string {
 	const rendered = tabs.map((tab) => {
 		const text = ` ${tab.label} `;
 		if (tab.id === activeTab) {

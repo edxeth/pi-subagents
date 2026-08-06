@@ -12,8 +12,7 @@ const PROVIDER_ERROR_RECOVERY_NUDGE = "continue";
  * Values below MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS are clamped so live child
  * recovery cannot race Pi's own default auto-retry backoff.
  */
-const PROVIDER_ERROR_RECOVERY_DELAYS_ENV =
-	"PI_SUBAGENT_PROVIDER_RECOVERY_DELAYS_MS";
+const PROVIDER_ERROR_RECOVERY_DELAYS_ENV = "PI_SUBAGENT_PROVIDER_RECOVERY_DELAYS_MS";
 
 export function resolveProviderRecoveryDelaysMs(
 	raw = process.env[PROVIDER_ERROR_RECOVERY_DELAYS_ENV],
@@ -69,13 +68,9 @@ export class ProviderErrorRecoveryController {
 	private readonly nudgeMessage: string;
 	private readonly runtime: ProviderErrorRecoveryRuntime;
 
-	constructor(
-		runtime: ProviderErrorRecoveryRuntime,
-		options: ProviderErrorRecoveryOptions = {},
-	) {
+	constructor(runtime: ProviderErrorRecoveryRuntime, options: ProviderErrorRecoveryOptions = {}) {
 		this.runtime = runtime;
-		this.recoveryDelaysMs =
-			options.recoveryDelaysMs ?? PROVIDER_ERROR_RECOVERY_DELAYS_MS;
+		this.recoveryDelaysMs = options.recoveryDelaysMs ?? PROVIDER_ERROR_RECOVERY_DELAYS_MS;
 		this.idlePollMs = options.idlePollMs ?? 250;
 		this.nudgeMessage = options.nudgeMessage ?? PROVIDER_ERROR_RECOVERY_NUDGE;
 		if (this.recoveryDelaysMs.length === 0) {
@@ -117,10 +112,7 @@ export class ProviderErrorRecoveryController {
 			if (shouldShutdown) {
 				this.runtime.writeExitSignal({
 					type: "error",
-					errorMessage: formatRecoveryExhaustedMessage(
-						failureNumber,
-						errorInfo.errorMessage,
-					),
+					errorMessage: formatRecoveryExhaustedMessage(failureNumber, errorInfo.errorMessage),
 					stopReason: errorInfo.stopReason,
 					outputTokens: this.runtime.getOutputTokens(),
 				});
@@ -132,16 +124,10 @@ export class ProviderErrorRecoveryController {
 	}
 
 	private getRecoveryDelay(failureNumber: number): number {
-		return this.recoveryDelaysMs[
-			Math.min(failureNumber - 1, this.recoveryDelaysMs.length - 1)
-		];
+		return this.recoveryDelaysMs[Math.min(failureNumber - 1, this.recoveryDelaysMs.length - 1)];
 	}
 
-	private whenIdle(
-		ctx: ExtensionContext,
-		token: number,
-		action: () => void,
-	): void {
+	private whenIdle(ctx: ExtensionContext, token: number, action: () => void): void {
 		if (!this.isCurrent(token)) return;
 		let isIdle = false;
 		try {
@@ -181,11 +167,7 @@ export class ProviderErrorRecoveryController {
 		if (replace) this.timer = timer;
 	}
 
-	private startCountdown(
-		ctx: ExtensionContext,
-		failureNumber: number,
-		delayMs: number,
-	): void {
+	private startCountdown(ctx: ExtensionContext, failureNumber: number, delayMs: number): void {
 		this.countdownCtx = ctx;
 		let remaining = Math.max(1, Math.ceil(delayMs / 1000));
 		const paint = () => {
@@ -223,10 +205,7 @@ export class ProviderErrorRecoveryController {
 	}
 }
 
-export function formatRecoveryExhaustedMessage(
-	failureNumber: number,
-	lastError: string,
-): string {
+export function formatRecoveryExhaustedMessage(failureNumber: number, lastError: string): string {
 	return `Provider/agent error recovery exhausted after ${failureNumber} consecutive completed-on-error failures. Last error: ${lastError}`;
 }
 
@@ -234,11 +213,7 @@ export function formatRecoveryExhaustedMessage(
  * Render the per-second countdown shown in the child pane while a recovery
  * window is armed. `failureNumber` is 1-based; the last window is the kill.
  */
-export function formatCountdown(
-	failureNumber: number,
-	secondsRemaining: number,
-	totalAttempts: number,
-): string {
+export function formatCountdown(failureNumber: number, secondsRemaining: number, totalAttempts: number): string {
 	const isFinal = failureNumber >= totalAttempts;
 	const action = isFinal ? "final recovery attempt" : "automatic retry";
 	return `Provider error — ${action} in ${secondsRemaining}s (${failureNumber}/${totalAttempts})`;

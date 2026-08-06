@@ -1,12 +1,5 @@
 import assert from "node:assert/strict";
-import {
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -16,20 +9,13 @@ function parseFrontmatter(content: string) {
 	if (!match) return null;
 	const frontmatter = match[1];
 	const get = (key: string) => {
-		const frontmatterMatch = frontmatter.match(
-			new RegExp(`^${key}:\\s*(.+)$`, "m"),
-		);
+		const frontmatterMatch = frontmatter.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
 		return frontmatterMatch ? frontmatterMatch[1].trim() : undefined;
 	};
 	const body = content.replace(/^---\n[\s\S]*?\n---\n*/, "").trim();
 	const systemPromptMode = get("system-prompt");
 	return {
-		systemPromptMode:
-			systemPromptMode === "replace"
-				? "replace"
-				: systemPromptMode === "append"
-					? "append"
-					: undefined,
+		systemPromptMode: systemPromptMode === "replace" ? "replace" : systemPromptMode === "append" ? "append" : undefined,
 		body: body || undefined,
 	};
 }
@@ -41,15 +27,11 @@ function simulateRouting(
 ) {
 	const identity = agentBody ?? paramSystemPrompt ?? null;
 	const identityInSystemPrompt = !!(systemPromptMode && identity);
-	const roleBlock =
-		identity && !identityInSystemPrompt ? `\n\n${identity}` : "";
+	const roleBlock = identity && !identityInSystemPrompt ? `\n\n${identity}` : "";
 
 	let cliFlag: string | null = null;
 	if (identityInSystemPrompt && identity) {
-		cliFlag =
-			systemPromptMode === "replace"
-				? "--system-prompt"
-				: "--append-system-prompt";
+		cliFlag = systemPromptMode === "replace" ? "--system-prompt" : "--append-system-prompt";
 	}
 
 	return { roleBlock, cliFlag, identityInSystemPrompt };

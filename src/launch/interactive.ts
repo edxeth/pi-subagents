@@ -1,52 +1,39 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
+import { getSubagentDisplayTitle, isSetTabTitleToolEnabled } from "../agents/titles.ts";
+import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
+import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
+import { createSurface, getMuxBackend, sendShellCommand, shellEscape } from "../mux.ts";
+import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
+import { buildPiPromptArgs, getDoneSentinelFile } from "../session/session-files.ts";
+import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
+import { SET_TAB_TITLE_TOOL_NAME } from "../tools/tool-names.ts";
+import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
 import { buildAppendSystemInheritancePlan } from "./append-system.ts";
-import {
-	getPiShellParts,
-} from "./child-command.ts";
-import {
-	getPreparedExtensionLaunchArgs,
-	getPreparedModel,
-	getPreparedRoleBlock,
-	getPreparedSessionLaunchArgs,
-	getPreparedSkillInjection,
-	getApprovalLaunchArgs,
-	getPreparedSkillLaunchArgs,
-	getPreparedSkillList,
-	getFlagsLaunchArgs,
-	type SubagentLaunchContext,
-} from "./prep.ts";
+import { getPiShellParts } from "./child-command.ts";
+import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
+import { buildInteractiveSentinelShellCommands } from "./interactive-sentinel.ts";
+import { coordinateSubagentLaunch } from "./launch-coordinator.ts";
 import {
 	resolveSubagentNoContextFiles,
 	resolveSubagentParentClosePolicy,
 	resolveSubagentReportContextUsage,
 } from "./policy.ts";
 import {
-	createSurface,
-	getMuxBackend,
-	sendShellCommand,
-	shellEscape,
-} from "../mux.ts";
-import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
-import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
-import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
-import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
-import {
-	buildPiPromptArgs,
-	getDoneSentinelFile,
-} from "../session/session-files.ts";
-import { coordinateSubagentLaunch } from "./launch-coordinator.ts";
+	getApprovalLaunchArgs,
+	getFlagsLaunchArgs,
+	getPreparedExtensionLaunchArgs,
+	getPreparedModel,
+	getPreparedRoleBlock,
+	getPreparedSessionLaunchArgs,
+	getPreparedSkillInjection,
+	getPreparedSkillLaunchArgs,
+	getPreparedSkillList,
+	type SubagentLaunchContext,
+} from "./prep.ts";
 import { writeSystemPromptArtifact, writeTaskArtifact } from "./prompt-artifacts.ts";
 import { expandSubagentTask } from "./task-expansion.ts";
-import { buildInteractiveSentinelShellCommands } from "./interactive-sentinel.ts";
 import { traceSubagentLaunch } from "./trace.ts";
-import {
-	getSubagentDisplayTitle,
-	isSetTabTitleToolEnabled,
-} from "../agents/titles.ts";
-import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
-import { SET_TAB_TITLE_TOOL_NAME } from "../tools/tool-names.ts";
 
 export interface InteractiveLaunchRuntime {
 	getContextWindow(modelRef: string | undefined): number | undefined;
@@ -61,7 +48,9 @@ export async function launchInteractiveSubagent(
 ): Promise<RunningSubagent> {
 	const startTime = Date.now();
 	const id = Math.random().toString(16).slice(2, 10);
-	const launch = await coordinateSubagentLaunch(params, ctx, { mode: "interactive" });
+	const launch = await coordinateSubagentLaunch(params, ctx, {
+		mode: "interactive",
+	});
 	const { prepared, sessionMode, noSession, directTask } = launch;
 	traceSubagentLaunch("interactive.prepared", {
 		id,
@@ -100,8 +89,8 @@ export async function launchInteractiveSubagent(
 		!isSetTabTitleToolEnabled() || prepared.denySet.has(SET_TAB_TITLE_TOOL_NAME)
 			? ""
 			: `As your FIRST action, set the tab title using set_tab_title. ` +
-			`The title MUST start with [${agentType}] followed by a short description of your current task. ` +
-			`Example: "[${agentType}] Analyzing auth module". Keep it concise.`;
+				`The title MUST start with [${agentType}] followed by a short description of your current task. ` +
+				`Example: "[${agentType}] Analyzing auth module". Keep it concise.`;
 	const roleBlock = getPreparedRoleBlock(prepared);
 	const expandedTask = await expandSubagentTask(params.task, {
 		enabled: prepared.agentDefs?.taskExpansion === "shell",
@@ -129,17 +118,12 @@ export async function launchInteractiveSubagent(
 		inheritAppendSystem: launch.launchMetadata.inheritAppendSystem === true,
 		systemPromptMode: launch.launchMetadata.systemPromptMode,
 		systemPrompt: launch.launchMetadata.systemPrompt,
-		boundarySystemPrompt: launch.boundarySystemPrompt
-			? CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT
-			: undefined,
+		boundarySystemPrompt: launch.boundarySystemPrompt ? CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT : undefined,
 	});
 	for (let i = 0; i < appendSystemPlan.promptArgs.length; i += 2) {
 		const flag = appendSystemPlan.promptArgs[i];
 		const text = appendSystemPlan.promptArgs[i + 1] ?? "";
-		const value =
-			flag === "--system-prompt"
-				? writeSystemPromptArtifact(params.name, text, ctx)
-				: text;
+		const value = flag === "--system-prompt" ? writeSystemPromptArtifact(params.name, text, ctx) : text;
 		parts.push(flag, shellEscape(value));
 	}
 	for (const arg of getApprovalLaunchArgs(prepared.agentDefs, "interactive")) {
@@ -155,16 +139,14 @@ export async function launchInteractiveSubagent(
 		parts.push(shellEscape(flag));
 	}
 
-	const zellijTarget =
-		!surfacePreCreated && getMuxBackend() === "zellij"
-			? await resolveZellijTarget()
-			: undefined;
+	const zellijTarget = !surfacePreCreated && getMuxBackend() === "zellij" ? await resolveZellijTarget() : undefined;
 	const ordinarySurface = zellijTarget
 		? undefined
-		: (options?.surface ?? await createSurface(surfaceName, {
+		: (options?.surface ??
+			(await createSurface(surfaceName, {
 				herdr: herdrContext,
 				zellij: zellijContext,
-			}));
+			})));
 	const envVars = {
 		...launch.envVars,
 		...(zellijTarget ? { ZELLIJ_SESSION_NAME: zellijTarget.sessionName } : {}),
@@ -175,11 +157,7 @@ export async function launchInteractiveSubagent(
 		.join(" ")} `;
 
 	const taskArg = `@${writeTaskArtifact(params.name, fullTask, ctx)}`;
-	const promptArgs = buildPiPromptArgs(
-		getPreparedSkillList(prepared),
-		taskArg,
-		directTask,
-	);
+	const promptArgs = buildPiPromptArgs(getPreparedSkillList(prepared), taskArg, directTask);
 	traceSubagentLaunch("interactive.promptArgs", {
 		id,
 		name: params.name,
@@ -195,18 +173,11 @@ export async function launchInteractiveSubagent(
 	const { launchEntryCount } = launch;
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
 	const sentinel = buildInteractiveSentinelShellCommands(doneSentinelFile);
-	const surfacePrefix = zellijTarget
-		? "PI_SUBAGENT_SURFACE=pane:$ZELLIJ_PANE_ID "
-		: "";
+	const surfacePrefix = zellijTarget ? "PI_SUBAGENT_SURFACE=pane:$ZELLIJ_PANE_ID " : "";
 	const command = `trap ${shellEscape(sentinel.exitTrap)} EXIT; ${cdPrefix}${envPrefix}${surfacePrefix}${parts.join(" ")}; ${sentinel.direct}`;
 	const surface =
 		ordinarySurface ??
-		(await createZellijCommandSurface(
-			surfaceName,
-			zellijTarget!,
-			getZellijShellCommand(command),
-			zellijContext,
-		));
+		(await createZellijCommandSurface(surfaceName, zellijTarget!, getZellijShellCommand(command), zellijContext));
 	traceSubagentLaunch("interactive.surface", {
 		id,
 		name: params.name,
@@ -214,9 +185,7 @@ export async function launchInteractiveSubagent(
 		surfacePreCreated,
 	});
 	if (!surfacePreCreated && !zellijTarget) {
-		await new Promise<void>((resolve) =>
-			setTimeout(resolve, runtime.getShellReadyDelayMs()),
-		);
+		await new Promise<void>((resolve) => setTimeout(resolve, runtime.getShellReadyDelayMs()));
 	}
 	traceSubagentLaunch("interactive.send", {
 		id,

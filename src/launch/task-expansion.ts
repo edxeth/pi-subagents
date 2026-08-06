@@ -63,9 +63,7 @@ async function runTaskExpansionCommand(command: string, cwd: string): Promise<st
 		const status = err.killed
 			? `timed out${err.signal ? ` (${err.signal})` : ""}`
 			: `failed${typeof err.code === "number" ? ` with code ${err.code}` : ""}`;
-		return `[task shell ${status}: ${command}${
-			output ? `\n${output}` : err.message ? `\n${err.message}` : ""
-		}]`;
+		return `[task shell ${status}: ${command}${output ? `\n${output}` : err.message ? `\n${err.message}` : ""}]`;
 	}
 }
 
@@ -77,8 +75,9 @@ function collectFencePlaceholders(task: string): {
 	const placeholders: TaskExpansionPlaceholder[] = [];
 
 	FENCE_OPEN_PATTERN.lastIndex = 0;
-	let match: RegExpExecArray | null;
-	while ((match = FENCE_OPEN_PATTERN.exec(task))) {
+	while (true) {
+		const match = FENCE_OPEN_PATTERN.exec(task);
+		if (!match) break;
 		const start = match.index;
 		const bodyStart = start + match[0].length;
 		const closingStart = task.indexOf("```", bodyStart);
@@ -126,15 +125,11 @@ function collectInlinePlaceholders(
 	return placeholders;
 }
 
-async function collectReplacements(
-	task: string,
-	cwd: string,
-): Promise<TaskExpansionReplacement[]> {
+async function collectReplacements(task: string, cwd: string): Promise<TaskExpansionReplacement[]> {
 	const { fenceRanges, placeholders: fencePlaceholders } = collectFencePlaceholders(task);
-	const placeholders = [
-		...fencePlaceholders,
-		...collectInlinePlaceholders(task, fenceRanges),
-	].sort((a, b) => a.start - b.start);
+	const placeholders = [...fencePlaceholders, ...collectInlinePlaceholders(task, fenceRanges)].sort(
+		(a, b) => a.start - b.start,
+	);
 
 	const replacements: TaskExpansionReplacement[] = [];
 	for (const placeholder of placeholders) {
@@ -148,10 +143,7 @@ async function collectReplacements(
 	return replacements;
 }
 
-export async function expandSubagentTask(
-	task: string,
-	options: SubagentTaskExpansionOptions,
-): Promise<string> {
+export async function expandSubagentTask(task: string, options: SubagentTaskExpansionOptions): Promise<string> {
 	if (!options.enabled) return task;
 	if (!task.includes("!`") && !task.includes("```!")) return task;
 

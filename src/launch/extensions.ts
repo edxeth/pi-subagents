@@ -1,7 +1,4 @@
-import {
-	DefaultPackageManager,
-	SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { AgentDefaults } from "../agents/definitions.ts";
 import type { ResumeMode } from "../session/session-files.ts";
 import { parseCommandWords } from "./child-command.ts";
@@ -29,10 +26,7 @@ function parseNpmSource(source: string): NpmSource | undefined {
 	return { name: spec };
 }
 
-function isProjectTrustedForLaunch(
-	agentDefs: AgentDefaults | null,
-	mode: ResumeMode,
-): boolean {
+function isProjectTrustedForLaunch(agentDefs: AgentDefaults | null, mode: ResumeMode): boolean {
 	let trusted = mode !== "background" && agentDefs?.trustProject === true;
 	for (const flag of parseCommandWords(agentDefs?.flags ?? "")) {
 		if (flag === "--approve") trusted = true;

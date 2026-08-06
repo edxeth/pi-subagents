@@ -4,8 +4,8 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	formatCountdown,
 	formatRecoveryExhaustedMessage,
-	PROVIDER_ERROR_RECOVERY_DELAYS_MS,
 	MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
+	PROVIDER_ERROR_RECOVERY_DELAYS_MS,
 	ProviderErrorRecoveryController,
 	resolveProviderRecoveryDelaysMs,
 } from "../../src/tools/provider-error-recovery.ts";
@@ -20,8 +20,7 @@ function createHarness(options: { idle?: boolean } = {}) {
 	const ctx = {
 		isIdle: () => idle,
 		ui: {
-			setStatus: (key: string, text: string | undefined) =>
-				statusUpdates.push({ key, text }),
+			setStatus: (key: string, text: string | undefined) => statusUpdates.push({ key, text }),
 		},
 	} as unknown as ExtensionContext;
 
@@ -33,10 +32,8 @@ function createHarness(options: { idle?: boolean } = {}) {
 			},
 			writeExitSignal: (payload) => exitSignals.push(payload),
 			getOutputTokens: () => 42,
-			showRecoveryCountdown: (c, message) =>
-				c.ui.setStatus("pi-subagent-recovery", message),
-			clearRecoveryCountdown: (c) =>
-				c.ui.setStatus("pi-subagent-recovery", undefined),
+			showRecoveryCountdown: (c, message) => c.ui.setStatus("pi-subagent-recovery", message),
+			clearRecoveryCountdown: (c) => c.ui.setStatus("pi-subagent-recovery", undefined),
 		},
 		{ recoveryDelaysMs: [30, 60, 90], idlePollMs: 5 },
 	);
@@ -55,79 +52,72 @@ function createHarness(options: { idle?: boolean } = {}) {
 		},
 		error(message = "Connection error.") {
 			controller.handleProviderError(
-				{ stopReason: "error", errorMessage: message, isRetryable: true, recoveryKind: "provider" },
+				{
+					stopReason: "error",
+					errorMessage: message,
+					isRetryable: true,
+					recoveryKind: "provider",
+				},
 				ctx,
 			);
 		},
 	};
 }
 
-	describe("resolveProviderRecoveryDelaysMs", () => {
-		it("defaults to the production 30/60/90 windows", () => {
-			assert.deepEqual(resolveProviderRecoveryDelaysMs(undefined), [
-				30_000, 60_000, 90_000,
-			]);
-			assert.deepEqual(PROVIDER_ERROR_RECOVERY_DELAYS_MS, [30_000, 60_000, 90_000]);
-		});
-
-		it("parses a comma-separated override for live tests", () => {
-			assert.deepEqual(resolveProviderRecoveryDelaysMs("16000,17000,18000"), [
-				16000, 17000, 18000,
-			]);
-		});
-
-		it("clamps override delays above Pi's default auto-retry backoff window", () => {
-			assert.deepEqual(resolveProviderRecoveryDelaysMs("1500,3000,4500"), [
-				MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
-				MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
-				MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
-			]);
-		});
-
-		it("ignores junk and falls back to defaults", () => {
-			assert.deepEqual(resolveProviderRecoveryDelaysMs("junk,, -1"), [
-				30_000, 60_000, 90_000,
-			]);
-		});
+describe("resolveProviderRecoveryDelaysMs", () => {
+	it("defaults to the production 30/60/90 windows", () => {
+		assert.deepEqual(resolveProviderRecoveryDelaysMs(undefined), [30_000, 60_000, 90_000]);
+		assert.deepEqual(PROVIDER_ERROR_RECOVERY_DELAYS_MS, [30_000, 60_000, 90_000]);
 	});
 
-	describe("formatCountdown", () => {
-		it("labels non-final windows as automatic retry", () => {
-			assert.equal(
-				formatCountdown(1, 28, 3),
-				"Provider error — automatic retry in 28s (1/3)",
-			);
-		});
-
-		it("labels the last window as the final recovery attempt", () => {
-			assert.equal(
-				formatCountdown(3, 5, 3),
-				"Provider error — final recovery attempt in 5s (3/3)",
-			);
-		});
+	it("parses a comma-separated override for live tests", () => {
+		assert.deepEqual(resolveProviderRecoveryDelaysMs("16000,17000,18000"), [16000, 17000, 18000]);
 	});
 
-	describe("constructor guard", () => {
-		it("rejects an empty delays list", () => {
-			assert.throws(
-				() =>
-					new ProviderErrorRecoveryController(
-						{
-							sendUserMessage: () => {},
-							requestShutdown: () => {},
-							writeExitSignal: () => {},
-							getOutputTokens: () => 0,
-							showRecoveryCountdown: () => {},
-							clearRecoveryCountdown: () => {},
-						},
-						{ recoveryDelaysMs: [] },
-					),
-				/Provider error recovery needs at least one delay/,
-			);
-		});
+	it("clamps override delays above Pi's default auto-retry backoff window", () => {
+		assert.deepEqual(resolveProviderRecoveryDelaysMs("1500,3000,4500"), [
+			MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
+			MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
+			MIN_PROVIDER_ERROR_RECOVERY_DELAY_MS,
+		]);
 	});
 
-	describe("provider error recovery", () => {
+	it("ignores junk and falls back to defaults", () => {
+		assert.deepEqual(resolveProviderRecoveryDelaysMs("junk,, -1"), [30_000, 60_000, 90_000]);
+	});
+});
+
+describe("formatCountdown", () => {
+	it("labels non-final windows as automatic retry", () => {
+		assert.equal(formatCountdown(1, 28, 3), "Provider error — automatic retry in 28s (1/3)");
+	});
+
+	it("labels the last window as the final recovery attempt", () => {
+		assert.equal(formatCountdown(3, 5, 3), "Provider error — final recovery attempt in 5s (3/3)");
+	});
+});
+
+describe("constructor guard", () => {
+	it("rejects an empty delays list", () => {
+		assert.throws(
+			() =>
+				new ProviderErrorRecoveryController(
+					{
+						sendUserMessage: () => {},
+						requestShutdown: () => {},
+						writeExitSignal: () => {},
+						getOutputTokens: () => 0,
+						showRecoveryCountdown: () => {},
+						clearRecoveryCountdown: () => {},
+					},
+					{ recoveryDelaysMs: [] },
+				),
+			/Provider error recovery needs at least one delay/,
+		);
+	});
+});
+
+describe("provider error recovery", () => {
 	it("keeps the child open while Pi retry could still land", () => {
 		mock.timers.enable({ apis: ["setTimeout"] });
 		try {
@@ -336,7 +326,10 @@ describe("recovery countdown", () => {
 			// Window fires (30ms delay) -> nudge sent, status cleared.
 			mock.timers.tick(30);
 			assert.deepEqual(h.sentMessages, ["continue"]);
-			assert.deepEqual(h.statusUpdates.at(-1), { key: "pi-subagent-recovery", text: undefined });
+			assert.deepEqual(h.statusUpdates.at(-1), {
+				key: "pi-subagent-recovery",
+				text: undefined,
+			});
 		} finally {
 			mock.timers.reset();
 		}
@@ -351,7 +344,10 @@ describe("recovery countdown", () => {
 
 			// A run that completes successfully cancels recovery and clears the countdown.
 			h.controller.cancelPendingRecovery(true);
-			assert.deepEqual(h.statusUpdates.at(-1), { key: "pi-subagent-recovery", text: undefined });
+			assert.deepEqual(h.statusUpdates.at(-1), {
+				key: "pi-subagent-recovery",
+				text: undefined,
+			});
 		} finally {
 			mock.timers.reset();
 		}

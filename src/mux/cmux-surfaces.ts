@@ -39,11 +39,7 @@ function parseCmuxColumns(record: Record<string, unknown>): number | undefined {
 }
 
 function parseCmuxRows(record: Record<string, unknown>): number | undefined {
-	return (
-		positiveNumber(record.rows) ??
-		positiveNumber(record.height) ??
-		positiveNumber(record.pane_rows)
-	);
+	return positiveNumber(record.rows) ?? positiveNumber(record.height) ?? positiveNumber(record.pane_rows);
 }
 
 function parseCmuxFocusedSnapshot(value: unknown): CmuxFocusSnapshot | null {
@@ -63,12 +59,8 @@ function parseCmuxFocusedSnapshot(value: unknown): CmuxFocusSnapshot | null {
 		height?: unknown;
 		pane_rows?: unknown;
 	};
-	const surfaceRef = nonEmptyString(record.surface_ref)
-		? record.surface_ref
-		: undefined;
-	const paneRef = nonEmptyString(record.pane_ref)
-		? record.pane_ref
-		: undefined;
+	const surfaceRef = nonEmptyString(record.surface_ref) ? record.surface_ref : undefined;
+	const paneRef = nonEmptyString(record.pane_ref) ? record.pane_ref : undefined;
 	const columns = parseCmuxColumns(record);
 	const rows = parseCmuxRows(record);
 
@@ -101,12 +93,8 @@ function parseCmuxCallerSnapshot(value: unknown): CmuxFocusSnapshot | null {
 		height?: unknown;
 		pane_rows?: unknown;
 	};
-	const surfaceRef = nonEmptyString(record.surface_ref)
-		? record.surface_ref
-		: undefined;
-	const paneRef = nonEmptyString(record.pane_ref)
-		? record.pane_ref
-		: undefined;
+	const surfaceRef = nonEmptyString(record.surface_ref) ? record.surface_ref : undefined;
+	const paneRef = nonEmptyString(record.pane_ref) ? record.pane_ref : undefined;
 	const columns = parseCmuxColumns(record);
 	const rows = parseCmuxRows(record);
 
@@ -114,10 +102,7 @@ function parseCmuxCallerSnapshot(value: unknown): CmuxFocusSnapshot | null {
 	return { surfaceRef, paneRef, columns, rows };
 }
 
-function parseCmuxCreatedSurface(
-	output: string,
-	command: string,
-): CmuxCreatedSurface {
+function parseCmuxCreatedSurface(output: string, command: string): CmuxCreatedSurface {
 	const surfaceMatch = output.match(/surface:\d+/);
 	if (!surfaceMatch) {
 		throw new Error(`Unexpected cmux ${command} output: ${output}`);
@@ -128,10 +113,7 @@ function parseCmuxCreatedSurface(
 	};
 }
 
-function parseCmuxPaneRefForSurface(
-	value: unknown,
-	surface: string,
-): string | null {
+function parseCmuxPaneRefForSurface(value: unknown, surface: string): string | null {
 	if (!value || typeof value !== "object") return null;
 
 	const record = value as {
@@ -150,10 +132,7 @@ function parseCmuxPaneRefForSurface(
 		surface_ref?: unknown;
 		pane_ref?: unknown;
 	};
-	if (
-		callerRecord.surface_ref === surface &&
-		nonEmptyString(callerRecord.pane_ref)
-	) {
+	if (callerRecord.surface_ref === surface && nonEmptyString(callerRecord.pane_ref)) {
 		return callerRecord.pane_ref;
 	}
 
@@ -207,26 +186,17 @@ function waitForCmuxFocusSettle(): void {
 	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
 }
 
-function cmuxFocusMatchesChild(
-	currentFocus: CmuxFocusSnapshot | null,
-	child: CmuxCreatedSurface,
-): boolean {
+function cmuxFocusMatchesChild(currentFocus: CmuxFocusSnapshot | null, child: CmuxCreatedSurface): boolean {
 	if (!currentFocus) return false;
 	if (currentFocus.surfaceRef === child.surface) return true;
 	return !!currentFocus.paneRef && currentFocus.paneRef === child.paneRef;
 }
 
-function cmuxFocusMatchesSurfaceRef(
-	currentFocus: CmuxFocusSnapshot | null,
-	surfaceRef: string | undefined,
-): boolean {
+function cmuxFocusMatchesSurfaceRef(currentFocus: CmuxFocusSnapshot | null, surfaceRef: string | undefined): boolean {
 	return !!surfaceRef && currentFocus?.surfaceRef === surfaceRef;
 }
 
-function cmuxFocusMatchesPaneRef(
-	currentFocus: CmuxFocusSnapshot | null,
-	paneRef: string | undefined,
-): boolean {
+function cmuxFocusMatchesPaneRef(currentFocus: CmuxFocusSnapshot | null, paneRef: string | undefined): boolean {
 	return !!paneRef && currentFocus?.paneRef === paneRef;
 }
 
@@ -245,10 +215,7 @@ function restoreCmuxFocusIfLaunchSurfaceFocused(
 	if (
 		cmuxFocusMatchesChild(currentFocus, child) ||
 		cmuxFocusMatchesSurfaceRef(currentFocus, options?.sourceSurfaceRef) ||
-		cmuxFocusMatchesSurfaceRef(
-			currentFocus,
-			options?.callerSnapshot?.surfaceRef,
-		) ||
+		cmuxFocusMatchesSurfaceRef(currentFocus, options?.callerSnapshot?.surfaceRef) ||
 		cmuxFocusMatchesPaneRef(currentFocus, options?.callerSnapshot?.paneRef)
 	) {
 		restoreCmuxFocusSnapshot(snapshot);
@@ -291,8 +258,7 @@ function createCmuxChildSurface(
 function canSplitCmuxPaneRight(snapshot: CmuxFocusSnapshot | null): boolean {
 	if (!snapshot?.columns || !snapshot.rows) return false;
 	return (
-		Math.floor(snapshot.columns / 2) >= DEFAULT_INTERACTIVE_MIN_COLUMNS &&
-		snapshot.rows >= DEFAULT_INTERACTIVE_MIN_ROWS
+		Math.floor(snapshot.columns / 2) >= DEFAULT_INTERACTIVE_MIN_COLUMNS && snapshot.rows >= DEFAULT_INTERACTIVE_MIN_ROWS
 	);
 }
 

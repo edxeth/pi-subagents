@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
-import { consumeSubagentExitSignal, getMuxBackend, pollForExit } from "../mux.ts";
+import { traceSubagentLaunch } from "../launch/trace.ts";
 import type { PollResult } from "../mux/poll.ts";
 import { isZellijSurfaceLive } from "../mux/zellij-runtime.ts";
-import type { RunningSubagent, SubagentResult, SubagentSummarySource } from "../types.ts";
+import { consumeSubagentExitSignal, getMuxBackend, pollForExit } from "../mux.ts";
 import { findLastSubagentOutputWithSource, getNewEntries } from "../session/session.ts";
-import { traceSubagentLaunch } from "../launch/trace.ts";
+import type { RunningSubagent, SubagentResult, SubagentSummarySource } from "../types.ts";
 import { resolveFinalContextUsage } from "./final-context-usage.ts";
 
 export interface InteractiveWatchRuntime {
@@ -32,23 +32,32 @@ export async function watchSubagent(
 	};
 
 	try {
-		traceSubagentLaunch("interactive.watch.start", { name, surface, sessionFile, signalAborted: signal.aborted });
-		const pollResult = getMuxBackend() === "zellij"
-			? await pollForZellijFiles(running, signal, updateStats)
-			: await pollForExit(surface, signal, {
-					interval: 1000,
-					sessionFile,
-					doneSentinelFile: running.doneSentinelFile,
-					onTick: updateStats,
-				});
+		traceSubagentLaunch("interactive.watch.start", {
+			name,
+			surface,
+			sessionFile,
+			signalAborted: signal.aborted,
+		});
+		const pollResult =
+			getMuxBackend() === "zellij"
+				? await pollForZellijFiles(running, signal, updateStats)
+				: await pollForExit(surface, signal, {
+						interval: 1000,
+						sessionFile,
+						doneSentinelFile: running.doneSentinelFile,
+						onTick: updateStats,
+					});
 
-		traceSubagentLaunch("interactive.watch.pollResult", { name, surface, sessionFile, pollResult });
+		traceSubagentLaunch("interactive.watch.pollResult", {
+			name,
+			surface,
+			sessionFile,
+			pollResult,
+		});
 		const elapsed = Math.floor((Date.now() - startTime) / 1000);
 		const { summary, summarySource } = getSummary(running, pollResult);
 		const errorMessage = pollResult.reason === "error" ? pollResult.errorMessage : undefined;
-		const exitSignal = pollResult.outputTokens === undefined
-			? consumeSubagentExitSignal(sessionFile)
-			: undefined;
+		const exitSignal = pollResult.outputTokens === undefined ? consumeSubagentExitSignal(sessionFile) : undefined;
 		const finalContextUsage = resolveFinalContextUsage(
 			running,
 			pollResult.contextTokens === undefined ? exitSignal : pollResult,
@@ -74,7 +83,13 @@ export async function watchSubagent(
 		};
 	} catch (err: unknown) {
 		const errorMessage = err instanceof Error ? err.message : String(err);
-		traceSubagentLaunch("interactive.watch.error", { name, surface, sessionFile, errorMessage, signalAborted: signal.aborted });
+		traceSubagentLaunch("interactive.watch.error", {
+			name,
+			surface,
+			sessionFile,
+			errorMessage,
+			signalAborted: signal.aborted,
+		});
 		cleanupDoneSentinel(running);
 		try {
 			await runtime.closeRunningSurface(running);
@@ -111,15 +126,14 @@ function getSummary(
 	pollResult: PollResult,
 ): { summary: string; summarySource: SubagentSummarySource } {
 	if (!running.noSession && existsSync(running.sessionFile)) {
-		const output = findLastSubagentOutputWithSource(
-			getNewEntries(running.sessionFile, running.launchEntryCount ?? 0),
-		);
+		const output = findLastSubagentOutputWithSource(getNewEntries(running.sessionFile, running.launchEntryCount ?? 0));
 		if (output) return output;
 	}
 	return {
-		summary: pollResult.exitCode !== 0
-			? `Sub-agent exited with code ${pollResult.exitCode}`
-			: "Sub-agent exited without output",
+		summary:
+			pollResult.exitCode !== 0
+				? `Sub-agent exited with code ${pollResult.exitCode}`
+				: "Sub-agent exited without output",
 		summarySource: "runtime",
 	};
 }
@@ -129,7 +143,6 @@ async function pollForZellijFiles(
 	signal: AbortSignal,
 	onTick: () => void,
 ): Promise<PollResult> {
-	const start = Date.now();
 	while (!signal.aborted) {
 		const exit = consumeSubagentExitSignal(running.sessionFile);
 		if (exit) return exit;
@@ -137,8 +150,11 @@ async function pollForZellijFiles(
 			const match = readFileSync(running.doneSentinelFile, "utf8").match(/__SUBAGENT_DONE_(\d+)__/);
 			if (match) return { reason: "sentinel", exitCode: Number(match[1]) };
 		}
-		if (running.zellijTarget && running.surface &&
-			!(await isZellijSurfaceLive(running.zellijTarget, running.surface))) {
+		if (
+			running.zellijTarget &&
+			running.surface &&
+			!(await isZellijSurfaceLive(running.zellijTarget, running.surface))
+		) {
 			return {
 				reason: "error",
 				exitCode: 1,

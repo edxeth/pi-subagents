@@ -1,11 +1,11 @@
 import {
 	assert,
 	createSurface,
+	createSurfaceSplit,
 	createTestDir,
 	describe,
 	it,
 	join,
-	createSurfaceSplit,
 	readFileSync,
 	renameCurrentTab,
 	renameWorkspace,
@@ -135,10 +135,7 @@ describe("Herdr owned placement", () => {
 
 		const log = readFileSync(logFile, "utf8");
 		assert.match(log, /pane layout --pane w1:p1/);
-		assert.match(
-			log,
-			/pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/,
-		);
+		assert.match(log, /pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/);
 		assert.match(log, /pane rename w1:p2 \[reviewer\] Auth review/);
 		assert.doesNotMatch(log, /tab create/);
 	});
@@ -151,10 +148,7 @@ describe("Herdr owned placement", () => {
 		assert.equal(await createSurface("[tester] Second child"), "w1:p3");
 
 		const log = readFileSync(logFile, "utf8");
-		assert.match(
-			log,
-			/pane split w1:p2 --direction down --ratio 0\.5 --cwd .* --no-focus/,
-		);
+		assert.match(log, /pane split w1:p2 --direction down --ratio 0\.5 --cwd .* --no-focus/);
 		assert.doesNotMatch(log, /pane split w1:p8/);
 	});
 
@@ -241,10 +235,7 @@ describe("Herdr owned placement", () => {
 		const logFile = useFakeHerdr();
 		process.env.PI_SUBAGENT_HERDR_PLACEMENT = "sideways";
 
-		await assert.rejects(
-			() => createSurface("[reviewer] Invalid placement"),
-			/Invalid PI_SUBAGENT_HERDR_PLACEMENT/,
-		);
+		await assert.rejects(() => createSurface("[reviewer] Invalid placement"), /Invalid PI_SUBAGENT_HERDR_PLACEMENT/);
 
 		const log = readFileSync(logFile, "utf8");
 		assert.doesNotMatch(log, /pane layout|pane split|tab create/);
@@ -269,10 +260,7 @@ describe("Herdr owned placement", () => {
 
 			const log = readFileSync(logFile, "utf8");
 			assert.doesNotMatch(log, /pane layout/);
-			assert.match(
-				log,
-				new RegExp(`pane split w1:p1 --direction ${policy} --cwd .* --no-focus`),
-			);
+			assert.match(log, new RegExp(`pane split w1:p1 --direction ${policy} --cwd .* --no-focus`));
 			assert.match(log, /pane rename w1:p2 \[reviewer\] Explicit child/);
 			assert.doesNotMatch(log, /tab create/);
 		});

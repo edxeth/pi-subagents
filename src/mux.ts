@@ -10,14 +10,7 @@ export {
 	muxSetupHint,
 	shellEscape,
 } from "./mux/core.ts";
-export {
-	createSurface,
-	createSurfaceSplit,
-	renameCurrentTab,
-	renameWorkspace,
-} from "./mux/surfaces.ts";
 export { resolveHerdrPlacementPolicy } from "./mux/herdr-surfaces.ts";
-export { resolveZellijPlacementPolicy } from "./mux/zellij-placement.ts";
 export {
 	closeSurface,
 	readScreen,
@@ -26,3 +19,10 @@ export {
 	sendShellCommand,
 } from "./mux/io.ts";
 export { consumeSubagentExitSignal, pollForExit } from "./mux/poll.ts";
+export {
+	createSurface,
+	createSurfaceSplit,
+	renameCurrentTab,
+	renameWorkspace,
+} from "./mux/surfaces.ts";
+export { resolveZellijPlacementPolicy } from "./mux/zellij-placement.ts";

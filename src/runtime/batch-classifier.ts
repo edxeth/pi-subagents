@@ -1,13 +1,13 @@
 import type { AgentDefaults } from "../agents/definitions.ts";
 import { resolveSubagentBlocking } from "../launch/policy.ts";
-import type { SubagentParamsInput } from "../types.ts";
-import { markSubagentBatchBlocking } from "./state.ts";
 import {
 	PI_SUBAGENTS_INTERNAL_TOOL_NAMES,
 	SUBAGENT_LAUNCH_TOOL_NAMES,
 	SUBAGENT_RESUME_TOOL_NAME,
 	SUBAGENT_TOOL_NAME,
 } from "../tools/tool-names.ts";
+import type { SubagentParamsInput } from "../types.ts";
+import { markSubagentBatchBlocking } from "./state.ts";
 
 type ToolCallLike = {
 	type: "toolCall";
@@ -20,10 +20,7 @@ type AssistantMessageLike = {
 	content?: unknown;
 };
 
-type AgentDefaultsLoader = (
-	agent: string | undefined,
-	cwd: string | undefined,
-) => AgentDefaults | null;
+type AgentDefaultsLoader = (agent: string | undefined, cwd: string | undefined) => AgentDefaults | null;
 
 function isCoordinatorOnlyTurnDisabled(): boolean {
 	return process.env.PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN === "1";
@@ -54,38 +51,25 @@ type SubagentChildLike = {
  * `children: [...]` array is provided, treat each entry as a separate
  * launch; otherwise the top-level params are the single launch.
  */
-function getRequestedSubagentChildren(
-	args: Record<string, unknown>,
-): SubagentChildLike[] {
+function getRequestedSubagentChildren(args: Record<string, unknown>): SubagentChildLike[] {
 	const children = args.children;
 	if (Array.isArray(children) && children.length > 0) {
-		return children.filter(
-			(c): c is SubagentChildLike => !!c && typeof c === "object",
-		);
+		return children.filter((c): c is SubagentChildLike => !!c && typeof c === "object");
 	}
 	return [args as SubagentChildLike];
 }
 
-function isAsyncSubagentChildLaunch(
-	child: SubagentChildLike,
-	loadAgentDefaults: AgentDefaultsLoader,
-): boolean {
+function isAsyncSubagentChildLaunch(child: SubagentChildLike, loadAgentDefaults: AgentDefaultsLoader): boolean {
 	const agent = typeof child.agent === "string" ? child.agent : undefined;
 	const cwd = typeof child.cwd === "string" ? child.cwd : undefined;
 	const agentDefs = agent ? loadAgentDefaults(agent, cwd) : null;
 	// Unknown/missing agent: not a valid launch; existing tool_call validation
 	// will surface the error. Don't classify it as a launch for our purposes.
 	if (!agentDefs) return false;
-	return !resolveSubagentBlocking(
-		child as Partial<SubagentParamsInput>,
-		agentDefs,
-	);
+	return !resolveSubagentBlocking(child as Partial<SubagentParamsInput>, agentDefs);
 }
 
-function isAsyncSubagentLaunch(
-	call: ToolCallLike,
-	loadAgentDefaults: AgentDefaultsLoader,
-): boolean {
+function isAsyncSubagentLaunch(call: ToolCallLike, loadAgentDefaults: AgentDefaultsLoader): boolean {
 	if (call.name === SUBAGENT_TOOL_NAME) {
 		// A `subagent` call is async-launching if ANY of its children
 		// (or its single top-level launch) resolves async. One async child

@@ -7,7 +7,10 @@ export function parseAllowedModels(raw: string | undefined): string[] {
 }
 
 /** Split Pi's provider/model[:thinking] syntax without duplicating Pi's level list. */
-export function splitModelRef(ref: string): { model: string; thinking?: string } {
+export function splitModelRef(ref: string): {
+	model: string;
+	thinking?: string;
+} {
 	const idx = ref.lastIndexOf(":");
 	if (idx === -1) return { model: ref };
 	return { model: ref.slice(0, idx), thinking: ref.slice(idx + 1) };
@@ -18,10 +21,7 @@ export function splitModelRef(ref: string): { model: string; thinking?: string }
  * string already carries a valid thinking suffix, it wins and `thinking` is
  * ignored. Returns undefined when no model is given.
  */
-export function buildModelRef(
-	model: string | undefined,
-	thinking: string | undefined,
-): string | undefined {
+export function buildModelRef(model: string | undefined, thinking: string | undefined): string | undefined {
 	const trimmedModel = model?.trim();
 	if (!trimmedModel) return undefined;
 	if (splitModelRef(trimmedModel).thinking) return trimmedModel;
@@ -29,10 +29,7 @@ export function buildModelRef(
 	return trimmedThinking ? `${trimmedModel}:${trimmedThinking}` : trimmedModel;
 }
 
-function isModelAllowed(
-	effectiveModelRef: string,
-	allowedModelRef: string,
-): boolean {
+function isModelAllowed(effectiveModelRef: string, allowedModelRef: string): boolean {
 	const effective = splitModelRef(effectiveModelRef);
 	const allowed = splitModelRef(allowedModelRef);
 	if (allowed.model !== effective.model) return false;
@@ -54,13 +51,6 @@ export function assertModelAllowed(
 	if (allowedModels.some((entry) => isModelAllowed(effectiveModelRef, entry))) return;
 	throw new Error(
 		`Model '${effectiveModelRef}' is not allowed for agent '${agentName ?? "subagent"}'. ` +
-		`Allowed models: ${allowedModels.join(", ")}.`,
+			`Allowed models: ${allowedModels.join(", ")}.`,
 	);
-}
-
-export function renderAllowedModelChoices(
-	allowedModelsRaw: string | undefined,
-): string | undefined {
-	const allowed = parseAllowedModels(allowedModelsRaw);
-	return allowed.length > 0 ? allowed.join(" | ") : undefined;
 }

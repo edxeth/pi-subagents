@@ -15,9 +15,7 @@ export interface InteractiveSentinelShellCommands {
  * after pi. The direct command captures the child status before clearing the trap;
  * the trap also refuses to overwrite an existing sentinel in staged-shell backends.
  */
-export function buildInteractiveSentinelShellCommands(
-	doneSentinelFile: string,
-): InteractiveSentinelShellCommands {
+export function buildInteractiveSentinelShellCommands(doneSentinelFile: string): InteractiveSentinelShellCommands {
 	const sentinelPath = shellEscape(doneSentinelFile);
 	if (isFishShell()) {
 		return {

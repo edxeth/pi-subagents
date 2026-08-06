@@ -7,10 +7,7 @@ export function traceSubagentLaunch(event: string, details: Record<string, unkno
 
 	try {
 		mkdirSync(dirname(logPath), { recursive: true });
-		appendFileSync(
-			logPath,
-			`${JSON.stringify({ timestamp: new Date().toISOString(), event, ...details })}\n`,
-		);
+		appendFileSync(logPath, `${JSON.stringify({ timestamp: new Date().toISOString(), event, ...details })}\n`);
 	} catch {
 		// Tracing is best-effort and must never break subagent launch.
 	}

@@ -1,10 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, copyFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-	CALLER_PING_TOOL_NAME,
-	SUBAGENT_DONE_TOOL_NAME,
-} from "../tools/tool-names.ts";
+import { CALLER_PING_TOOL_NAME, SUBAGENT_DONE_TOOL_NAME } from "../tools/tool-names.ts";
 import type { SubagentSummarySource } from "../types.ts";
 
 export interface SessionEntry {
@@ -29,25 +26,17 @@ function getNonEmptyLines(sessionFile: string): string[] {
 		.filter((line) => line.trim());
 }
 
-function parseEntryLine(
-	sessionFile: string,
-	line: string,
-	lineNumber: number,
-): SessionEntry {
+function parseEntryLine(sessionFile: string, line: string, lineNumber: number): SessionEntry {
 	try {
 		return JSON.parse(line) as SessionEntry;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(
-			`Invalid session JSONL at ${sessionFile}:${lineNumber}: ${message}`,
-		);
+		throw new Error(`Invalid session JSONL at ${sessionFile}:${lineNumber}: ${message}`);
 	}
 }
 
 export function getEntries(sessionFile: string): SessionEntry[] {
-	return getNonEmptyLines(sessionFile).map((line, index) =>
-		parseEntryLine(sessionFile, line, index + 1),
-	);
+	return getNonEmptyLines(sessionFile).map((line, index) => parseEntryLine(sessionFile, line, index + 1));
 }
 
 export function getLeafId(sessionFile: string): string | null {
@@ -59,25 +48,15 @@ export function getEntryCount(sessionFile: string): number {
 	return getNonEmptyLines(sessionFile).length;
 }
 
-export function getNewEntries(
-	sessionFile: string,
-	afterLine: number,
-): SessionEntry[] {
+export function getNewEntries(sessionFile: string, afterLine: number): SessionEntry[] {
 	return getNonEmptyLines(sessionFile)
 		.slice(afterLine)
-		.map((line, index) =>
-			parseEntryLine(sessionFile, line, afterLine + index + 1),
-		);
+		.map((line, index) => parseEntryLine(sessionFile, line, afterLine + index + 1));
 }
 
 function getTextContent(msg: MessageEntry): string | null {
 	const texts = msg.message.content
-		.filter(
-			(block) =>
-				block.type === "text" &&
-				typeof block.text === "string" &&
-				block.text.trim() !== "",
-		)
+		.filter((block) => block.type === "text" && typeof block.text === "string" && block.text.trim() !== "")
 		.map((block) => block.text as string);
 
 	return texts.length > 0 && texts.join("").trim() ? texts.join("\n") : null;
@@ -85,9 +64,7 @@ function getTextContent(msg: MessageEntry): string | null {
 
 function getStopReason(msg: MessageEntry): string | null {
 	const stopReason = (msg.message as Record<string, unknown>).stopReason;
-	return typeof stopReason === "string" && stopReason.trim() !== ""
-		? stopReason
-		: null;
+	return typeof stopReason === "string" && stopReason.trim() !== "" ? stopReason : null;
 }
 
 function isToolUseStopReason(stopReason: string | null): boolean {
@@ -128,9 +105,7 @@ export interface AssistantContextSnapshot {
 	model?: string;
 }
 
-export function findLatestAssistantContextSnapshot(
-	entries: SessionEntry[],
-): AssistantContextSnapshot | undefined {
+export function findLatestAssistantContextSnapshot(entries: SessionEntry[]): AssistantContextSnapshot | undefined {
 	for (let index = entries.length - 1; index >= 0; index--) {
 		const entry = entries[index];
 		if (entry.type !== "message") continue;
@@ -143,27 +118,21 @@ export function findLatestAssistantContextSnapshot(
 					output?: number;
 					cacheRead?: number;
 					cacheWrite?: number;
-				}
+			  }
 			| undefined;
 		if (!usage) continue;
 		return {
 			contextTokens:
 				usage.totalTokens ??
-				(usage.input ?? 0) +
-					(usage.output ?? 0) +
-					(usage.cacheRead ?? 0) +
-					(usage.cacheWrite ?? 0),
-			provider:
-				typeof message.provider === "string" ? message.provider : undefined,
+				(usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0),
+			provider: typeof message.provider === "string" ? message.provider : undefined,
 			model: typeof message.model === "string" ? message.model : undefined,
 		};
 	}
 	return undefined;
 }
 
-export function findLatestAssistantContextTokens(
-	entries: SessionEntry[],
-): number | undefined {
+export function findLatestAssistantContextTokens(entries: SessionEntry[]): number | undefined {
 	return findLatestAssistantContextSnapshot(entries)?.contextTokens;
 }
 
@@ -189,15 +158,11 @@ function findLastAssistantOutput(entries: SessionEntry[]): SubagentOutput | null
 	return null;
 }
 
-export function findLastAssistantMessage(
-	entries: SessionEntry[],
-): string | null {
+export function findLastAssistantMessage(entries: SessionEntry[]): string | null {
 	return findLastAssistantOutput(entries)?.summary ?? null;
 }
 
-export function findLastSubagentOutputWithSource(
-	entries: SessionEntry[],
-): SubagentOutput | null {
+export function findLastSubagentOutputWithSource(entries: SessionEntry[]): SubagentOutput | null {
 	const assistantOutput = findLastAssistantOutput(entries);
 	if (assistantOutput) return assistantOutput;
 
@@ -244,11 +209,7 @@ export function copySessionFile(sessionFile: string, destDir: string): string {
 	return dest;
 }
 
-export function mergeNewEntries(
-	sourceFile: string,
-	targetFile: string,
-	afterLine: number,
-): SessionEntry[] {
+export function mergeNewEntries(sourceFile: string, targetFile: string, afterLine: number): SessionEntry[] {
 	const entries = getNewEntries(sourceFile, afterLine);
 	for (const entry of entries) {
 		appendFileSync(targetFile, `${JSON.stringify(entry)}\n`, "utf8");

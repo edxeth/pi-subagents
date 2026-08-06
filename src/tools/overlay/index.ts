@@ -1,2 +1,4 @@
-export { SubagentsOverlayController, type OverlayRuntime } from "./controller.ts";
-
+export {
+	type OverlayRuntime,
+	SubagentsOverlayController,
+} from "./controller.ts";

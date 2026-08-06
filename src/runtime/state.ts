@@ -1,11 +1,6 @@
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { getSubagentTerminalStopReason } from "../session/session.ts";
-import type {
-	CompletedSubagentResult,
-	RunningSubagent,
-	SubagentCompletionStatus,
-	SubagentResult,
-} from "../types.ts";
+import type { CompletedSubagentResult, RunningSubagent, SubagentCompletionStatus, SubagentResult } from "../types.ts";
 import { SubagentWidgetManager } from "./widget.ts";
 
 export const runningSubagents = new Map<string, RunningSubagent>();
@@ -26,21 +21,14 @@ function getSubagentCompletionStatus(
 	// non-zero status; if the child already produced a real final assistant message
 	// and the watcher did not hit an error path, that close is a successful operator
 	// close rather than a crash.
-	if (
-		running?.mode === "interactive" &&
-		running.autoExit === false &&
-		!result.error &&
-		hasRealSubagentOutput(result)
-	) {
+	if (running?.mode === "interactive" && running.autoExit === false && !result.error && hasRealSubagentOutput(result)) {
 		return "completed";
 	}
 	return "failed";
 }
 
 /** True when the summary came from the child rather than runtime diagnostics. */
-export function hasRealSubagentOutput(
-	result: Pick<SubagentResult, "summary" | "summarySource">,
-): boolean {
+export function hasRealSubagentOutput(result: Pick<SubagentResult, "summary" | "summarySource">): boolean {
 	return result.summarySource !== "runtime" && result.summary.trim() !== "";
 }
 
@@ -78,32 +66,31 @@ export function clearSubagentShutdownTimer(running: RunningSubagent): void {
 	running.shutdownTimer = undefined;
 }
 
-export const widgetManager = new SubagentWidgetManager(() =>
-	runningSubagents.values(),
-);
+export const widgetManager = new SubagentWidgetManager(() => runningSubagents.values());
 
 const WIDGET_MANAGER_KEY = Symbol.for("pi-subagents/widget-manager");
 const MODULE_ABORT_KEY = Symbol.for("pi-subagents/poll-abort-controller");
 
 function initializeModuleReloadState(): AbortController {
-	const previousWidgetManager = (globalThis as Record<PropertyKey, unknown>)[
-		WIDGET_MANAGER_KEY
-	] as SubagentWidgetManager | undefined;
+	const previousWidgetManager = (globalThis as Record<PropertyKey, unknown>)[WIDGET_MANAGER_KEY] as
+		| SubagentWidgetManager
+		| undefined;
 	previousWidgetManager?.reset();
 
-	const previousAbortController = (globalThis as Record<PropertyKey, unknown>)[
-		MODULE_ABORT_KEY
-	] as AbortController | undefined;
+	const previousAbortController = (globalThis as Record<PropertyKey, unknown>)[MODULE_ABORT_KEY] as
+		| AbortController
+		| undefined;
 	previousAbortController?.abort();
 
 	const controller = new AbortController();
-	(globalThis as Record<PropertyKey, unknown>)[WIDGET_MANAGER_KEY] =
-		widgetManager;
+	(globalThis as Record<PropertyKey, unknown>)[WIDGET_MANAGER_KEY] = widgetManager;
 	(globalThis as Record<PropertyKey, unknown>)[MODULE_ABORT_KEY] = controller;
 	return controller;
 }
 
-export type SubagentToolResult = AgentToolResult<unknown> & { terminate?: true };
+export type SubagentToolResult = AgentToolResult<unknown> & {
+	terminate?: true;
+};
 
 export function asSubagentToolResult(result: unknown): SubagentToolResult {
 	return result as SubagentToolResult;
@@ -146,25 +133,18 @@ export function getSubagentBatchStopMetadata(): { terminate?: true } {
 	return stopAfterCurrentSubagentBatch && !currentSubagentBatchHasBlocking ? { terminate: true } : {};
 }
 
-export function withSubagentBatchStop<T extends AgentToolResult<unknown>>(
-	result: T,
-): T & { terminate?: true } {
+export function withSubagentBatchStop<T extends AgentToolResult<unknown>>(result: T): T & { terminate?: true } {
 	return {
 		...result,
 		...getSubagentBatchStopMetadata(),
 	};
 }
 
-export function getWatcherSignal(
-	_running: RunningSubagent,
-	watcherAbort: AbortController,
-): AbortSignal {
+export function getWatcherSignal(_running: RunningSubagent, watcherAbort: AbortController): AbortSignal {
 	return watcherAbort.signal;
 }
 
-export function resetRuntimeStateForTest(
-	resetAmbient: () => void,
-): void {
+export function resetRuntimeStateForTest(resetAmbient: () => void): void {
 	resetAmbient();
 	for (const agent of runningSubagents.values()) {
 		clearSubagentShutdownTimer(agent);

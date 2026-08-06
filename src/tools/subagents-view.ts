@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { completedSubagentResults, runningSubagents } from "../runtime/state.ts";
 import { getEffectiveAgentDefinitions } from "../agents/definitions.ts";
-import { SubagentsOverlayController, type OverlayRuntime } from "./overlay/index.ts";
+import { completedSubagentResults, runningSubagents } from "../runtime/state.ts";
+import { type OverlayRuntime, SubagentsOverlayController } from "./overlay/index.ts";
 
 export { SubagentsOverlayController as SubagentsOverlay } from "./overlay/index.ts";
 
@@ -15,21 +15,22 @@ export function registerSubagentsView(pi: ExtensionAPI, runtime: OverlayRuntime)
 			return;
 		}
 
-		ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
-			const overlay = new SubagentsOverlayController(
-				done,
-				ctx,
-				{
-					fg: (tone, text) => theme.fg(tone as Parameters<typeof theme.fg>[0], text),
-					bg: (color, text) => theme.bg(color as Parameters<typeof theme.bg>[0], text),
-					bold: (text) => theme.bold(text),
-				},
-				runtime,
-				tui,
-			);
-			activeOverlay = overlay;
-			return overlay;
-		})
+		ctx.ui
+			.custom<null>((tui, theme, _keybindings, done) => {
+				const overlay = new SubagentsOverlayController(
+					done,
+					ctx,
+					{
+						fg: (tone, text) => theme.fg(tone as Parameters<typeof theme.fg>[0], text),
+						bg: (color, text) => theme.bg(color as Parameters<typeof theme.bg>[0], text),
+						bold: (text) => theme.bold(text),
+					},
+					runtime,
+					tui,
+				);
+				activeOverlay = overlay;
+				return overlay;
+			})
 			.finally(() => {
 				activeOverlay = null;
 			});

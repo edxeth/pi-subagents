@@ -1,15 +1,15 @@
 import { mock } from "node:test";
 import {
 	assert,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-	join,
+	createTestDir,
 	describe,
 	it,
-	subagentDoneExtension,
-	createTestDir,
+	join,
+	readFileSync,
+	rmSync,
 	sleep,
+	subagentDoneExtension,
+	writeFileSync,
 } from "../support/index.ts";
 
 describe("subagent-done.ts", () => {
@@ -110,7 +110,12 @@ describe("subagent-done.ts", () => {
 			);
 		}
 		function beginOverflowCompaction(h: ReturnType<typeof loadRecoveryChild>, signal = new AbortController().signal) {
-			h.handlers.get("session_before_compact")?.({ type: "session_before_compact", reason: "overflow", willRetry: true, signal });
+			h.handlers.get("session_before_compact")?.({
+				type: "session_before_compact",
+				reason: "overflow",
+				willRetry: true,
+				signal,
+			});
 		}
 		function readExit(h: ReturnType<typeof loadRecoveryChild>) {
 			return JSON.parse(readFileSync(`${h.sessionFile}.exit`, "utf8"));
@@ -125,10 +130,22 @@ describe("subagent-done.ts", () => {
 			try {
 				// Failed run 1: a successful tool call, THEN the connection error.
 				h.handlers.get("message_end")?.({
-					message: { role: "assistant", stopReason: "toolUse", usage: { output: 3 } },
+					message: {
+						role: "assistant",
+						stopReason: "toolUse",
+						usage: { output: 3 },
+					},
 				});
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "error",
+								errorMessage: "Connection error.",
+							},
+						],
+					},
 					h.ctx,
 				);
 				mock.timers.tick(10_000);
@@ -137,10 +154,22 @@ describe("subagent-done.ts", () => {
 				// Failed run 2: again a successful tool call, then error. Pre-fix this
 				// reset the chain and looped forever; it must now escalate.
 				h.handlers.get("message_end")?.({
-					message: { role: "assistant", stopReason: "toolUse", usage: { output: 3 } },
+					message: {
+						role: "assistant",
+						stopReason: "toolUse",
+						usage: { output: 3 },
+					},
 				});
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "error",
+								errorMessage: "Connection error.",
+							},
+						],
+					},
 					h.ctx,
 				);
 				mock.timers.tick(10_000);
@@ -148,7 +177,15 @@ describe("subagent-done.ts", () => {
 
 				// Failed run 3 -> kill (no third nudge, error sidecar written).
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "error",
+								errorMessage: "Connection error.",
+							},
+						],
+					},
 					h.ctx,
 				);
 				mock.timers.tick(10_000);
@@ -169,7 +206,15 @@ describe("subagent-done.ts", () => {
 			try {
 				// Failed run -> nudge.
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "error",
+								errorMessage: "Connection error.",
+							},
+						],
+					},
 					h.ctx,
 				);
 				mock.timers.tick(10_000);
@@ -177,7 +222,15 @@ describe("subagent-done.ts", () => {
 
 				// Recovered run completes normally -> reset + done sidecar, no further nudge.
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "stop",
+								content: [{ type: "text", text: "done" }],
+							},
+						],
+					},
 					h.ctx,
 				);
 				const exit = JSON.parse(readFileSync(`${h.sessionFile}.exit`, "utf8"));
@@ -222,10 +275,7 @@ describe("subagent-done.ts", () => {
 			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
 			const h = loadRecoveryChild();
 			try {
-				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "tooluse" }] },
-					h.ctx,
-				);
+				h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "tooluse" }] }, h.ctx);
 
 				assert.deepEqual(h.sentMessages, ["continue"]);
 				assert.deepEqual(h.sentMessageOptions, [{ deliverAs: "steer" }]);
@@ -233,7 +283,15 @@ describe("subagent-done.ts", () => {
 				assertNoExit(h);
 
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "stop",
+								content: [{ type: "text", text: "done" }],
+							},
+						],
+					},
 					h.ctx,
 				);
 
@@ -254,13 +312,13 @@ describe("subagent-done.ts", () => {
 					type: "tool_execution_end",
 					toolCallId: "intentional-stop",
 					toolName: "detached_launch",
-					result: { content: [{ type: "text", text: "started" }], terminate: true },
+					result: {
+						content: [{ type: "text", text: "started" }],
+						terminate: true,
+					},
 					isError: false,
 				});
-				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "toolUse" }] },
-					h.ctx,
-				);
+				h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "toolUse" }] }, h.ctx);
 				mock.timers.tick(0);
 
 				assert.deepEqual(h.sentMessages, []);
@@ -277,10 +335,7 @@ describe("subagent-done.ts", () => {
 			const h = loadRecoveryChild();
 			try {
 				for (let attempt = 0; attempt < 3; attempt++) {
-					h.handlers.get("agent_end")?.(
-						{ messages: [{ role: "assistant", stopReason: "toolUse" }] },
-						h.ctx,
-					);
+					h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "toolUse" }] }, h.ctx);
 				}
 				mock.timers.tick(0);
 
@@ -301,21 +356,23 @@ describe("subagent-done.ts", () => {
 			const h = loadRecoveryChild();
 			try {
 				for (let attempt = 0; attempt < 2; attempt++) {
+					h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "toolUse" }] }, h.ctx);
 					h.handlers.get("agent_end")?.(
-						{ messages: [{ role: "assistant", stopReason: "toolUse" }] },
-						h.ctx,
-					);
-					h.handlers.get("agent_end")?.(
-						{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+						{
+							messages: [
+								{
+									role: "assistant",
+									stopReason: "error",
+									errorMessage: "Connection error.",
+								},
+							],
+						},
 						h.ctx,
 					);
 					mock.timers.tick(10_000);
 				}
 
-				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "toolUse" }] },
-					h.ctx,
-				);
+				h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "toolUse" }] }, h.ctx);
 				mock.timers.tick(0);
 
 				assert.equal(h.shutdowns, 1);
@@ -330,7 +387,15 @@ describe("subagent-done.ts", () => {
 			const h = loadRecoveryChild();
 			try {
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "insufficient_quota" }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "error",
+								errorMessage: "insufficient_quota",
+							},
+						],
+					},
 					h.ctx,
 				);
 				await sleep(20);
@@ -351,11 +416,27 @@ describe("subagent-done.ts", () => {
 			const h = loadRecoveryChild();
 			try {
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "error",
+								errorMessage: "Connection error.",
+							},
+						],
+					},
 					h.ctx,
 				);
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "insufficient_quota" }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "error",
+								errorMessage: "insufficient_quota",
+							},
+						],
+					},
 					h.ctx,
 				);
 
@@ -386,9 +467,21 @@ describe("subagent-done.ts", () => {
 				assert.equal(h.shutdowns, 0);
 				assertNoExit(h);
 
-				h.handlers.get("session_compact")?.({ type: "session_compact", reason: "overflow", willRetry: true });
+				h.handlers.get("session_compact")?.({
+					type: "session_compact",
+					reason: "overflow",
+					willRetry: true,
+				});
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "stop",
+								content: [{ type: "text", text: "done" }],
+							},
+						],
+					},
 					h.ctx,
 				);
 				assert.equal(readExit(h).type, "done");
@@ -451,7 +544,11 @@ describe("subagent-done.ts", () => {
 			try {
 				emitContextOverflow(h);
 				beginOverflowCompaction(h, oldAbort.signal);
-				h.handlers.get("session_compact")?.({ type: "session_compact", reason: "overflow", willRetry: true });
+				h.handlers.get("session_compact")?.({
+					type: "session_compact",
+					reason: "overflow",
+					willRetry: true,
+				});
 
 				emitContextOverflow(h);
 				beginOverflowCompaction(h);
@@ -472,10 +569,21 @@ describe("subagent-done.ts", () => {
 			const h = loadRecoveryChild({ interactive: false });
 			try {
 				h.handlers.get("agent_end")?.(
-					{ messages: [{ role: "assistant", stopReason: "error", errorMessage: "Connection error." }] },
+					{
+						messages: [
+							{
+								role: "assistant",
+								stopReason: "error",
+								errorMessage: "Connection error.",
+							},
+						],
+					},
 					h.ctx,
 				);
-				h.handlers.get("session_shutdown")?.({ type: "session_shutdown", reason: "quit" });
+				h.handlers.get("session_shutdown")?.({
+					type: "session_shutdown",
+					reason: "quit",
+				});
 				h.makeContextStale();
 				mock.timers.tick(10_000);
 
@@ -493,5 +601,4 @@ describe("subagent-done.ts", () => {
 			}
 		});
 	});
-
 });

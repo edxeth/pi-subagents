@@ -1,9 +1,5 @@
-import type {
-	CompletedSubagentResult,
-	RunningSubagent,
-	SubagentPingMessageDetails,
-	SubagentResult,
-} from "../types.ts";
+import type { CompletedSubagentResult, RunningSubagent, SubagentPingMessageDetails, SubagentResult } from "../types.ts";
+import { formatFinalContextUsage } from "./final-context-usage.ts";
 import {
 	buildCompletedSubagentResult,
 	cacheCompletedSubagentResult,
@@ -12,7 +8,6 @@ import {
 	runningSubagents,
 	stopAfterCurrentSubagentBatch,
 } from "./state.ts";
-import { formatFinalContextUsage } from "./final-context-usage.ts";
 
 interface ParentMessageSink {
 	sendMessage(message: unknown, options: unknown): void;
@@ -38,9 +33,7 @@ interface RoutedPingOutcome {
 
 export type RoutedSubagentOutcome = RoutedCompletionOutcome | RoutedPingOutcome;
 
-export function routeSubagentOutcome(
-	options: RouteSubagentOutcomeOptions,
-): RoutedSubagentOutcome {
+export function routeSubagentOutcome(options: RouteSubagentOutcomeOptions): RoutedSubagentOutcome {
 	const { pi, running, result, formatElapsed, updateWidget } = options;
 	clearSubagentShutdownTimer(running);
 	if (result.ping) {
@@ -52,9 +45,10 @@ export function routeSubagentOutcome(
 		deliverSubagentPing(pi, running, result, formatElapsed);
 		return { kind: "ping", delivered: true };
 	}
-	const completed = running.allowSteerDelivery === false && !running.resultOwner
-		? buildCompletedSubagentResult(running, result)
-		: cacheCompletedSubagentResult(running, result);
+	const completed =
+		running.allowSteerDelivery === false && !running.resultOwner
+			? buildCompletedSubagentResult(running, result)
+			: cacheCompletedSubagentResult(running, result);
 	runningSubagents.delete(running.id);
 	updateWidget();
 	if (running.allowSteerDelivery === false) {
@@ -80,17 +74,11 @@ export function deliverCompletedSubagentResult(
 	const sessionRef = completed.sessionFile
 		? `\n\nSession: ${completed.sessionFile}\nResume: pi --session ${completed.sessionFile}`
 		: "";
-	const contextRef = completed.reportContextUsage === false
-		? ""
-		: formatFinalContextUsage(completed);
+	const contextRef = completed.reportContextUsage === false ? "" : formatFinalContextUsage(completed);
 	pi.sendMessage(
 		{
 			customType: "subagent_result",
-			content: getCompletedSubagentContent(
-				completed,
-				formatElapsed,
-				`${sessionRef}${contextRef}`,
-			),
+			content: getCompletedSubagentContent(completed, formatElapsed, `${sessionRef}${contextRef}`),
 			display: true,
 			details: {
 				id: completed.id,

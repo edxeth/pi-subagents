@@ -1,27 +1,35 @@
 import {
-	assert,
-	existsSync,
-	mkdirSync,
-	writeFileSync,
-	join,
 	afterEach,
-	describe,
-	it,
+	assert,
 	buildPersistedSubagentLaunchMetadataForTest,
 	buildResumePiArgsForTest,
 	buildShellChangeDirectoryPrefixForTest,
 	buildSkillLaunchPlanForTest,
-	getFlagsLaunchArgs,
-	getSubagentToolLaunchArgsForTest,
+	createSessionFile,
+	createTestDir,
+	describe,
+	enforceAgentFrontmatterForTest,
+	existsSync,
+	getAgentConfigDirForTest,
+	getApprovalLaunchArgsForTest,
 	getBaseSubagentEnvVarsForTest,
+	getEntries,
+	getFlagsLaunchArgs,
 	getNoSessionSeedModeForTest,
+	getPersistedApprovalLaunchArgsForTest,
+	getPersistedSessionParityArgsForTest,
 	getPiInvocationForTest,
 	getPiShellPartsForTest,
-	getPersistedSessionParityArgsForTest,
 	getPreparedSessionLaunchArgsForTest,
 	getResumeCwdForTest,
 	getSubagentChildProcessEnvForTest,
+	getSubagentToolLaunchArgsForTest,
+	isInitialPromptInvocationForTest,
+	isOneShotPromptInvocationForTest,
+	it,
+	join,
 	loadAgentDefaults,
+	mkdirSync,
 	readSubagentLaunchMetadataForTest,
 	resetSubagentStateForTest,
 	resolveResumeLaunchMetadataForTest,
@@ -29,18 +37,10 @@ import {
 	resolveSubagentNoContextFilesForTest,
 	resolveSubagentNoSessionForTest,
 	resolveSubagentReportContextUsageForTest,
+	shouldForceSynchronousLaunchForTest,
+	writeFileSync,
 	writeSubagentLaunchMetadataEntryForTest,
 	writeSubagentModelStateEntriesForTest,
-	getEntries,
-	createTestDir,
-	createSessionFile,
-	enforceAgentFrontmatterForTest,
-	getAgentConfigDirForTest,
-	getApprovalLaunchArgsForTest,
-	getPersistedApprovalLaunchArgsForTest,
-	isInitialPromptInvocationForTest,
-	isOneShotPromptInvocationForTest,
-	shouldForceSynchronousLaunchForTest,
 } from "../support/index.ts";
 
 describe("agent launch configuration", () => {
@@ -77,10 +77,7 @@ describe("agent launch configuration", () => {
 			"---\nname: context-aware\ncontext-warn-threshold: 80%\n---\nWrap up before compaction.",
 		);
 
-		assert.equal(
-			loadAgentDefaults("context-aware", undefined, dir)?.contextWarnThreshold,
-			"80%",
-		);
+		assert.equal(loadAgentDefaults("context-aware", undefined, dir)?.contextWarnThreshold, "80%");
 	});
 
 	it("reports final child context usage by default and allows an agent definition to opt out", () => {
@@ -142,7 +139,10 @@ describe("agent launch configuration", () => {
 				effectiveModel: "provider/requested",
 				effectiveThinking: "high",
 				effectiveModelRef: "provider/requested:high",
-				runtimePaths: { effectiveAgentConfigDir: "/tmp", targetCwdForSession: "/tmp" },
+				runtimePaths: {
+					effectiveAgentConfigDir: "/tmp",
+					targetCwdForSession: "/tmp",
+				},
 				denySet: new Set(),
 				identity: "reviewer",
 				identityInSystemPrompt: false,
@@ -173,7 +173,13 @@ describe("agent launch configuration", () => {
 		const sessionFile = join(dir, "child.jsonl");
 		writeFileSync(
 			sessionFile,
-			JSON.stringify({ type: "session", version: 3, id: "s", timestamp: new Date().toISOString(), cwd: dir }) + "\n",
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "s",
+				timestamp: new Date().toISOString(),
+				cwd: dir,
+			}) + "\n",
 		);
 
 		writeSubagentModelStateEntriesForTest(sessionFile, {
@@ -206,11 +212,7 @@ describe("agent launch configuration", () => {
 
 	it("parses getFlagsLaunchArgs from a flags string", () => {
 		assert.deepEqual(getFlagsLaunchArgs("--plan"), ["--plan"]);
-		assert.deepEqual(getFlagsLaunchArgs("--plan --foo bar"), [
-			"--plan",
-			"--foo",
-			"bar",
-		]);
+		assert.deepEqual(getFlagsLaunchArgs("--plan --foo bar"), ["--plan", "--foo", "bar"]);
 	});
 
 	it("returns empty array for undefined, empty, or whitespace-only flags", () => {
@@ -220,38 +222,19 @@ describe("agent launch configuration", () => {
 	});
 
 	it("handles quoted flag values via parseCommandWords", () => {
-		assert.deepEqual(getFlagsLaunchArgs("--plan 'arg with spaces'"), [
-			"--plan",
-			"arg with spaces",
-		]);
+		assert.deepEqual(getFlagsLaunchArgs("--plan 'arg with spaces'"), ["--plan", "arg with spaces"]);
 	});
 
 	it("defaults child approval to no-approve unless interactive frontmatter trusts the project", () => {
-		assert.deepEqual(getApprovalLaunchArgsForTest(undefined, "interactive"), [
-			"--no-approve",
-		]);
-		assert.deepEqual(
-			getApprovalLaunchArgsForTest({ trustProject: true }, "interactive"),
-			["--approve"],
-		);
-		assert.deepEqual(
-			getApprovalLaunchArgsForTest({ trustProject: true }, "background"),
-			["--no-approve"],
-		);
+		assert.deepEqual(getApprovalLaunchArgsForTest(undefined, "interactive"), ["--no-approve"]);
+		assert.deepEqual(getApprovalLaunchArgsForTest({ trustProject: true }, "interactive"), ["--approve"]);
+		assert.deepEqual(getApprovalLaunchArgsForTest({ trustProject: true }, "background"), ["--no-approve"]);
 	});
 
 	it("restores persisted approval policy for resume with background safety", () => {
-		assert.deepEqual(
-			getPersistedApprovalLaunchArgsForTest({ trustProject: true }, "interactive"),
-			["--approve"],
-		);
-		assert.deepEqual(
-			getPersistedApprovalLaunchArgsForTest({ trustProject: true }, "background"),
-			["--no-approve"],
-		);
-		assert.deepEqual(getPersistedApprovalLaunchArgsForTest(undefined, "interactive"), [
-			"--no-approve",
-		]);
+		assert.deepEqual(getPersistedApprovalLaunchArgsForTest({ trustProject: true }, "interactive"), ["--approve"]);
+		assert.deepEqual(getPersistedApprovalLaunchArgsForTest({ trustProject: true }, "background"), ["--no-approve"]);
+		assert.deepEqual(getPersistedApprovalLaunchArgsForTest(undefined, "interactive"), ["--no-approve"]);
 	});
 
 	it("keeps approval args before persisted flags so flags remain the escape hatch", async () => {
@@ -285,9 +268,7 @@ describe("agent launch configuration", () => {
 
 	it("builds --no-skills when skills are none", async () => {
 		const dir = createTestDir();
-		assert.deepEqual((await buildSkillLaunchPlanForTest("none", undefined, dir)).launchArgs, [
-			"--no-skills",
-		]);
+		assert.deepEqual((await buildSkillLaunchPlanForTest("none", undefined, dir)).launchArgs, ["--no-skills"]);
 	});
 
 	it("resolves multiple skill names to explicit skill paths", async () => {
@@ -306,12 +287,7 @@ describe("agent launch configuration", () => {
 			"---\nname: torpathy\ndescription: Decide where fixes belong.\n---\n\n# Torpathy",
 		);
 
-		const plan = await buildSkillLaunchPlanForTest(
-			"pua, torpathy",
-			"pua, torpathy",
-			dir,
-			configDir,
-		);
+		const plan = await buildSkillLaunchPlanForTest("pua, torpathy", "pua, torpathy", dir, configDir);
 
 		assert.deepEqual(plan.injectNames, ["pua", "torpathy"]);
 		assert.deepEqual(plan.launchArgs, [
@@ -348,20 +324,10 @@ describe("agent launch configuration", () => {
 			"---\nname: pkg-skill\ndescription: Packaged skill.\n---\n\n# Packaged Skill",
 		);
 
-		const plan = await buildSkillLaunchPlanForTest(
-			"pkg-skill",
-			"pkg-skill",
-			dir,
-			configDir,
-			[packageDir],
-		);
+		const plan = await buildSkillLaunchPlanForTest("pkg-skill", "pkg-skill", dir, configDir, [packageDir]);
 
 		assert.deepEqual(plan.injectNames, ["pkg-skill"]);
-		assert.deepEqual(plan.launchArgs, [
-			"--no-skills",
-			"--skill",
-			join(skillDir, "SKILL.md"),
-		]);
+		assert.deepEqual(plan.launchArgs, ["--no-skills", "--skill", join(skillDir, "SKILL.md")]);
 		assert.equal(existsSync(executionMarker), false);
 	});
 
@@ -376,19 +342,10 @@ describe("agent launch configuration", () => {
 		mkdirSync(skillDir, { recursive: true });
 		writeFileSync(betterSkillsPath, "export default function extension() {}\n");
 		writeFileSync(unrelatedPath, "export default function extension() {}\n");
-		writeFileSync(
-			join(skillDir, "SKILL.md"),
-			"---\nname: review\ndescription: Review changes.\n---\n\n# Review",
-		);
+		writeFileSync(join(skillDir, "SKILL.md"), "---\nname: review\ndescription: Review changes.\n---\n\n# Review");
 
-		assert.equal(
-			(await buildSkillLaunchPlanForTest("review", "review", dir, configDir)).betterSkillsActive,
-			true,
-		);
-		assert.equal(
-			(await buildSkillLaunchPlanForTest("review", "review", dir, configDir, [])).betterSkillsActive,
-			false,
-		);
+		assert.equal((await buildSkillLaunchPlanForTest("review", "review", dir, configDir)).betterSkillsActive, true);
+		assert.equal((await buildSkillLaunchPlanForTest("review", "review", dir, configDir, [])).betterSkillsActive, false);
 		assert.equal(
 			(await buildSkillLaunchPlanForTest("review", "review", dir, configDir, [unrelatedPath])).betterSkillsActive,
 			false,
@@ -403,28 +360,18 @@ describe("agent launch configuration", () => {
 		const dir = createTestDir();
 		const skillDir = join(dir, ".agents", "skills", "review");
 		mkdirSync(skillDir, { recursive: true });
-		writeFileSync(
-			join(skillDir, "SKILL.md"),
-			"---\nname: review\ndescription: Review changes.\n---\n\n# Review",
-		);
+		writeFileSync(join(skillDir, "SKILL.md"), "---\nname: review\ndescription: Review changes.\n---\n\n# Review");
 
 		const plan = await buildSkillLaunchPlanForTest("review", undefined, dir);
 
-		assert.deepEqual(plan.launchArgs, [
-			"--no-skills",
-			"--skill",
-			join(skillDir, "SKILL.md"),
-		]);
+		assert.deepEqual(plan.launchArgs, ["--no-skills", "--skill", join(skillDir, "SKILL.md")]);
 	});
 
 	it("rejects injecting a skill outside the availability list", async () => {
 		const dir = createTestDir();
 		const skillDir = join(dir, ".pi", "skills", "pua");
 		mkdirSync(skillDir, { recursive: true });
-		writeFileSync(
-			join(skillDir, "SKILL.md"),
-			"---\nname: pua\ndescription: Debug stubborn failures.\n---\n\n# PUA",
-		);
+		writeFileSync(join(skillDir, "SKILL.md"), "---\nname: pua\ndescription: Debug stubborn failures.\n---\n\n# PUA");
 
 		await assert.rejects(
 			() => buildSkillLaunchPlanForTest("pua", "torpathy", dir),
@@ -435,72 +382,49 @@ describe("agent launch configuration", () => {
 	it("passes flags through getPiInvocation for background children", () => {
 		const args = ["-p", "--session", "/tmp/test.jsonl", "--flags-injected"];
 		const invocation = getPiInvocationForTest(args);
-		assert.ok(
-			invocation.args.includes("--flags-injected"),
-			"flags should appear in pi invocation args",
-		);
+		assert.ok(invocation.args.includes("--flags-injected"), "flags should appear in pi invocation args");
 	});
 
 	it("shell-escapes flags in getPiShellParts for interactive children", () => {
-		const parts = getPiShellPartsForTest([
-			"--session",
-			"/tmp/s.jsonl",
-			"--custom-flag",
-		]);
-		assert.ok(
-			parts.join(" ").includes("--custom-flag"),
-			"custom flag should be in shell parts",
-		);
+		const parts = getPiShellPartsForTest(["--session", "/tmp/s.jsonl", "--custom-flag"]);
+		assert.ok(parts.join(" ").includes("--custom-flag"), "custom flag should be in shell parts");
 	});
 
 	it("preserves the default launcher when no subagent command override is set", () => {
 		delete process.env.PI_SUBAGENT_PI_COMMAND;
 		delete process.env.PI_PACKAGE_DIR;
 		delete process.env.PI_CODING_AGENT_DIR;
-		const invocation = getPiInvocationForTest([
-			"--session",
-			"/tmp/session.jsonl",
-		]);
+		const invocation = getPiInvocationForTest(["--session", "/tmp/session.jsonl"]);
 		assert.equal(invocation.command, process.execPath);
-		assert.deepEqual(invocation.args.slice(-2), [
-			"--session",
-			"/tmp/session.jsonl",
-		]);
+		assert.deepEqual(invocation.args.slice(-2), ["--session", "/tmp/session.jsonl"]);
 	});
 
 	it("uses PI_SUBAGENT_PI_COMMAND as an opt-in wrapper for child pi launches", () => {
 		process.env.PI_SUBAGENT_PI_COMMAND = "wrapper pi";
-		assert.deepEqual(
-			getPiInvocationForTest(["--session", "/tmp/session.jsonl"]),
-			{
-				command: "wrapper",
-				args: ["pi", "--session", "/tmp/session.jsonl"],
-			},
-		);
-		assert.deepEqual(
-			getPiShellPartsForTest(["--session", "/tmp/with space.jsonl"]),
-			["'wrapper'", "'pi'", "'--session'", "'/tmp/with space.jsonl'"],
-		);
+		assert.deepEqual(getPiInvocationForTest(["--session", "/tmp/session.jsonl"]), {
+			command: "wrapper",
+			args: ["pi", "--session", "/tmp/session.jsonl"],
+		});
+		assert.deepEqual(getPiShellPartsForTest(["--session", "/tmp/with space.jsonl"]), [
+			"'wrapper'",
+			"'pi'",
+			"'--session'",
+			"'/tmp/with space.jsonl'",
+		]);
 	});
 
 	it("parses quoted PI_SUBAGENT_PI_COMMAND values", () => {
 		process.env.PI_SUBAGENT_PI_COMMAND = "'/opt/wrapper bin/pi-wrapper' pi";
-		assert.deepEqual(
-			getPiInvocationForTest(["--session", "/tmp/session.jsonl"]),
-			{
-				command: "/opt/wrapper bin/pi-wrapper",
-				args: ["pi", "--session", "/tmp/session.jsonl"],
-			},
-		);
+		assert.deepEqual(getPiInvocationForTest(["--session", "/tmp/session.jsonl"]), {
+			command: "/opt/wrapper bin/pi-wrapper",
+			args: ["pi", "--session", "/tmp/session.jsonl"],
+		});
 	});
 
 	it("preserves child process environment while applying launch vars", () => {
 		process.env.PI_PACKAGE_DIR = "/tmp/pi-package";
 		process.env.PI_CODING_AGENT_DIR = "/tmp/pi-agent";
-		const env = getSubagentChildProcessEnvForTest(
-			{ command: "pi", args: [] },
-			{ PI_SUBAGENT_NAME: "x" },
-		);
+		const env = getSubagentChildProcessEnvForTest({ command: "pi", args: [] }, { PI_SUBAGENT_NAME: "x" });
 		assert.equal(env.PI_PACKAGE_DIR, "/tmp/pi-package");
 		assert.equal(env.PI_CODING_AGENT_DIR, "/tmp/pi-agent");
 		assert.equal(env.PI_SUBAGENT_NAME, "x");
@@ -562,10 +486,7 @@ describe("agent launch configuration", () => {
 		mkdirSync(agentsDir, { recursive: true });
 		process.env.PI_CODING_AGENT_DIR = configDir;
 
-		writeFileSync(
-			join(agentsDir, "tester.md"),
-			`---\nname: tester\n---\n\nYou are the tester.`,
-		);
+		writeFileSync(join(agentsDir, "tester.md"), `---\nname: tester\n---\n\nYou are the tester.`);
 		assert.equal(loadAgentDefaults("tester")?.inheritAppendSystem, false);
 
 		writeFileSync(
@@ -592,10 +513,7 @@ describe("agent launch configuration", () => {
 		assert.equal(resolveSubagentNoContextFilesForTest(defs), true);
 		assert.equal(resolveSubagentNoContextFilesForTest(null), false);
 
-		writeFileSync(
-			join(agentsDir, "tester.md"),
-			`---\nname: tester\n---\n\nYou are the tester.`,
-		);
+		writeFileSync(join(agentsDir, "tester.md"), `---\nname: tester\n---\n\nYou are the tester.`);
 
 		const defaults = loadAgentDefaults("tester");
 		assert.equal(defaults?.noContextFiles, undefined);
@@ -609,57 +527,39 @@ describe("agent launch configuration", () => {
 		mkdirSync(agentsDir, { recursive: true });
 		process.env.PI_CODING_AGENT_DIR = configDir;
 
-		writeFileSync(
-			join(agentsDir, "tester.md"),
-			`---\nname: tester\nno-session: true\n---\n\nYou are the tester.`,
-		);
+		writeFileSync(join(agentsDir, "tester.md"), `---\nname: tester\nno-session: true\n---\n\nYou are the tester.`);
 
 		const defs = loadAgentDefaults("tester");
 		assert.equal(defs?.noSession, true);
 		assert.equal(resolveSubagentNoSessionForTest(defs), true);
 		assert.equal(resolveSubagentNoSessionForTest(null), false);
-		assert.deepEqual(getPreparedSessionLaunchArgsForTest(defs), [
-			"--session",
-			"child.jsonl",
-			"--no-session",
-		]);
+		assert.deepEqual(getPreparedSessionLaunchArgsForTest(defs), ["--session", "child.jsonl", "--no-session"]);
 
-		writeFileSync(
-			join(agentsDir, "tester.md"),
-			`---\nname: tester\n---\n\nYou are the tester.`,
-		);
+		writeFileSync(join(agentsDir, "tester.md"), `---\nname: tester\n---\n\nYou are the tester.`);
 
 		const defaults = loadAgentDefaults("tester");
 		assert.equal(defaults?.noSession, undefined);
 		assert.equal(resolveSubagentNoSessionForTest(defaults), false);
-		assert.deepEqual(getPreparedSessionLaunchArgsForTest(defaults), [
-			"--session",
-			"child.jsonl",
-		]);
+		assert.deepEqual(getPreparedSessionLaunchArgsForTest(defaults), ["--session", "child.jsonl"]);
 	});
 
 	it("adds native session names for prepared child launches", () => {
-		assert.deepEqual(getPreparedSessionLaunchArgsForTest({
-			subagentSessionFile: "child.jsonl",
-			sessionTitle: "[reviewer] Code review",
-			agentDefs: {},
-		}), [
-			"--session",
-			"child.jsonl",
-			"--name",
-			"[reviewer] Code review",
-		]);
-		assert.deepEqual(getPreparedSessionLaunchArgsForTest({
-			subagentSessionFile: "child.jsonl",
-			sessionTitle: "[reviewer] Disposable review",
-			agentDefs: { noSession: true },
-		}), [
-			"--session",
-			"child.jsonl",
-			"--no-session",
-			"--name",
-			"[reviewer] Disposable review",
-		]);
+		assert.deepEqual(
+			getPreparedSessionLaunchArgsForTest({
+				subagentSessionFile: "child.jsonl",
+				sessionTitle: "[reviewer] Code review",
+				agentDefs: {},
+			}),
+			["--session", "child.jsonl", "--name", "[reviewer] Code review"],
+		);
+		assert.deepEqual(
+			getPreparedSessionLaunchArgsForTest({
+				subagentSessionFile: "child.jsonl",
+				sessionTitle: "[reviewer] Disposable review",
+				agentDefs: { noSession: true },
+			}),
+			["--session", "child.jsonl", "--no-session", "--name", "[reviewer] Disposable review"],
+		);
 	});
 
 	it("adds native exclude-tools for the resolved deny set", async () => {
@@ -716,10 +616,7 @@ describe("agent launch configuration", () => {
 		const dir = createTestDir();
 		const configDir = join(dir, "config");
 		mkdirSync(join(configDir, "agents"), { recursive: true });
-		writeFileSync(
-			join(configDir, "agents", "tester.md"),
-			`---\nname: tester\nauto-exit: true\n---\n\nTester body.`,
-		);
+		writeFileSync(join(configDir, "agents", "tester.md"), `---\nname: tester\nauto-exit: true\n---\n\nTester body.`);
 		process.env.PI_CODING_AGENT_DIR = configDir;
 
 		const defs = loadAgentDefaults("tester");
@@ -749,27 +646,11 @@ describe("agent launch configuration", () => {
 	});
 
 	it("restores persisted resume cwd without putting task text in CLI argv", () => {
-		const weirdTask =
-			"--help @not-a-file ' \" ` ; | && $(echo bad) $HOME\nこんにちは 🚀";
-		assert.deepEqual(buildResumePiArgsForTest("child.jsonl", "background"), [
-			"-p",
-			"--session",
-			"child.jsonl",
-		]);
-		assert.deepEqual(buildResumePiArgsForTest("child.jsonl", "interactive"), [
-			"--session",
-			"child.jsonl",
-		]);
-		assert.equal(
-			buildResumePiArgsForTest("child.jsonl", "background").includes(weirdTask),
-			false,
-		);
-		assert.equal(
-			buildResumePiArgsForTest("child.jsonl", "interactive").includes(
-				weirdTask,
-			),
-			false,
-		);
+		const weirdTask = "--help @not-a-file ' \" ` ; | && $(echo bad) $HOME\nこんにちは 🚀";
+		assert.deepEqual(buildResumePiArgsForTest("child.jsonl", "background"), ["-p", "--session", "child.jsonl"]);
+		assert.deepEqual(buildResumePiArgsForTest("child.jsonl", "interactive"), ["--session", "child.jsonl"]);
+		assert.equal(buildResumePiArgsForTest("child.jsonl", "background").includes(weirdTask), false);
+		assert.equal(buildResumePiArgsForTest("child.jsonl", "interactive").includes(weirdTask), false);
 
 		const metadata = {
 			version: 1 as const,
@@ -788,10 +669,7 @@ describe("agent launch configuration", () => {
 			boundarySystemPrompt: true,
 		};
 		assert.equal(getResumeCwdForTest(metadata), "/tmp/child cwd/with spaces");
-		assert.equal(
-			buildShellChangeDirectoryPrefixForTest(metadata.cwd),
-			"cd '/tmp/child cwd/with spaces' && ",
-		);
+		assert.equal(buildShellChangeDirectoryPrefixForTest(metadata.cwd), "cd '/tmp/child cwd/with spaces' && ");
 	});
 
 	it("infers resume mode from parent launch metadata", () => {
@@ -896,9 +774,7 @@ describe("agent launch configuration", () => {
 
 	it("falls back to interactive resume mode when metadata is unavailable", () => {
 		const dir = createTestDir();
-		const child = createSessionFile(dir, [
-			{ type: "session", timestamp: new Date().toISOString(), cwd: dir },
-		]);
+		const child = createSessionFile(dir, [{ type: "session", timestamp: new Date().toISOString(), cwd: dir }]);
 		assert.deepEqual(resolveResumeLaunchMetadataForTest(child), {
 			mode: "interactive",
 			modeSource: "fallback",
@@ -966,10 +842,6 @@ describe("agent launch configuration", () => {
 		assert.equal(entries[1].type, "custom");
 		assert.equal(entries[1].customType, "pi-subagents_launch_metadata");
 		assert.equal(JSON.stringify(entries).includes("custom_message"), false);
-		assert.equal(
-			readSubagentLaunchMetadataForTest(child)?.systemPrompt,
-			"STANDALONE_CHILD_PROMPT_TOKEN",
-		);
+		assert.equal(readSubagentLaunchMetadataForTest(child)?.systemPrompt, "STANDALONE_CHILD_PROMPT_TOKEN");
 	});
-
 });

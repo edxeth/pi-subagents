@@ -1,5 +1,5 @@
+import { launchBackgroundSubagent } from "../../src/launch/background.ts";
 import {
-	SESSION_HEADER,
 	assert,
 	createTestDir,
 	describe,
@@ -8,10 +8,10 @@ import {
 	join,
 	mkdirSync,
 	readFileSync,
+	SESSION_HEADER,
 	writeExecutable,
 	writeFileSync,
 } from "../support/index.ts";
-import { launchBackgroundSubagent } from "../../src/launch/background.ts";
 
 async function readEventually(path: string): Promise<string> {
 	let lastText = "";
@@ -84,7 +84,10 @@ printf '%s\n' "$*" > '${childLog}'
 	);
 
 	const argvLog = await readEventually(childLog);
-	return { cwd, taskArtifact: readFileSync(extractTaskArtifactPath(argvLog), "utf8") };
+	return {
+		cwd,
+		taskArtifact: readFileSync(extractTaskArtifactPath(argvLog), "utf8"),
+	};
 }
 
 describe("subagent task expansion", () => {

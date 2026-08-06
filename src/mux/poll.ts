@@ -16,10 +16,7 @@ export interface PollResult {
  * Interpret an `.exit` sidecar payload. Centralized so both
  * consumeSubagentExitSignal and pollForExit decode the same way.
  */
-function withDefinedTokens(
-	obj: PollResult,
-	tokens: number | undefined,
-): PollResult {
+function withDefinedTokens(obj: PollResult, tokens: number | undefined): PollResult {
 	if (tokens !== undefined) {
 		obj.outputTokens = tokens;
 	}
@@ -43,42 +40,29 @@ function withDefinedContextUsage(
  * consumeSubagentExitSignal and pollForExit decode the same way.
  */
 function interpretExitSidecar(data: any): PollResult {
-	const tokens =
-		typeof data?.outputTokens === "number" ? data.outputTokens : undefined;
-	const contextTokens =
-		typeof data?.contextTokens === "number" ? data.contextTokens : undefined;
-	const contextWindow =
-		typeof data?.contextWindow === "number" ? data.contextWindow : undefined;
+	const tokens = typeof data?.outputTokens === "number" ? data.outputTokens : undefined;
+	const contextTokens = typeof data?.contextTokens === "number" ? data.contextTokens : undefined;
+	const contextWindow = typeof data?.contextWindow === "number" ? data.contextWindow : undefined;
 	const withUsage = (result: PollResult) =>
-		withDefinedContextUsage(
-			withDefinedTokens(result, tokens),
-			contextTokens,
-			contextWindow,
-		);
+		withDefinedContextUsage(withDefinedTokens(result, tokens), contextTokens, contextWindow);
 	if (data?.type === "ping") {
-		return withUsage(
-			{
-				reason: "ping" as const,
-				exitCode: 0,
-				ping: {
-					name: data.name ?? "subagent",
-					message: data.message ?? "",
-				},
+		return withUsage({
+			reason: "ping" as const,
+			exitCode: 0,
+			ping: {
+				name: data.name ?? "subagent",
+				message: data.message ?? "",
 			},
-		);
+		});
 	}
 	if (data?.type === "error") {
 		const errorMessage =
 			typeof data.errorMessage === "string" && data.errorMessage.trim() !== ""
 				? data.errorMessage
 				: "Subagent exited with stopReason=error (no errorMessage in sidecar).";
-		return withUsage(
-			{ reason: "error" as const, exitCode: 1, errorMessage },
-		);
+		return withUsage({ reason: "error" as const, exitCode: 1, errorMessage });
 	}
-	return withUsage(
-		{ reason: "done" as const, exitCode: 0 },
-	);
+	return withUsage({ reason: "done" as const, exitCode: 0 });
 }
 
 export const __pollForExitTest__ = { interpretExitSidecar };
@@ -116,9 +100,7 @@ function readDoneSentinel(doneSentinelFile: string): PollResult | null {
 	if (!existsSync(doneSentinelFile)) return null;
 	const fileText = readFileSync(doneSentinelFile, "utf8");
 	const fileMatch = fileText.match(/__SUBAGENT_DONE_(\d+)__/);
-	return fileMatch
-		? { reason: "sentinel", exitCode: parseInt(fileMatch[1], 10) }
-		: null;
+	return fileMatch ? { reason: "sentinel", exitCode: parseInt(fileMatch[1], 10) } : null;
 }
 
 export async function pollForExit(

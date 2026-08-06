@@ -1,13 +1,5 @@
-import {
-	assert,
-	createTestDir,
-	describe,
-	it,
-	join,
-	mkdirSync,
-	writeFileSync,
-} from "../support/index.ts";
 import { buildChildLaunchPlan } from "../../src/launch/child-launch-plan.ts";
+import { assert, createTestDir, describe, it, join, mkdirSync, writeFileSync } from "../support/index.ts";
 
 /**
  * The child launch plan is the foundation seam for agent definition and launch
@@ -65,11 +57,7 @@ describe("child launch plan", () => {
 		assert.equal(plan.capability.skills, "none");
 		assert.equal(plan.capability.injectSkills, undefined);
 		assert.deepEqual(plan.capability.extensions, []);
-		assert.deepEqual([...plan.capability.denySet].sort(), [
-			"bash",
-			"subagent",
-			"subagent_resume",
-		]);
+		assert.deepEqual([...plan.capability.denySet].sort(), ["bash", "subagent", "subagent_resume"]);
 		assert.deepEqual(plan.capability.skillLaunchPlan.launchArgs, ["--no-skills"]);
 	});
 
@@ -157,12 +145,11 @@ describe("child launch plan", () => {
 		mkdirSync(packageRoot, { recursive: true });
 		writeFileSync(
 			join(agentDir, "settings.json"),
-			JSON.stringify({ packages: ["git:github.com/example/footer-extension@v2"] }),
+			JSON.stringify({
+				packages: ["git:github.com/example/footer-extension@v2"],
+			}),
 		);
-		writeFileSync(
-			join(packageRoot, "package.json"),
-			JSON.stringify({ name: "footer-extension", version: "2.0.0" }),
-		);
+		writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: "footer-extension", version: "2.0.0" }));
 
 		const plan = await buildChildLaunchPlan({
 			params: {
@@ -180,19 +167,14 @@ describe("child launch plan", () => {
 			mode: "background",
 		});
 
-		assert.deepEqual(plan.capability.extensions, [
-			"git:github.com/example/footer-extension@v1",
-		]);
+		assert.deepEqual(plan.capability.extensions, ["git:github.com/example/footer-extension@v1"]);
 	});
 
 	it("keeps temporary resolution when a configured npm package is not installed", async () => {
 		const cwd = createTestDir();
 		const agentDir = join(cwd, "agent-root");
 		mkdirSync(agentDir, { recursive: true });
-		writeFileSync(
-			join(agentDir, "settings.json"),
-			JSON.stringify({ packages: ["npm:missing-footer"] }),
-		);
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:missing-footer"] }));
 
 		const plan = await buildChildLaunchPlan({
 			params: {
@@ -220,10 +202,7 @@ describe("child launch plan", () => {
 		mkdirSync(projectPackageRoot, { recursive: true });
 		mkdirSync(agentDir, { recursive: true });
 		writeFileSync(join(agentDir, "settings.json"), "{}");
-		writeFileSync(
-			join(cwd, ".pi", "settings.json"),
-			JSON.stringify({ packages: ["npm:project-footer"] }),
-		);
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ packages: ["npm:project-footer"] }));
 		writeFileSync(
 			join(projectPackageRoot, "package.json"),
 			JSON.stringify({ name: "project-footer", version: "1.0.0" }),
@@ -245,10 +224,16 @@ describe("child launch plan", () => {
 			parentSessionDir: join(cwd, "parent-sessions"),
 		};
 
-		const background = await buildChildLaunchPlan({ ...base, mode: "background" });
+		const background = await buildChildLaunchPlan({
+			...base,
+			mode: "background",
+		});
 		assert.deepEqual(background.capability.extensions, ["npm:project-footer"]);
 
-		const interactive = await buildChildLaunchPlan({ ...base, mode: "interactive" });
+		const interactive = await buildChildLaunchPlan({
+			...base,
+			mode: "interactive",
+		});
 		assert.deepEqual(interactive.capability.extensions, [projectPackageRoot]);
 	});
 
@@ -259,10 +244,7 @@ describe("child launch plan", () => {
 		mkdirSync(projectPackageRoot, { recursive: true });
 		mkdirSync(agentDir, { recursive: true });
 		writeFileSync(join(agentDir, "settings.json"), "{}");
-		writeFileSync(
-			join(cwd, ".pi", "settings.json"),
-			JSON.stringify({ packages: ["npm:project-footer"] }),
-		);
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ packages: ["npm:project-footer"] }));
 		writeFileSync(
 			join(projectPackageRoot, "package.json"),
 			JSON.stringify({ name: "project-footer", version: "1.0.0" }),
@@ -293,14 +275,8 @@ describe("child launch plan", () => {
 		const agentDir = join(cwd, "agent-root");
 		const packageRoot = join(agentDir, "npm", "node_modules", "pi-fancy-footer");
 		mkdirSync(packageRoot, { recursive: true });
-		writeFileSync(
-			join(agentDir, "settings.json"),
-			JSON.stringify({ packages: ["npm:pi-fancy-footer"] }),
-		);
-		writeFileSync(
-			join(packageRoot, "package.json"),
-			JSON.stringify({ name: "pi-fancy-footer", version: "1.4.0" }),
-		);
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:pi-fancy-footer"] }));
+		writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: "pi-fancy-footer", version: "1.4.0" }));
 
 		const plan = await buildChildLaunchPlan({
 			params: {
@@ -338,7 +314,11 @@ describe("child launch plan", () => {
 			parentSessionDir: join(cwd, "parent-sessions"),
 			modelRegistry: {
 				getAvailable: () => [
-					{ provider: "zai-messages", id: "glm-5.2", thinkingLevelMap: { max: "max" } },
+					{
+						provider: "zai-messages",
+						id: "glm-5.2",
+						thinkingLevelMap: { max: "max" },
+					},
 				],
 			},
 		});
@@ -348,23 +328,29 @@ describe("child launch plan", () => {
 		assert.equal(plan.effectiveModelRef, "zai-messages/glm-5.2:max");
 
 		await assert.rejects(
-			() => buildChildLaunchPlan({
-				params: {
-					name: "code-review",
-					task: "review the diff",
-					title: "Code review",
-					agent: "reviewer",
-					model: "zai-messages/glm-5.2:ultra",
-				},
-				agentDefs: null,
-				parentCwd: cwd,
-				parentSessionDir: join(cwd, "parent-sessions"),
-				modelRegistry: {
-					getAvailable: () => [
-						{ provider: "zai-messages", id: "glm-5.2", reasoning: true, thinkingLevelMap: { max: "max" } },
-					],
-				},
-			}),
+			() =>
+				buildChildLaunchPlan({
+					params: {
+						name: "code-review",
+						task: "review the diff",
+						title: "Code review",
+						agent: "reviewer",
+						model: "zai-messages/glm-5.2:ultra",
+					},
+					agentDefs: null,
+					parentCwd: cwd,
+					parentSessionDir: join(cwd, "parent-sessions"),
+					modelRegistry: {
+						getAvailable: () => [
+							{
+								provider: "zai-messages",
+								id: "glm-5.2",
+								reasoning: true,
+								thinkingLevelMap: { max: "max" },
+							},
+						],
+					},
+				}),
 			/does not support thinking level 'ultra'.*Supported levels: off, minimal, low, medium, high, max/,
 		);
 	});
@@ -400,28 +386,29 @@ describe("child launch plan", () => {
 		assert.equal(plan.effectiveModelRef, "zai-messages/glm-5.1:high");
 
 		await assert.rejects(
-			() => buildChildLaunchPlan({
-				params: {
-					name: "code-review",
-					task: "review the diff",
-					title: "Code review",
-					agent: "reviewer",
-					model: "glm-5.1",
-				},
-				agentDefs: {
-					allowedModels: "openai-ws/gpt-5.5:low",
-				},
-				parentCwd: cwd,
-				parentSessionDir,
-				parentModelRef: "zai-messages/glm-5-turbo",
-				parentThinking: "medium",
-				modelRegistry: {
-					getAvailable: () => [
-						{ provider: "zai-messages", id: "glm-5.1" },
-						{ provider: "zai-messages", id: "glm-5-turbo" },
-					],
-				},
-			}),
+			() =>
+				buildChildLaunchPlan({
+					params: {
+						name: "code-review",
+						task: "review the diff",
+						title: "Code review",
+						agent: "reviewer",
+						model: "glm-5.1",
+					},
+					agentDefs: {
+						allowedModels: "openai-ws/gpt-5.5:low",
+					},
+					parentCwd: cwd,
+					parentSessionDir,
+					parentModelRef: "zai-messages/glm-5-turbo",
+					parentThinking: "medium",
+					modelRegistry: {
+						getAvailable: () => [
+							{ provider: "zai-messages", id: "glm-5.1" },
+							{ provider: "zai-messages", id: "glm-5-turbo" },
+						],
+					},
+				}),
 			/Model 'zai-messages\/glm-5\.1:medium' is not allowed for agent 'reviewer'/,
 		);
 	});
@@ -473,9 +460,7 @@ describe("child launch plan", () => {
 			parentCwd: cwd,
 			parentSessionDir,
 			modelRegistry: {
-				getAvailable: () => [
-					{ provider: "zai-messages", id: "glm-5.1" },
-				],
+				getAvailable: () => [{ provider: "zai-messages", id: "glm-5.1" }],
 			},
 		});
 
@@ -497,16 +482,25 @@ describe("child launch plan", () => {
 			parentSessionDir,
 		};
 
-		await assert.doesNotReject(() => buildChildLaunchPlan({
-			...base,
-			agentDefs: { model: "zai-messages/glm-5-turbo:off", allowedModels: "zai-messages/glm-5.1" },
-		}));
+		await assert.doesNotReject(() =>
+			buildChildLaunchPlan({
+				...base,
+				agentDefs: {
+					model: "zai-messages/glm-5-turbo:off",
+					allowedModels: "zai-messages/glm-5.1",
+				},
+			}),
+		);
 
 		await assert.rejects(
-			() => buildChildLaunchPlan({
-				...base,
-				agentDefs: { model: "zai-messages/glm-5-turbo:off", allowedModels: "zai-messages/glm-5.1:low" },
-			}),
+			() =>
+				buildChildLaunchPlan({
+					...base,
+					agentDefs: {
+						model: "zai-messages/glm-5-turbo:off",
+						allowedModels: "zai-messages/glm-5.1:low",
+					},
+				}),
 			/Model 'zai-messages\/glm-5\.1:high' is not allowed for agent 'reviewer'/,
 		);
 	});

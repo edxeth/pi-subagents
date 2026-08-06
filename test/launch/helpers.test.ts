@@ -1,10 +1,10 @@
 import {
 	assert,
+	buildPiPromptArgsForTest,
 	describe,
+	getShellReadyDelayMs,
 	it,
 	subagentsExtension,
-	buildPiPromptArgsForTest,
-	getShellReadyDelayMs,
 } from "../support/index.ts";
 
 describe("launch helpers", () => {
@@ -20,14 +20,13 @@ describe("launch helpers", () => {
 	});
 
 	it("inserts a separator before skill prompts for artifact-backed launches", () => {
-		assert.deepEqual(
-			buildPiPromptArgsForTest(["debugger", "pua"], "@/tmp/task.md", false),
-			["", "/skill:debugger", "/skill:pua", "@/tmp/task.md"],
-		);
-		assert.deepEqual(buildPiPromptArgsForTest(["debugger"], "do work", true), [
+		assert.deepEqual(buildPiPromptArgsForTest(["debugger", "pua"], "@/tmp/task.md", false), [
+			"",
 			"/skill:debugger",
-			"do work",
+			"/skill:pua",
+			"@/tmp/task.md",
 		]);
+		assert.deepEqual(buildPiPromptArgsForTest(["debugger"], "do work", true), ["/skill:debugger", "do work"]);
 		assert.deepEqual(buildPiPromptArgsForTest(["research"], "@/tmp/fork-task.md", true), [
 			"",
 			"/skill:research",
@@ -67,4 +66,3 @@ describe("launch helpers", () => {
 		assert.equal(tools.has("set_tab_title"), true);
 	});
 });
-

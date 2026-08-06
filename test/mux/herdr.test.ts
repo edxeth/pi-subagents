@@ -1,3 +1,4 @@
+import { getHerdrCurrentPane, getHerdrServerStatus, getHerdrTab, getHerdrWorkspace } from "../../src/mux/herdr.ts";
 import {
 	assert,
 	closeSurface,
@@ -5,8 +6,12 @@ import {
 	createSurfaceSplit,
 	createTestDir,
 	describe,
+	getMuxBackend,
+	isHerdrAvailable,
+	isMuxAvailable,
 	it,
 	join,
+	muxSetupHint,
 	readFileSync,
 	readScreen,
 	readScreenAsync,
@@ -16,17 +21,7 @@ import {
 	sendShellCommand,
 	writeExecutable,
 	writeFileSync,
-	getMuxBackend,
-	isHerdrAvailable,
-	isMuxAvailable,
-	muxSetupHint,
 } from "../support/index.ts";
-import {
-	getHerdrCurrentPane,
-	getHerdrServerStatus,
-	getHerdrTab,
-	getHerdrWorkspace,
-} from "../../src/mux/herdr.ts";
 
 function clearMuxRuntimeEnv(): void {
 	delete process.env.CMUX_SOCKET_PATH;
@@ -340,10 +335,7 @@ describe("Herdr mux backend", async () => {
 
 			const log = readFileSync(logFile, "utf8");
 			assert.match(log, /pane layout --pane w1:p1/);
-			assert.match(
-				log,
-				/pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/,
-			);
+			assert.match(log, /pane split w1:p1 --direction right --ratio 0\.5 --cwd .* --no-focus/);
 			assert.match(log, /pane rename w1:p-split-right Herdr Child/);
 			assert.doesNotMatch(log, /tab create/);
 		});
@@ -352,16 +344,10 @@ describe("Herdr mux backend", async () => {
 			const { logFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
 
-			assert.equal(
-				await createSurface("[scout] Explore auth implementation"),
-				"w1:p-split-right",
-			);
+			assert.equal(await createSurface("[scout] Explore auth implementation"), "w1:p-split-right");
 
 			const log = readFileSync(logFile, "utf8");
-			assert.match(
-				log,
-				/pane rename w1:p-split-right \[scout\] Explore auth implementation/,
-			);
+			assert.match(log, /pane rename w1:p-split-right \[scout\] Explore auth implementation/);
 			assert.doesNotMatch(log, /tab create|tab rename/);
 		});
 
@@ -370,10 +356,7 @@ describe("Herdr mux backend", async () => {
 			process.env.PI_SUBAGENT_MUX = "herdr";
 			process.env.PI_SUBAGENT_HERDR_PLACEMENT = "tab";
 
-			await assert.rejects(
-				() => createSurface("Herdr Child"),
-				/Herdr tab create returned malformed pane record/,
-			);
+			await assert.rejects(() => createSurface("Herdr Child"), /Herdr tab create returned malformed pane record/);
 
 			const log = readFileSync(logFile, "utf8");
 			assert.match(log, /tab create --workspace w1 --cwd .* --label Herdr Child --no-focus/);
@@ -385,18 +368,10 @@ describe("Herdr mux backend", async () => {
 				const { logFile } = useFakeHerdr();
 				process.env.PI_SUBAGENT_MUX = "herdr";
 
-				assert.equal(
-					createSurfaceSplit("Herdr Split", direction, "w1:p1"),
-					`w1:p-split-${direction}`,
-				);
+				assert.equal(createSurfaceSplit("Herdr Split", direction, "w1:p1"), `w1:p-split-${direction}`);
 
 				const log = readFileSync(logFile, "utf8");
-				assert.match(
-					log,
-					new RegExp(
-						`pane split w1:p1 --direction ${direction} --cwd .* --no-focus`,
-					),
-				);
+				assert.match(log, new RegExp(`pane split w1:p1 --direction ${direction} --cwd .* --no-focus`));
 				assert.match(log, new RegExp(`pane rename w1:p-split-${direction} Herdr Split`));
 				assert.doesNotMatch(log, /tab create/);
 			});
@@ -409,9 +384,7 @@ describe("Herdr mux backend", async () => {
 
 				assert.throws(
 					() => createSurfaceSplit("Herdr Split", direction, "w1:p1"),
-					new RegExp(
-						`Herdr split direction "${direction}" is unsupported; .*right and down`,
-					),
+					new RegExp(`Herdr split direction "${direction}" is unsupported; .*right and down`),
 				);
 
 				const log = readFileSync(logFile, "utf8");
@@ -424,10 +397,7 @@ describe("Herdr mux backend", async () => {
 		it("sends commands, empty Enter, shell commands, reads recent output, and closes panes", async () => {
 			const { logFile, screenFile } = useFakeHerdr();
 			process.env.PI_SUBAGENT_MUX = "herdr";
-			writeFileSync(
-				screenFile,
-				"herdr line 1\nherdr line 2\n__SUBAGENT_DONE_0__\n",
-			);
+			writeFileSync(screenFile, "herdr line 1\nherdr line 2\n__SUBAGENT_DONE_0__\n");
 
 			sendCommand("w1:p2", "echo herdr");
 			sendCommand("w1:p2", "");
@@ -443,23 +413,14 @@ describe("Herdr mux backend", async () => {
 			assert.ok(stagedScriptPath, "expected sendShellCommand to stage Herdr shell command");
 			assert.match(readFileSync(stagedScriptPath, "utf8"), /printf shell/);
 			assert.equal((log.match(/pane send-keys w1:p2 Enter/g) ?? []).length, 1);
-			assert.match(
-				log,
-				/pane read w1:p2 --source recent --lines 10 --format text/,
-			);
+			assert.match(log, /pane read w1:p2 --source recent --lines 10 --format text/);
 			assert.match(log, /pane close w1:p2/);
 		});
 
 		for (const [mode, expected] of [
-			[
-				"run-api-error",
-				/Herdr pane run failed: permission_denied: fake run refused/,
-			],
+			["run-api-error", /Herdr pane run failed: permission_denied: fake run refused/],
 			["run-malformed-output", /Herdr pane run returned malformed JSON/],
-			[
-				"run-empty-failure",
-				/Herdr pane run failed with exit code 1: \(empty\)/,
-			],
+			["run-empty-failure", /Herdr pane run failed with exit code 1: \(empty\)/],
 		] as const) {
 			it(`reports ${mode} Herdr command failures`, async () => {
 				const { logFile } = useFakeHerdr(mode);
@@ -511,10 +472,7 @@ describe("Herdr mux backend", async () => {
 			process.env.PI_SUBAGENT_MUX = "herdr";
 
 			assert.doesNotThrow(() => closeSurface("w1:closed"));
-			assert.throws(
-				() => closeSurface("w1:bad"),
-				/Herdr pane close failed: permission_denied: fake close refused/,
-			);
+			assert.throws(() => closeSurface("w1:bad"), /Herdr pane close failed: permission_denied: fake close refused/);
 
 			const log = readFileSync(logFile, "utf8");
 			assert.match(log, /pane close w1:closed/);
@@ -569,28 +527,19 @@ describe("Herdr mux backend", async () => {
 		it("reports Herdr API errors with the failing operation name", async () => {
 			useFakeHerdr("api-error");
 
-			assert.throws(
-				() => getHerdrCurrentPane(),
-				/Herdr pane current failed: boom: fake current failed/,
-			);
+			assert.throws(() => getHerdrCurrentPane(), /Herdr pane current failed: boom: fake current failed/);
 		});
 
 		it("reports malformed JSON with the failing operation name", async () => {
 			useFakeHerdr("malformed-current");
 
-			assert.throws(
-				() => getHerdrCurrentPane(),
-				/Herdr pane current returned malformed JSON/,
-			);
+			assert.throws(() => getHerdrCurrentPane(), /Herdr pane current returned malformed JSON/);
 		});
 
 		it("reports malformed server status JSON with the status operation name", async () => {
 			useFakeHerdr("malformed-status");
 
-			assert.throws(
-				() => getHerdrServerStatus(),
-				/Herdr status server returned malformed JSON/,
-			);
+			assert.throws(() => getHerdrServerStatus(), /Herdr status server returned malformed JSON/);
 		});
 	});
 });

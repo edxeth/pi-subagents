@@ -1,9 +1,4 @@
-import type {
-	CompletedSubagentResult,
-	ParentClosePolicy,
-	ParentShutdownAction,
-	RunningSubagent,
-} from "../types.ts";
+import type { CompletedSubagentResult, ParentClosePolicy, ParentShutdownAction, RunningSubagent } from "../types.ts";
 import { clearSubagentShutdownTimer } from "./state.ts";
 
 export type ShutdownSubagentsOptions = {
@@ -18,10 +13,7 @@ export interface ShutdownRuntime {
 	closeRunningSurface(running: RunningSubagent): Promise<void>;
 }
 
-export function terminateBackgroundChildProcess(
-	running: RunningSubagent,
-	signal: NodeJS.Signals,
-): void {
+export function terminateBackgroundChildProcess(running: RunningSubagent, signal: NodeJS.Signals): void {
 	if (!running.childProcess?.pid) return;
 	try {
 		process.kill(-running.childProcess.pid, signal);
@@ -30,10 +22,7 @@ export function terminateBackgroundChildProcess(
 	}
 }
 
-function abortBackgroundSubagent(
-	running: RunningSubagent,
-	escalationMs: number,
-): void {
+function abortBackgroundSubagent(running: RunningSubagent, escalationMs: number): void {
 	if (running.abortController) {
 		running.abortController.abort();
 		return;
@@ -49,10 +38,7 @@ function abortBackgroundSubagent(
 	running.shutdownTimer.unref?.();
 }
 
-async function terminateInteractiveSubagent(
-	running: RunningSubagent,
-	runtime: ShutdownRuntime,
-): Promise<void> {
+async function terminateInteractiveSubagent(running: RunningSubagent, runtime: ShutdownRuntime): Promise<void> {
 	running.abortController?.abort();
 	try {
 		await runtime.closeRunningSurface(running);
@@ -62,11 +48,13 @@ async function terminateInteractiveSubagent(
 export async function shutdownSubagentsForParentExit(
 	runtime: ShutdownRuntime,
 	options: ShutdownSubagentsOptions = {},
-): Promise<Array<{
-	id: string;
-	policy: ParentClosePolicy;
-	action: ParentShutdownAction;
-}>> {
+): Promise<
+	Array<{
+		id: string;
+		policy: ParentClosePolicy;
+		action: ParentShutdownAction;
+	}>
+> {
 	const escalationMs = options.escalationMs ?? runtime.parentCloseEscalationMs;
 	const actions: Array<{
 		id: string;

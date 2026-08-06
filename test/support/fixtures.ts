@@ -29,22 +29,19 @@ export function getAgentConfigDirForTest(): string {
 	return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
 }
 
-export function resolveSubagentCwdForTest(
-	rawCwd: string | null,
-	baseCwd = process.cwd(),
-): string {
+export function resolveSubagentCwdForTest(rawCwd: string | null, baseCwd = process.cwd()): string {
 	if (!rawCwd) return baseCwd;
 	return rawCwd.startsWith("/") ? rawCwd : join(baseCwd, rawCwd);
 }
 
-export function _loadAgentDefaultsForTest(
-	agentName: string,
-	cwdHint?: string | null,
-) {
+export function _loadAgentDefaultsForTest(agentName: string, cwdHint?: string | null) {
 	const baseCwd = resolveSubagentCwdForTest(cwdHint ?? null);
 	const configDir = getAgentConfigDirForTest();
 	const paths = [
-		{ path: join(baseCwd, ".pi", "agents", `${agentName}.md`), cwdBase: baseCwd },
+		{
+			path: join(baseCwd, ".pi", "agents", `${agentName}.md`),
+			cwdBase: baseCwd,
+		},
 		{ path: join(configDir, "agents", `${agentName}.md`), cwdBase: configDir },
 	];
 	for (const { path, cwdBase } of paths) {
@@ -63,38 +60,19 @@ export function _loadAgentDefaultsForTest(
 		const extensionsRaw = get("extensions");
 		const modeRaw = get("mode");
 		return {
-			systemPromptMode:
-				systemPromptRaw === "append" || systemPromptRaw === "replace"
-					? systemPromptRaw
-					: undefined,
+			systemPromptMode: systemPromptRaw === "append" || systemPromptRaw === "replace" ? systemPromptRaw : undefined,
 			cwd: get("cwd"),
 			cwdBase,
 			extensions: extensionsRaw,
-			noContextFiles:
-				noContextFilesRaw === "true"
-					? true
-					: noContextFilesRaw === "false"
-						? false
-						: undefined,
-			noSession:
-				noSessionRaw === "true"
-					? true
-					: noSessionRaw === "false"
-						? false
-						: undefined,
-			mode:
-				modeRaw === "background" || modeRaw === "interactive"
-					? modeRaw
-					: undefined,
+			noContextFiles: noContextFilesRaw === "true" ? true : noContextFilesRaw === "false" ? false : undefined,
+			noSession: noSessionRaw === "true" ? true : noSessionRaw === "false" ? false : undefined,
+			mode: modeRaw === "background" || modeRaw === "interactive" ? modeRaw : undefined,
 		};
 	}
 	return null;
 }
 
-export function createForkSessionFileForTest(
-	parentSessionFile: string,
-	childSessionFile: string,
-): void {
+export function createForkSessionFileForTest(parentSessionFile: string, childSessionFile: string): void {
 	const entries = getEntries(parentSessionFile) as any[];
 	let truncateAt = entries.length;
 	for (let i = entries.length - 1; i >= 0; i--) {
@@ -114,14 +92,15 @@ export function createForkSessionFileForTest(
 		cwd: process.cwd(),
 		parentSession: parentSessionFile,
 	};
-	writeFileSync(
-		childSessionFile,
-		`${[header, ...contentEntries].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
-	);
+	writeFileSync(childSessionFile, `${[header, ...contentEntries].map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 }
 
 export const SESSION_HEADER = { type: "session", id: "sess-001", version: 3 };
-export const MODEL_CHANGE = { type: "model_change", id: "mc-001", parentId: null };
+export const MODEL_CHANGE = {
+	type: "model_change",
+	id: "mc-001",
+	parentId: null,
+};
 export const USER_MSG = {
 	type: "message",
 	id: "user-001",

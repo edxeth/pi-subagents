@@ -7,15 +7,7 @@ import {
 	SUBAGENT_DONE_TOOL_NAME,
 } from "./tool-names.ts";
 
-const BUILTIN_TOOL_NAMES = new Set([
-	"read",
-	"bash",
-	"edit",
-	"write",
-	"grep",
-	"find",
-	"ls",
-]);
+const BUILTIN_TOOL_NAMES = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
 
 /**
  * Names pi-subagents can validate at the parent boundary. Extension/custom tool
@@ -80,17 +72,8 @@ function damerauLevenshtein(a: string, b: string): number {
 		current[0] = i;
 		for (let j = 1; j <= bLen; j++) {
 			const cost = aChars[i - 1] === bChars[j - 1] ? 0 : 1;
-			current[j] = Math.min(
-				previous[j] + 1,
-				current[j - 1] + 1,
-				previous[j - 1] + cost,
-			);
-			if (
-				i > 1 &&
-				j > 1 &&
-				aChars[i - 1] === bChars[j - 2] &&
-				aChars[i - 2] === bChars[j - 1]
-			) {
+			current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
+			if (i > 1 && j > 1 && aChars[i - 1] === bChars[j - 2] && aChars[i - 2] === bChars[j - 1]) {
 				current[j] = Math.min(current[j], previousPrevious[j - 2] + 1);
 			}
 		}
@@ -153,9 +136,7 @@ export function getSubagentToolsWarning(tools?: string): SubagentToolsWarning | 
 	return null;
 }
 
-function normalizeToolMode(
-	tools?: string,
-): "default" | "all" | "none" | "list" {
+function normalizeToolMode(tools?: string): "default" | "all" | "none" | "list" {
 	if (!tools) return "default";
 	const normalized = tools.trim().toLowerCase();
 	if (normalized === "all") return "all";
@@ -171,19 +152,13 @@ function getChildProtocolToolNames(deniedTools: Set<string>): string[] {
 	if (!deniedTools.has(SUBAGENT_DONE_TOOL_NAME)) {
 		protocolTools.push(SUBAGENT_DONE_TOOL_NAME);
 	}
-	if (
-		isSetTabTitleToolEnabled() &&
-		!deniedTools.has(SET_TAB_TITLE_TOOL_NAME)
-	) {
+	if (isSetTabTitleToolEnabled() && !deniedTools.has(SET_TAB_TITLE_TOOL_NAME)) {
 		protocolTools.push(SET_TAB_TITLE_TOOL_NAME);
 	}
 	return protocolTools;
 }
 
-export function getSubagentToolAllowlist(
-	tools?: string,
-	deniedTools = new Set<string>(),
-): string[] {
+export function getSubagentToolAllowlist(tools?: string, deniedTools = new Set<string>()): string[] {
 	if (normalizeToolMode(tools) !== "list" || !tools) return [];
 	const allowlist = parseToolNames(tools).filter(
 		(tool) => tool !== SET_TAB_TITLE_TOOL_NAME || isSetTabTitleToolEnabled(),
@@ -192,19 +167,13 @@ export function getSubagentToolAllowlist(
 	return [...new Set(allowlist)];
 }
 
-export function addToolModeDeniedNames(
-	deniedTools: Set<string>,
-	tools?: string,
-) {
+export function addToolModeDeniedNames(deniedTools: Set<string>, tools?: string) {
 	if (normalizeToolMode(tools) !== "none") return deniedTools;
 	for (const tool of BUILTIN_TOOL_NAMES) deniedTools.add(tool);
 	return deniedTools;
 }
 
-export function getSubagentToolLaunchArgs(
-	tools?: string,
-	deniedTools = new Set<string>(),
-): string[] {
+export function getSubagentToolLaunchArgs(tools?: string, deniedTools = new Set<string>()): string[] {
 	const args: string[] = [];
 	const toolMode = normalizeToolMode(tools);
 	if (toolMode === "none") {

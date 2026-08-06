@@ -74,10 +74,7 @@ function describeActivity(toolNames: string[], responseText?: string): string {
 	return preview || "thinking…";
 }
 
-function renderAgentBadge(
-	theme: WidgetThemeLike,
-	agent: RunningSubagent,
-): string {
+function renderAgentBadge(theme: WidgetThemeLike, agent: RunningSubagent): string {
 	const label = agent.agent ?? "subagent";
 	if (agent.deliveryState === "detached") {
 		return theme.fg("muted", `[${label}]`);
@@ -118,13 +115,9 @@ export class SubagentWidgetManager {
 			modelId = rest.join("/");
 		}
 		if (!provider) return undefined;
-		const candidates = [modelId, modelId.replace(/:[^:]+$/, "")].filter(
-			Boolean,
-		);
+		const candidates = [modelId, modelId.replace(/:[^:]+$/, "")].filter(Boolean);
 		const model = [...new Set(candidates)]
-			.map((candidate) =>
-				this.latestCtx?.modelRegistry.find(provider!, candidate),
-			)
+			.map((candidate) => this.latestCtx?.modelRegistry.find(provider!, candidate))
 			.find(Boolean);
 		return model?.contextWindow;
 	}
@@ -179,46 +172,28 @@ export class SubagentWidgetManager {
 			const [parsedProvider, ...rest] = resolvedModelId.split("/");
 			resolvedProvider = parsedProvider;
 			resolvedModelId = rest.join("/");
-		} else if (
-			resolvedProvider &&
-			resolvedModelId.startsWith(`${resolvedProvider}/`)
-		) {
+		} else if (resolvedProvider && resolvedModelId.startsWith(`${resolvedProvider}/`)) {
 			resolvedModelId = resolvedModelId.slice(resolvedProvider.length + 1);
 		}
 
 		if (!resolvedProvider && !fallbackContextWindow) return undefined;
 
 		let contextWindow = fallbackContextWindow ?? 0;
-		if (
-			!contextWindow &&
-			this.latestCtx?.modelRegistry?.find &&
-			resolvedProvider
-		) {
-			const candidates = [
-				resolvedModelId,
-				resolvedModelId.replace(/:[^:]+$/, ""),
-			].filter(Boolean);
+		if (!contextWindow && this.latestCtx?.modelRegistry?.find && resolvedProvider) {
+			const candidates = [resolvedModelId, resolvedModelId.replace(/:[^:]+$/, "")].filter(Boolean);
 			const model = [...new Set(candidates)]
-				.map((candidate) =>
-					this.latestCtx?.modelRegistry.find(resolvedProvider!, candidate),
-				)
+				.map((candidate) => this.latestCtx?.modelRegistry.find(resolvedProvider!, candidate))
 				.find(Boolean);
 			contextWindow = model?.contextWindow ?? 0;
 		}
 		if (!contextWindow) return undefined;
 
 		const contextTokens =
-			usage.totalTokens ??
-			(usage.input ?? 0) +
-				(usage.output ?? 0) +
-				(usage.cacheRead ?? 0) +
-				(usage.cacheWrite ?? 0);
+			usage.totalTokens ?? (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
 		if (!contextTokens) return undefined;
 
 		const pct = Math.min((contextTokens / contextWindow) * 100, 100);
-		return `${formatCompactCount(contextTokens)}/${formatCompactCount(
-			contextWindow,
-		)} ctx (${pct.toFixed(1)}%)`;
+		return `${formatCompactCount(contextTokens)}/${formatCompactCount(contextWindow)} ctx (${pct.toFixed(1)}%)`;
 	}
 
 	private refreshRunningSubagentState(agent: RunningSubagent): void {
@@ -273,10 +248,7 @@ export class SubagentWidgetManager {
 						lastAssistantWithUsage = message;
 						totalTokens +=
 							usage.totalTokens ??
-							(usage.input ?? 0) +
-								(usage.output ?? 0) +
-								(usage.cacheRead ?? 0) +
-								(usage.cacheWrite ?? 0);
+							(usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
 					}
 				}
 			}
@@ -284,22 +256,14 @@ export class SubagentWidgetManager {
 			const pendingTools = new Map<string, string>();
 			if (lastAssistantIndex >= 0 && Array.isArray(lastAssistant?.content)) {
 				for (const block of lastAssistant.content) {
-					if (block?.type !== "toolCall" || typeof block.id !== "string")
-						continue;
-					pendingTools.set(
-						block.id,
-						typeof block.name === "string" ? block.name : "tool",
-					);
+					if (block?.type !== "toolCall" || typeof block.id !== "string") continue;
+					pendingTools.set(block.id, typeof block.name === "string" ? block.name : "tool");
 				}
 
 				for (let i = Math.max(lastAssistantIndex + 1, activityStartIndex); i < entries.length; i++) {
 					const entry = entries[i];
 					const message = entry?.message;
-					if (
-						entry?.type === "message" &&
-						message?.role === "toolResult" &&
-						typeof message.toolCallId === "string"
-					) {
+					if (entry?.type === "message" && message?.role === "toolResult" && typeof message.toolCallId === "string") {
 						pendingTools.delete(message.toolCallId);
 					}
 				}
@@ -307,10 +271,7 @@ export class SubagentWidgetManager {
 
 			const lastAssistantText = Array.isArray(lastAssistant?.content)
 				? lastAssistant.content
-						.filter(
-							(block: SessionContentBlock) =>
-								block?.type === "text" && typeof block.text === "string",
-						)
+						.filter((block: SessionContentBlock) => block?.type === "text" && typeof block.text === "string")
 						.map((block: SessionContentBlock) => block.text?.trim())
 						.filter(Boolean)
 						.join("\n")
@@ -332,11 +293,11 @@ export class SubagentWidgetManager {
 			agent.toolUses = toolUses;
 			agent.totalTokens = totalTokens;
 			agent.contextTokens = contextSource?.usage
-				? contextSource.usage.totalTokens ??
+				? (contextSource.usage.totalTokens ??
 					(contextSource.usage.input ?? 0) +
 						(contextSource.usage.output ?? 0) +
 						(contextSource.usage.cacheRead ?? 0) +
-						(contextSource.usage.cacheWrite ?? 0)
+						(contextSource.usage.cacheWrite ?? 0))
 				: undefined;
 			agent.contextLabel = this.resolveContextLabel(
 				contextSource?.provider,
@@ -346,18 +307,13 @@ export class SubagentWidgetManager {
 			);
 			agent.lastAssistantText = lastAssistantText;
 			agent.pendingToolCount = pendingTools.size;
-			agent.activity =
-				terminalActivity ??
-				describeActivity([...pendingTools.values()], lastAssistantText);
+			agent.activity = terminalActivity ?? describeActivity([...pendingTools.values()], lastAssistantText);
 		} catch {
 			agent.activity ??= "starting…";
 		}
 	}
 
-	private renderSubagentWidget(
-		tui: WidgetTuiLike,
-		theme: WidgetThemeLike,
-	): string[] {
+	private renderSubagentWidget(tui: WidgetTuiLike, theme: WidgetThemeLike): string[] {
 		const agents = [...this.getAgents()];
 
 		// If no running subagents, show nothing
@@ -365,28 +321,18 @@ export class SubagentWidgetManager {
 
 		const width = tui?.terminal?.columns ?? getTerminalColumns();
 		const lines: string[] = [];
-		const maxVisibleAgents = Math.floor(
-			(MAX_WIDGET_LINES - 2) / LINES_PER_AGENT,
-		);
-		const visibleAgents =
-			agents.length > maxVisibleAgents
-				? agents.slice(0, maxVisibleAgents)
-				: agents;
+		const maxVisibleAgents = Math.floor((MAX_WIDGET_LINES - 2) / LINES_PER_AGENT);
+		const visibleAgents = agents.length > maxVisibleAgents ? agents.slice(0, maxVisibleAgents) : agents;
 
 		// Show running subagents section
 		if (agents.length > 0) {
 			const spinner = SPINNER[this.widgetFrame % SPINNER.length] ?? "●";
-			const oldestStartTime = Math.min(
-				...agents.map((agent) => agent.startTime),
-			);
+			const oldestStartTime = Math.min(...agents.map((agent) => agent.startTime));
 			lines.push(
 				theme.fg("accent", "●") +
 					" " +
 					theme.fg("accent", "Agents") +
-					theme.fg(
-						"dim",
-						` · ${agents.length} running · ${formatElapsedMs(oldestStartTime)}`,
-					),
+					theme.fg("dim", ` · ${agents.length} running · ${formatElapsedMs(oldestStartTime)}`),
 			);
 
 			for (let i = 0; i < visibleAgents.length; i++) {
@@ -398,9 +344,7 @@ export class SubagentWidgetManager {
 
 				const toolUses = agent.toolUses ?? 0;
 				if (toolUses > 0) {
-					stats.push(
-						`${toolUses} tool use${toolUses === 1 ? "" : "s"}`,
-					);
+					stats.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
 				}
 				if (agent.contextLabel) {
 					stats.push(agent.contextLabel);
@@ -408,48 +352,29 @@ export class SubagentWidgetManager {
 					// No resolvable context window: show the last-message snapshot, not
 					// the cumulative totalTokens sum (which balloons past any window).
 					const snapshot = agent.contextTokens ?? 0;
-					if (snapshot > 0)
-						stats.push(`${formatCompactCount(snapshot)} tokens`);
+					if (snapshot > 0) stats.push(`${formatCompactCount(snapshot)} tokens`);
 				}
 
 				const header =
 					theme.fg("dim", connector) +
 					` ${theme.fg("accent", spinner)} ${theme.bold(agent.name)} ${renderAgentBadge(theme, agent)}` +
-					(stats.length > 0
-						? ` ${theme.fg("dim", "·")} ${theme.fg("dim", stats.join(" · "))}`
-						: "");
+					(stats.length > 0 ? ` ${theme.fg("dim", "·")} ${theme.fg("dim", stats.join(" · "))}` : "");
 				lines.push(header);
 
-				const displayTitle =
-					agent.taskPreview ??
-					firstNonEmptyLine(agent.title ?? agent.task, 46);
+				const displayTitle = agent.taskPreview ?? firstNonEmptyLine(agent.title ?? agent.task, 46);
 				if (displayTitle) {
-					const modelSuffix = agent.modelRef
-						? theme.fg("dim", ` · ${agent.modelRef}`)
-						: "";
-					lines.push(
-						theme.fg("dim", childConnector) +
-							theme.fg("muted", `  ${displayTitle}`) +
-							modelSuffix,
-					);
+					const modelSuffix = agent.modelRef ? theme.fg("dim", ` · ${agent.modelRef}`) : "";
+					lines.push(theme.fg("dim", childConnector) + theme.fg("muted", `  ${displayTitle}`) + modelSuffix);
 				}
 
 				const activity = agent.activity ?? "starting…";
-				lines.push(
-					theme.fg("dim", childConnector) +
-					theme.fg("dim", `  ${activity}`),
-				);
+				lines.push(theme.fg("dim", childConnector) + theme.fg("dim", `  ${activity}`));
 			}
 
 			const hiddenCount = agents.length - visibleAgents.length;
 			if (hiddenCount > 0) {
 				const noun = hiddenCount === 1 ? "subagent" : "subagents";
-				lines.push(
-					theme.fg(
-						"muted",
-						`... (+${hiddenCount} more ${noun} — Alt+S to show all)`,
-					),
-				);
+				lines.push(theme.fg("muted", `... (+${hiddenCount} more ${noun} — Alt+S to show all)`));
 			}
 		}
 
@@ -459,14 +384,7 @@ export class SubagentWidgetManager {
 	private renderWidgetNow(): void {
 		if (!this.latestCtx?.hasUI) return;
 		const theme = this.latestCtx.ui.theme as WidgetThemeLike;
-		const lines = this.renderSubagentWidget(
-			{ terminal: { columns: getTerminalColumns() } },
-			theme,
-		);
-		this.latestCtx.ui.setWidget(
-			"subagent-status",
-			lines.length ? lines : undefined,
-			{ placement: "aboveEditor" },
-		);
+		const lines = this.renderSubagentWidget({ terminal: { columns: getTerminalColumns() } }, theme);
+		this.latestCtx.ui.setWidget("subagent-status", lines.length ? lines : undefined, { placement: "aboveEditor" });
 	}
 }

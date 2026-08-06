@@ -1,19 +1,10 @@
-import type { OverlayItem, OverlayState, TabId, Theme } from "./render-types.ts";
 import { fitLine, renderHighlightedLine, renderScrollbar, wrapPlainText } from "./render-helpers.ts";
+import type { OverlayItem, OverlayState, TabId, Theme } from "./render-types.ts";
 
 const EMPTY_MESSAGES: Record<TabId, string[]> = {
-	running: [
-		"No agents running.",
-		"Launch an agent and it will appear here with live activity.",
-	],
-	completed: [
-		"No completed agents yet.",
-		"Finished, cancelled, and failed agents will appear here.",
-	],
-	agents: [
-		"No agent definitions found.",
-		"Add .md agent files in .pi/agents or ~/.pi/agent/agents.",
-	],
+	running: ["No agents running.", "Launch an agent and it will appear here with live activity."],
+	completed: ["No completed agents yet.", "Finished, cancelled, and failed agents will appear here."],
+	agents: ["No agent definitions found.", "Add .md agent files in .pi/agents or ~/.pi/agent/agents."],
 };
 
 export function renderList(
@@ -24,7 +15,8 @@ export function renderList(
 	scroll: number,
 ): string[] {
 	if (state.loading) return withScrollbar([` ${theme.fg("muted", "Loading…")}`], theme, width, maxHeight, 0);
-	if (state.items.length === 0) return withScrollbar(renderEmptyState(state.activeTab, theme, width - 2), theme, width, maxHeight, 0);
+	if (state.items.length === 0)
+		return withScrollbar(renderEmptyState(state.activeTab, theme, width - 2), theme, width, maxHeight, 0);
 
 	const contentWidth = Math.max(20, width - 2);
 	const rows: string[] = [];
@@ -63,13 +55,7 @@ function renderEmptyState(tab: TabId, theme: Theme, width: number): string[] {
 	});
 }
 
-function renderItem(
-	item: OverlayItem,
-	isSelected: boolean,
-	tab: TabId,
-	theme: Theme,
-	width: number,
-): string[] {
+function renderItem(item: OverlayItem, isSelected: boolean, tab: TabId, theme: Theme, width: number): string[] {
 	const contentWidth = Math.max(20, width - 2);
 	const pointer = isSelected ? theme.fg("accent", "▸") : " ";
 	const icon = theme.fg(item.iconColor, item.icon);
@@ -83,7 +69,11 @@ function renderItem(
 
 	const previewIndent = "    ";
 	const maxPreviewLines = tab === "agents" ? 4 : 3;
-	for (const preview of wrapPlainText(item.activity, Math.max(10, contentWidth - previewIndent.length), maxPreviewLines)) {
+	for (const preview of wrapPlainText(
+		item.activity,
+		Math.max(10, contentWidth - previewIndent.length),
+		maxPreviewLines,
+	)) {
 		rows.push(`${previewIndent}${theme.fg("muted", preview)}`);
 	}
 

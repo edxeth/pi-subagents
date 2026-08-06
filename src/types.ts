@@ -129,10 +129,6 @@ export interface StartedSubagentToolDetails {
 	autoExit?: boolean;
 }
 
-interface ResumeToolDetails extends StartedSubagentToolDetails {
-	sessionFile?: string;
-}
-
 export interface SessionUsage {
 	totalTokens?: number;
 	input?: number;

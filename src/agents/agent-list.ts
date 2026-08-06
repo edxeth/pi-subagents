@@ -18,14 +18,9 @@ export interface AgentListEntry {
 	allowModelOverride?: boolean;
 }
 
-export type ResolveSubagentSessionMode = (
-	agent: ResolvedAgentDefinition,
-) => SubagentSessionMode;
+export type ResolveSubagentSessionMode = (agent: ResolvedAgentDefinition) => SubagentSessionMode;
 
-export function getAgentListEntries(
-	baseCwd: string,
-	resolveSessionMode: ResolveSubagentSessionMode,
-): AgentListEntry[] {
+export function getAgentListEntries(baseCwd: string, resolveSessionMode: ResolveSubagentSessionMode): AgentListEntry[] {
 	return getEffectiveAgentDefinitions(baseCwd)
 		.filter((agent) => agent.description?.trim())
 		.map((agent) => ({
@@ -51,15 +46,11 @@ function getRunsAs(entry: AgentListEntry): "visible_terminal" | "hidden_process"
 	return entry.mode === "background" ? "hidden_process" : "visible_terminal";
 }
 
-function getContext(
-	entry: AgentListEntry,
-): "fresh_chat_needs_full_brief" | "copy_of_this_chat" {
+function getContext(entry: AgentListEntry): "fresh_chat_needs_full_brief" | "copy_of_this_chat" {
 	return entry.sessionMode === "fork" ? "copy_of_this_chat" : "fresh_chat_needs_full_brief";
 }
 
-function getCompletion(
-	entry: AgentListEntry,
-): "exits_automatically" | "human_or_agent_must_finish" {
+function getCompletion(entry: AgentListEntry): "exits_automatically" | "human_or_agent_must_finish" {
 	return entry.autoExit === false ? "human_or_agent_must_finish" : "exits_automatically";
 }
 
@@ -77,10 +68,10 @@ function renderModelsLine(entry: AgentListEntry): string | undefined {
 	return `  models: ${choices.join(" | ")}`;
 }
 
-export function renderAgentListReminder(
-	entries: AgentListEntry[],
-): string {
-	const hasModelInfo = entries.some((entry) => buildModelRef(entry.model, entry.thinking) || entry.allowModelOverride !== false);
+export function renderAgentListReminder(entries: AgentListEntry[]): string {
+	const hasModelInfo = entries.some(
+		(entry) => buildModelRef(entry.model, entry.thinking) || entry.allowModelOverride !== false,
+	);
 	const agentLines = entries.map((entry) => {
 		return [
 			`- \`${entry.name}\`: ${entry.description}`,
@@ -90,7 +81,9 @@ export function renderAgentListReminder(
 			`  completion: ${getCompletion(entry)}`,
 			renderDefaultModelLine(entry),
 			renderModelsLine(entry),
-		].filter(Boolean).join("\n");
+		]
+			.filter(Boolean)
+			.join("\n");
 	});
 	const body = [
 		"You can launch separate helper agents with the subagent tool. Use this roster to choose exact agent names and to understand how each launched agent behaves.",
@@ -106,7 +99,9 @@ export function renderAgentListReminder(
 		"- context=copy_of_this_chat means the helper starts from this conversation; give scope, boundary, and expected output without repeating all background.",
 		"- completion=exits_automatically means the helper should finish and close itself. completion=human_or_agent_must_finish means the session stays open until the human or helper explicitly completes it.",
 		...(hasModelInfo
-			? ["- `default_model:` runs when model/thinking are omitted. `models:` lists accepted overrides; `models: any model ref` accepts any available model. An agent with no `models:` line ignores model and thinking overrides. For a listed ref, copy it exactly and split `provider/model:thinking` into model=`provider/model`, thinking=`thinking`. Never use an unlisted model when an explicit list is present."]
+			? [
+					"- `default_model:` runs when model/thinking are omitted. `models:` lists accepted overrides; `models: any model ref` accepts any available model. An agent with no `models:` line ignores model and thinking overrides. For a listed ref, copy it exactly and split `provider/model:thinking` into model=`provider/model`, thinking=`thinking`. Never use an unlisted model when an explicit list is present.",
+				]
 			: []),
 		"- If the user names an agent that is not listed, say it was not found and stop; do not suggest a different listed agent.",
 		"</subagent-rules>",
@@ -114,9 +109,7 @@ export function renderAgentListReminder(
 	return `<system-reminder>\n${body}\n</system-reminder>`;
 }
 
-export function getAgentListSignature(
-	entries: AgentListEntry[],
-): string {
+export function getAgentListSignature(entries: AgentListEntry[]): string {
 	return JSON.stringify(
 		entries.map((entry) => ({
 			name: entry.name,

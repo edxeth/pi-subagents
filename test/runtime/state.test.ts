@@ -1,6 +1,6 @@
-import { assert, describe, it } from "../support/index.ts";
 import { buildCompletedSubagentResult, getWatcherSignal } from "../../src/runtime/state.ts";
 import type { RunningSubagent, SubagentResult } from "../../src/types.ts";
+import { assert, describe, it } from "../support/index.ts";
 
 function makeRunning(overrides: Partial<RunningSubagent> = {}): RunningSubagent {
 	return {
@@ -82,7 +82,11 @@ describe("getSubagentCompletionStatus (via buildCompletedSubagentResult)", () =>
 	it("keeps a manual interactive child failed on an explicit provider error", () => {
 		const result = buildCompletedSubagentResult(
 			makeRunning({ mode: "interactive", autoExit: false }),
-			makeResult({ exitCode: 1, summary: "partial work", errorMessage: "529 Overloaded" }),
+			makeResult({
+				exitCode: 1,
+				summary: "partial work",
+				errorMessage: "529 Overloaded",
+			}),
 		);
 		assert.equal(result.status, "failed");
 	});
@@ -117,18 +121,12 @@ describe("getSubagentCompletionStatus (via buildCompletedSubagentResult)", () =>
 	});
 
 	it("returns failed when exitCode is non-zero", () => {
-		const result = buildCompletedSubagentResult(
-			makeRunning(),
-			makeResult({ exitCode: 1 }),
-		);
+		const result = buildCompletedSubagentResult(makeRunning(), makeResult({ exitCode: 1 }));
 		assert.equal(result.status, "failed");
 	});
 
 	it("returns cancelled when error is 'cancelled'", () => {
-		const result = buildCompletedSubagentResult(
-			makeRunning(),
-			makeResult({ error: "cancelled", exitCode: 1 }),
-		);
+		const result = buildCompletedSubagentResult(makeRunning(), makeResult({ error: "cancelled", exitCode: 1 }));
 		assert.equal(result.status, "cancelled");
 	});
 

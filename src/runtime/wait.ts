@@ -1,9 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type {
-	CompletedSubagentResult,
-	RunningSubagent,
-	SubagentResult,
-} from "../types.ts";
+import type { CompletedSubagentResult, RunningSubagent, SubagentResult } from "../types.ts";
 
 interface TrackedSubagentMatch {
 	id?: string;
@@ -16,10 +12,7 @@ export interface WaitRuntime {
 	runningSubagents: Map<string, RunningSubagent>;
 	completedSubagentResults: Map<string, CompletedSubagentResult>;
 	findTrackedSubagent(query: string): TrackedSubagentMatch;
-	cacheCompletedSubagentResult(
-		running: RunningSubagent,
-		result: SubagentResult,
-	): CompletedSubagentResult;
+	cacheCompletedSubagentResult(running: RunningSubagent, result: SubagentResult): CompletedSubagentResult;
 	updateWidget(): void;
 	deliverCompletedSubagentResultViaSteer(
 		pi: Pick<ExtensionAPI, "sendMessage">,

@@ -1,26 +1,26 @@
 import { mock } from "node:test";
 import {
 	assert,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-	join,
+	createTestDir,
 	describe,
-	it,
-	shouldAutoExitOnAgentEnd,
-	shouldMarkUserTookOver,
-	getSubagentToolAllowlistForTest,
-	getSubagentToolsWarningForTest,
-	withToolWarningForTest,
-	getSubagentToolDeniedNamesForTest,
-	getSubagentToolLaunchArgsForTest,
-	subagentDoneExtension,
 	filterToolNames,
 	getDeniedToolNames,
+	getSubagentToolAllowlistForTest,
+	getSubagentToolDeniedNamesForTest,
+	getSubagentToolLaunchArgsForTest,
+	getSubagentToolsWarningForTest,
 	installDeniedToolGuards,
+	it,
+	join,
+	readFileSync,
+	rmSync,
+	shouldAutoExitOnAgentEnd,
+	shouldMarkUserTookOver,
 	shouldRegisterSubagentDone,
-	createTestDir,
 	sleep,
+	subagentDoneExtension,
+	withToolWarningForTest,
+	writeFileSync,
 } from "../support/index.ts";
 
 function withSetTabTitleEnv<T>(value: string | undefined, run: () => T): T {
@@ -68,7 +68,13 @@ describe("subagent-done.ts", () => {
 		});
 
 		it("auto-exits after provider error when there are no usable text messages", () => {
-			const messages = [{ role: "assistant", stopReason: "error", errorMessage: "Provider overload" }];
+			const messages = [
+				{
+					role: "assistant",
+					stopReason: "error",
+					errorMessage: "Provider overload",
+				},
+			];
 			assert.equal(shouldAutoExitOnAgentEnd(messages), true);
 		});
 
@@ -106,29 +112,19 @@ describe("subagent-done.ts", () => {
 
 	describe("deny-tools enforcement", () => {
 		it("adds subagent_done to denied tools for auto-exit agents", () => {
-			assert.deepEqual(getDeniedToolNames(true, "ask_user_question"), [
-				"ask_user_question",
-				"subagent_done",
-			]);
+			assert.deepEqual(getDeniedToolNames(true, "ask_user_question"), ["ask_user_question", "subagent_done"]);
 		});
 
 		it("filters denied tool names and de-duplicates survivors", () => {
-			assert.deepEqual(
-				filterToolNames(
-					["read", "ask_user_question", "read", "bash"],
-					["ask_user_question"],
-				),
-				["read", "bash"],
-			);
+			assert.deepEqual(filterToolNames(["read", "ask_user_question", "read", "bash"], ["ask_user_question"]), [
+				"read",
+				"bash",
+			]);
 		});
 
 		it("keeps required subagent protocol tools available when built-in tools are narrowed", () => {
 			withSetTabTitleEnv(undefined, () => {
-				assert.deepEqual(getSubagentToolAllowlistForTest("bash"), [
-					"bash",
-					"caller_ping",
-					"subagent_done",
-				]);
+				assert.deepEqual(getSubagentToolAllowlistForTest("bash"), ["bash", "caller_ping", "subagent_done"]);
 			});
 		});
 
@@ -149,38 +145,27 @@ describe("subagent-done.ts", () => {
 					"--tools",
 					"caller_ping,subagent_done",
 				]);
-				assert.deepEqual(
-					getSubagentToolLaunchArgsForTest("set_tab_title", [
-						"caller_ping",
-						"subagent_done",
-					]),
-					[
-						"--no-tools",
-						"--exclude-tools",
-						"caller_ping,subagent_done",
-					],
-				);
+				assert.deepEqual(getSubagentToolLaunchArgsForTest("set_tab_title", ["caller_ping", "subagent_done"]), [
+					"--no-tools",
+					"--exclude-tools",
+					"caller_ping,subagent_done",
+				]);
 			});
 		});
 
 		it("removes denied subagent protocol tools from the launch allowlist", () => {
 			withSetTabTitleEnv(undefined, () => {
-				assert.deepEqual(
-					getSubagentToolAllowlistForTest("bash,read", ["caller_ping"]),
-					["bash", "read", "subagent_done"],
-				);
+				assert.deepEqual(getSubagentToolAllowlistForTest("bash,read", ["caller_ping"]), [
+					"bash",
+					"read",
+					"subagent_done",
+				]);
 			});
 		});
 
 		it("keeps non-requested built-ins out of narrowed child launch allowlists", () => {
-			assert.deepEqual(
-				getSubagentToolAllowlistForTest("bash").includes("edit"),
-				false,
-			);
-			assert.deepEqual(
-				getSubagentToolAllowlistForTest("bash").includes("write"),
-				false,
-			);
+			assert.deepEqual(getSubagentToolAllowlistForTest("bash").includes("edit"), false);
+			assert.deepEqual(getSubagentToolAllowlistForTest("bash").includes("write"), false);
 			assert.deepEqual(getSubagentToolAllowlistForTest(undefined), []);
 		});
 
@@ -188,17 +173,12 @@ describe("subagent-done.ts", () => {
 			assert.deepEqual(getSubagentToolLaunchArgsForTest(undefined), []);
 			assert.deepEqual(getSubagentToolLaunchArgsForTest("all"), []);
 			assert.deepEqual(getSubagentToolLaunchArgsForTest(" all "), []);
-			assert.deepEqual(getSubagentToolLaunchArgsForTest("all", ["bash"]), [
-				"--exclude-tools",
-				"bash",
-			]);
+			assert.deepEqual(getSubagentToolLaunchArgsForTest("all", ["bash"]), ["--exclude-tools", "bash"]);
 		});
 
 		it("maps tools none to no built-in tools while preserving extension tools", () => {
 			assert.deepEqual(getSubagentToolAllowlistForTest("none"), []);
-			assert.deepEqual(getSubagentToolLaunchArgsForTest("none"), [
-				"--no-builtin-tools",
-			]);
+			assert.deepEqual(getSubagentToolLaunchArgsForTest("none"), ["--no-builtin-tools"]);
 			assert.deepEqual(getSubagentToolLaunchArgsForTest("none", ["read", "subagent"]), [
 				"--no-builtin-tools",
 				"--exclude-tools",
@@ -217,10 +197,7 @@ describe("subagent-done.ts", () => {
 
 		it("maps narrowed built-in tools to a tool allowlist with protocol tools", () => {
 			withSetTabTitleEnv(undefined, () => {
-				assert.deepEqual(getSubagentToolLaunchArgsForTest("bash", []), [
-					"--tools",
-					"bash,caller_ping,subagent_done",
-				]);
+				assert.deepEqual(getSubagentToolLaunchArgsForTest("bash", []), ["--tools", "bash,caller_ping,subagent_done"]);
 			});
 		});
 
@@ -274,11 +251,17 @@ describe("subagent-done.ts", () => {
 
 		it("preserves terminate and details when prepending a warning to a result", () => {
 			const result = withToolWarningForTest(
-				{ content: [{ type: "text", text: "Sub-agent started." }], details: { status: "started" }, terminate: true },
+				{
+					content: [{ type: "text", text: "Sub-agent started." }],
+					details: { status: "started" },
+					terminate: true,
+				},
 				"Warning: edti may be a typo of edit.",
 			);
 			assert.equal((result as { terminate?: true }).terminate, true);
-			assert.deepEqual((result as { details: unknown }).details, { status: "started" });
+			assert.deepEqual((result as { details: unknown }).details, {
+				status: "started",
+			});
 			const text = (result as { content: Array<{ type: string; text: string }> }).content
 				.filter((block) => block.type === "text")
 				.map((block) => block.text)
@@ -288,18 +271,18 @@ describe("subagent-done.ts", () => {
 
 			// No warning: result returned untouched, including terminate.
 			const untouched = withToolWarningForTest(
-				{ content: [{ type: "text", text: "ok" }], details: {}, terminate: true },
+				{
+					content: [{ type: "text", text: "ok" }],
+					details: {},
+					terminate: true,
+				},
 				"",
 			);
 			assert.equal((untouched as { terminate?: true }).terminate, true);
 		});
 
 		it("preserves CLI-disabled built-ins while applying denied tool filters", () => {
-			const allTools = [
-				{ name: "read" },
-				{ name: "bash" },
-				{ name: "caller_ping" },
-			];
+			const allTools = [{ name: "read" }, { name: "bash" }, { name: "caller_ping" }];
 			let activeTools = ["caller_ping"];
 			const pi = {
 				getAllTools: () => allTools,
@@ -319,11 +302,7 @@ describe("subagent-done.ts", () => {
 		});
 
 		it("keeps denied tools out of the active set after registration and later setActiveTools calls", () => {
-			const allTools = [
-				{ name: "read" },
-				{ name: "bash" },
-				{ name: "ask_user_question" },
-			];
+			const allTools = [{ name: "read" }, { name: "bash" }, { name: "ask_user_question" }];
 			let activeTools = allTools.map((tool) => tool.name);
 			const changes: Array<{ active: string[]; denied: string[] }> = [];
 			const pi = {
@@ -340,13 +319,9 @@ describe("subagent-done.ts", () => {
 			const original = process.env.PI_DENY_TOOLS;
 			process.env.PI_DENY_TOOLS = "ask_user_question";
 			try {
-				const { applyDeniedTools } = installDeniedToolGuards(
-					pi,
-					false,
-					(active, denied) => {
-						changes.push({ active: [...active], denied: [...denied] });
-					},
-				);
+				const { applyDeniedTools } = installDeniedToolGuards(pi, false, (active, denied) => {
+					changes.push({ active: [...active], denied: [...denied] });
+				});
 
 				assert.deepEqual(applyDeniedTools(), ["read", "bash"]);
 				assert.deepEqual(activeTools, ["read", "bash"]);
@@ -447,7 +422,7 @@ describe("subagent-done.ts", () => {
 							handlers.set(event, handler);
 						},
 						registerShortcut() {},
-					registerCommand() {},
+						registerCommand() {},
 					} as any);
 
 					handlers.get("message_end")?.(
@@ -498,7 +473,7 @@ describe("subagent-done.ts", () => {
 					handlers.set(event, handler);
 				},
 				registerShortcut() {},
-					registerCommand() {},
+				registerCommand() {},
 			} as any);
 
 			const pingTool = tools.get("caller_ping");
@@ -517,29 +492,20 @@ describe("subagent-done.ts", () => {
 					message: { role: "assistant", usage: { output: 11 } },
 				});
 				let shutdowns = 0;
-				await pingTool.execute(
-					"tool-1",
-					{ message: "Need help" },
-					undefined,
-					undefined,
-					{
-						shutdown() {
-							shutdowns += 1;
-						},
+				await pingTool.execute("tool-1", { message: "Need help" }, undefined, undefined, {
+					shutdown() {
+						shutdowns += 1;
 					},
-				);
+				});
 				await sleep(0);
 
 				assert.equal(shutdowns, 1);
-				assert.deepEqual(
-					JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
-					{
-						type: "ping",
-						name: "Ping Child",
-						message: "Need help",
-						outputTokens: 11,
-					},
-				);
+				assert.deepEqual(JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")), {
+					type: "ping",
+					name: "Ping Child",
+					message: "Need help",
+					outputTokens: 11,
+				});
 			} finally {
 				if (originalSession == null) delete process.env.PI_SUBAGENT_SESSION;
 				else process.env.PI_SUBAGENT_SESSION = originalSession;
@@ -582,7 +548,11 @@ describe("subagent-done.ts", () => {
 				handlers.get("agent_start")?.({});
 				handlers.get("agent_end")?.(
 					{ messages: [{ role: "assistant", stopReason: "stop" }] },
-					{ shutdown() { shutdowns += 1; } },
+					{
+						shutdown() {
+							shutdowns += 1;
+						},
+					},
 				);
 				await sleep(0);
 
@@ -630,7 +600,9 @@ describe("subagent-done.ts", () => {
 				handlers.get("agent_end")?.(
 					{ messages: [{ role: "assistant", stopReason: "aborted" }] },
 					{
-						shutdown() { shutdowns += 1; },
+						shutdown() {
+							shutdowns += 1;
+						},
 						ui: { setStatus() {}, notify() {} },
 					},
 				);
@@ -645,7 +617,11 @@ describe("subagent-done.ts", () => {
 				// 5. Agent answers the question — should NOT auto-exit
 				handlers.get("agent_end")?.(
 					{ messages: [{ role: "assistant", stopReason: "stop" }] },
-					{ shutdown() { shutdowns += 1; } },
+					{
+						shutdown() {
+							shutdowns += 1;
+						},
+					},
 				);
 				await sleep(0);
 
@@ -694,7 +670,12 @@ describe("subagent-done.ts", () => {
 				// 2. User presses Escape — agent turn aborted
 				handlers.get("agent_end")?.(
 					{ messages: [{ role: "assistant", stopReason: "aborted" }] },
-					{ shutdown() { shutdowns += 1; }, ui: { setStatus() {}, notify() {} }, },
+					{
+						shutdown() {
+							shutdowns += 1;
+						},
+						ui: { setStatus() {}, notify() {} },
+					},
 				);
 				assert.equal(shutdowns, 0, "aborted turn should not shutdown");
 
@@ -706,7 +687,9 @@ describe("subagent-done.ts", () => {
 				handlers.get("agent_end")?.(
 					{ messages: [{ role: "assistant", stopReason: "stop" }] },
 					{
-						shutdown() { shutdowns += 1; },
+						shutdown() {
+							shutdowns += 1;
+						},
 						ui: { setStatus() {}, notify() {} },
 					},
 				);
@@ -757,12 +740,11 @@ describe("subagent-done.ts", () => {
 					},
 				} as any);
 
-				let shutdowns = 0;
 				handlers.get("agent_start")?.({});
 				handlers.get("agent_end")?.(
 					{ messages: [{ role: "assistant", stopReason: "aborted" }] },
 					{
-						shutdown() { shutdowns += 1; },
+						shutdown() {},
 						ui: {
 							setStatus(key: string, msg?: string) {
 								statusKey = key;
@@ -829,17 +811,20 @@ describe("subagent-done.ts", () => {
 				assert.equal(autoExitCmd.description, "Re-enable auto-exit after operator interaction");
 
 				// Run the command handler
-				await autoExitCmd.handler({}, {
-					ui: {
-						setStatus(key: string, msg?: string) {
-							statusKey = key;
-							statusMessage = msg;
-						},
-						notify(msg: string) {
-							notifyMsg = msg;
+				await autoExitCmd.handler(
+					{},
+					{
+						ui: {
+							setStatus(key: string, msg?: string) {
+								statusKey = key;
+								statusMessage = msg;
+							},
+							notify(msg: string) {
+								notifyMsg = msg;
+							},
 						},
 					},
-				});
+				);
 
 				// Status should be cleared
 				assert.equal(statusKey, "pi-subagent-auto-exit");
@@ -852,7 +837,11 @@ describe("subagent-done.ts", () => {
 				// After /auto-exit, agent_end should auto-exit
 				handlers.get("agent_end")?.(
 					{ messages: [{ role: "assistant", stopReason: "stop" }] },
-					{ shutdown() { shutdowns += 1; } },
+					{
+						shutdown() {
+							shutdowns += 1;
+						},
+					},
 				);
 				await sleep(0);
 
@@ -884,7 +873,7 @@ describe("subagent-done.ts", () => {
 					handlers.set(event, handler);
 				},
 				registerShortcut() {},
-					registerCommand() {},
+				registerCommand() {},
 			} as any);
 
 			const doneTool = tools.get("subagent_done");
@@ -915,15 +904,12 @@ describe("subagent-done.ts", () => {
 				await sleep(0);
 
 				assert.equal(shutdowns, 1);
-				assert.deepEqual(
-					JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
-					{
-						type: "done",
-						outputTokens: 17,
-						contextTokens: 145_000,
-						contextWindow: 200_000,
-					},
-				);
+				assert.deepEqual(JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")), {
+					type: "done",
+					outputTokens: 17,
+					contextTokens: 145_000,
+					contextWindow: 200_000,
+				});
 			} finally {
 				if (originalSession == null) delete process.env.PI_SUBAGENT_SESSION;
 				else process.env.PI_SUBAGENT_SESSION = originalSession;
@@ -935,8 +921,7 @@ describe("subagent-done.ts", () => {
 	describe("APPEND_SYSTEM inheritance", () => {
 		it("appends pi-subagents child prompt text after Pi performs native discovery", () => {
 			const original = process.env.PI_SUBAGENT_APPEND_SYSTEM_PROMPT;
-			process.env.PI_SUBAGENT_APPEND_SYSTEM_PROMPT =
-				"Reviewer identity.\n\nChild boundary instructions.";
+			process.env.PI_SUBAGENT_APPEND_SYSTEM_PROMPT = "Reviewer identity.\n\nChild boundary instructions.";
 			try {
 				const handlers = new Map<string, any>();
 				subagentDoneExtension({
@@ -987,7 +972,7 @@ describe("subagent-done.ts", () => {
 				},
 				on() {},
 				registerShortcut() {},
-					registerCommand() {},
+				registerCommand() {},
 			} as any);
 			return tools;
 		}
@@ -1001,7 +986,7 @@ describe("subagent-done.ts", () => {
 				const tools = loadChildExtension();
 				assert.ok(tools.has("set_tab_title"), "child extension should register set_tab_title");
 				const tool = tools.get("set_tab_title");
-			assert.equal(tool.label, "Set Tab Title");
+				assert.equal(tool.label, "Set Tab Title");
 			} finally {
 				if (original == null) delete process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE;
 				else process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE = original;

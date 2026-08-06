@@ -1,20 +1,13 @@
-import {
-	appendFileSync,
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { randomUUID } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { randomUUID } from "node:crypto";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentDefaults } from "../agents/definitions.ts";
-import type { ParentClosePolicy, SubagentParamsInput } from "../types.ts";
 import type { HerdrPlacementPolicy } from "../mux/herdr-surfaces.ts";
 import type { ZellijPlacementPolicy } from "../mux/zellij-placement.ts";
+import type { ParentClosePolicy, SubagentParamsInput } from "../types.ts";
 import { getEntries } from "./session.ts";
-
 
 export type SubagentSessionMode = "standalone" | "lineage-only" | "fork";
 
@@ -78,8 +71,7 @@ export interface PersistedSubagentLaunchMetadata {
 	env?: string;
 }
 
-const SUBAGENT_LAUNCH_METADATA_CUSTOM_TYPE =
-	"pi-subagents_launch_metadata";
+const SUBAGENT_LAUNCH_METADATA_CUSTOM_TYPE = "pi-subagents_launch_metadata";
 
 /**
  * Generate a unique session file path for a subagent.
@@ -183,8 +175,7 @@ function getLastSessionEntryId(sessionFile: string): string | null {
 	for (let i = lines.length - 1; i >= 0; i--) {
 		try {
 			const entry = JSON.parse(lines[i]);
-			if (entry.type !== "session" && typeof entry.id === "string")
-				return entry.id;
+			if (entry.type !== "session" && typeof entry.id === "string") return entry.id;
 		} catch {
 			// Ignore malformed historical lines here; session loading will report them later.
 		}
@@ -212,16 +203,10 @@ export function writeChildContextBoundaryEntry(
 	writeFileSync(childSessionFile, `${line}\n`, { flag: "a" });
 }
 
-export function writeSubagentExtensionEntry(
-	path: string,
-	extensions: string[] | undefined,
-): void {
+export function writeSubagentExtensionEntry(path: string, extensions: string[] | undefined): void {
 	if (extensions === undefined) return;
 	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(
-		`${path}.ext`,
-		`${JSON.stringify({ extensions, timestamp: new Date().toISOString() })}\n`,
-	);
+	writeFileSync(`${path}.ext`, `${JSON.stringify({ extensions, timestamp: new Date().toISOString() })}\n`);
 }
 
 export function writeSubagentModelStateEntries(
@@ -262,10 +247,7 @@ export function writeSubagentModelStateEntries(
 	);
 }
 
-export function writeSubagentLaunchMetadataEntry(
-	path: string,
-	metadata: PersistedSubagentLaunchMetadata,
-): void {
+export function writeSubagentLaunchMetadataEntry(path: string, metadata: PersistedSubagentLaunchMetadata): void {
 	if (!existsSync(path)) return;
 	const parentId = getLastSessionEntryId(path);
 	const line = JSON.stringify({
@@ -279,10 +261,7 @@ export function writeSubagentLaunchMetadataEntry(
 	appendFileSync(path, `${line}\n`, "utf8");
 }
 
-async function waitForSessionFile(
-	path: string,
-	timeoutMs = 5000,
-): Promise<boolean> {
+async function waitForSessionFile(path: string, timeoutMs = 5000): Promise<boolean> {
 	const startedAt = Date.now();
 	while (Date.now() - startedAt < timeoutMs) {
 		if (existsSync(path)) return true;
@@ -321,33 +300,21 @@ export function getSubagentActivityStartIndex(
 ): number {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const entry = entries[i];
-		if (
-			entry?.type === "custom" &&
-			entry.customType === SUBAGENT_LAUNCH_METADATA_CUSTOM_TYPE
-		) {
+		if (entry?.type === "custom" && entry.customType === SUBAGENT_LAUNCH_METADATA_CUSTOM_TYPE) {
 			return i + 1;
 		}
 	}
 	return 0;
 }
 
-export function readSubagentLaunchMetadata(
-	path: string,
-): PersistedSubagentLaunchMetadata | undefined {
+export function readSubagentLaunchMetadata(path: string): PersistedSubagentLaunchMetadata | undefined {
 	try {
 		const entries = getEntries(path) as Array<Record<string, unknown>>;
 		for (let i = entries.length - 1; i >= 0; i--) {
 			const entry = entries[i];
-			if (
-				entry?.type !== "custom" ||
-				entry.customType !== SUBAGENT_LAUNCH_METADATA_CUSTOM_TYPE
-			)
-				continue;
-			const data = entry.data as
-				| Partial<PersistedSubagentLaunchMetadata>
-				| undefined;
-			if (!data || data.version !== 1 || !isResumeMode(data.mode))
-				return undefined;
+			if (entry?.type !== "custom" || entry.customType !== SUBAGENT_LAUNCH_METADATA_CUSTOM_TYPE) continue;
+			const data = entry.data as Partial<PersistedSubagentLaunchMetadata> | undefined;
+			if (!data || data.version !== 1 || !isResumeMode(data.mode)) return undefined;
 			return data as PersistedSubagentLaunchMetadata;
 		}
 	} catch {
@@ -386,34 +353,22 @@ export type ResolveSubagentNoSession = (agentDefs: AgentDefaults | null) => bool
 export function resolveTaskSessionMode(
 	agentDefs: AgentDefaults | null,
 	resolveSubagentNoSession: ResolveSubagentNoSession,
-	getNoSessionSeedMode: (
-		sessionMode: SubagentSessionMode,
-	) => Exclude<SubagentSessionMode, "standalone"> | null,
+	getNoSessionSeedMode: (sessionMode: SubagentSessionMode) => Exclude<SubagentSessionMode, "standalone"> | null,
 ): SubagentSessionMode {
 	const sessionMode = resolveEffectiveSessionMode({}, agentDefs);
 	if (!resolveSubagentNoSession(agentDefs)) return sessionMode;
 	return getNoSessionSeedMode(sessionMode) ?? sessionMode;
 }
 
-export function buildPiPromptArgs(
-	skills: string[],
-	taskArg: string,
-	directTask: boolean,
-): string[] {
+export function buildPiPromptArgs(skills: string[], taskArg: string, directTask: boolean): string[] {
 	const skillPrompts = skills.map((skill) => `/skill:${skill}`);
 	const isArtifactTask = taskArg.startsWith("@");
 	const needsSeparator = isArtifactTask && (skillPrompts.length > 0 || directTask);
 	return [...(needsSeparator ? [""] : []), ...skillPrompts, taskArg];
 }
 
-export function buildIdentityBlock(
-	agentDefs: AgentDefaults | null,
-	systemPrompt?: string,
-): string {
+export function buildIdentityBlock(agentDefs: AgentDefaults | null, systemPrompt?: string): string {
 	return [agentDefs?.body, systemPrompt]
-		.filter(
-			(value): value is string =>
-				typeof value === "string" && value.trim() !== "",
-		)
+		.filter((value): value is string => typeof value === "string" && value.trim() !== "")
 		.join("\n\n");
 }

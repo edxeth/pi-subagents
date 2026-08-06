@@ -1,5 +1,4 @@
-export const PI_SUBAGENT_APPEND_SYSTEM_PROMPT =
-	"PI_SUBAGENT_APPEND_SYSTEM_PROMPT";
+export const PI_SUBAGENT_APPEND_SYSTEM_PROMPT = "PI_SUBAGENT_APPEND_SYSTEM_PROMPT";
 
 export interface AppendSystemInheritanceInput {
 	inheritAppendSystem: boolean;
@@ -13,9 +12,7 @@ export interface AppendSystemInheritancePlan {
 	env: Record<string, string>;
 }
 
-export function buildAppendSystemInheritancePlan(
-	input: AppendSystemInheritanceInput,
-): AppendSystemInheritancePlan {
+export function buildAppendSystemInheritancePlan(input: AppendSystemInheritanceInput): AppendSystemInheritancePlan {
 	const generatedAppend = [
 		input.systemPromptMode === "append" ? input.systemPrompt : undefined,
 		input.boundarySystemPrompt,
@@ -23,9 +20,7 @@ export function buildAppendSystemInheritancePlan(
 
 	if (input.inheritAppendSystem) {
 		const promptArgs =
-			input.systemPromptMode === "replace" && input.systemPrompt
-				? ["--system-prompt", input.systemPrompt]
-				: [];
+			input.systemPromptMode === "replace" && input.systemPrompt ? ["--system-prompt", input.systemPrompt] : [];
 		return {
 			promptArgs,
 			env: {
@@ -37,9 +32,7 @@ export function buildAppendSystemInheritancePlan(
 	const promptArgs: string[] = [];
 	if (input.systemPromptMode && input.systemPrompt) {
 		promptArgs.push(
-			input.systemPromptMode === "replace"
-				? "--system-prompt"
-				: "--append-system-prompt",
+			input.systemPromptMode === "replace" ? "--system-prompt" : "--append-system-prompt",
 			input.systemPrompt,
 		);
 	}

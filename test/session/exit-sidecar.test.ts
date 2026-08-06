@@ -1,13 +1,13 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { assert, createTestDir } from "../support/index.ts";
+import { consumeSubagentExitSignal } from "../../src/mux/poll.ts";
 import {
 	clearSubagentExitSidecar,
 	getSubagentExitSidecarPath,
 	writeSubagentExitSidecar,
 } from "../../src/session/exit-sidecar.ts";
-import { consumeSubagentExitSignal } from "../../src/mux/poll.ts";
+import { assert, createTestDir } from "../support/index.ts";
 
 describe("subagent exit sidecars", () => {
 	it("stores exit sidecars next to the child session and consumes them once", () => {

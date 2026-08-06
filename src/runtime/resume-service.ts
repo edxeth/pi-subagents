@@ -2,15 +2,13 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getArtifactStorageRoot } from "../artifact-storage.ts";
-import { getPiInvocation, getPiShellParts, getSubagentChildProcessEnv } from "../launch/child-command.ts";
-import { writeResumeTaskArtifact } from "../launch/prompt-artifacts.ts";
-import { expandSubagentTask } from "../launch/task-expansion.ts";
-import { buildInteractiveSentinelShellCommands } from "../launch/interactive-sentinel.ts";
-import { parseEnvString } from "../launch/env.ts";
-import { buildAppendSystemInheritancePlan } from "../launch/append-system.ts";
-import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "../launch/context-boundary.ts";
 import { assertModelAllowed, buildModelRef, splitModelRef } from "../agents/model-refs.ts";
+import { getArtifactStorageRoot } from "../artifact-storage.ts";
+import { buildAppendSystemInheritancePlan } from "../launch/append-system.ts";
+import { getPiInvocation, getPiShellParts, getSubagentChildProcessEnv } from "../launch/child-command.ts";
+import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "../launch/context-boundary.ts";
+import { parseEnvString } from "../launch/env.ts";
+import { buildInteractiveSentinelShellCommands } from "../launch/interactive-sentinel.ts";
 import {
 	getExtensionLaunchArgs,
 	getPersistedPromptLaunchArgs,
@@ -18,12 +16,16 @@ import {
 	normalizeModelRef,
 	resolveAvailableModelRef,
 } from "../launch/prep.ts";
+import { writeResumeTaskArtifact } from "../launch/prompt-artifacts.ts";
 import {
 	buildResumePiArgs,
 	buildShellChangeDirectoryPrefix,
 	getResumeCwd,
 	resolveResumeLaunchMetadata,
 } from "../launch/resume.ts";
+import { expandSubagentTask } from "../launch/task-expansion.ts";
+import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
+import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
 import {
 	createSurface,
 	getMuxBackend,
@@ -33,40 +35,26 @@ import {
 	sendShellCommand,
 	shellEscape,
 } from "../mux.ts";
-import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
-import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import { getEntryCount } from "../session/session.ts";
 import {
 	getDoneSentinelFile,
 	isResumeMode,
+	type PersistedSubagentLaunchMetadata,
 	readSubagentExtensionEntry,
 	readSubagentLaunchMetadata,
 	writeSubagentLaunchMetadataEntry,
 	writeSubagentModelStateEntries,
-	type PersistedSubagentLaunchMetadata,
 } from "../session/session-files.ts";
+import { PI_SUBAGENT_CONTEXT_WARN_STEP, PI_SUBAGENT_CONTEXT_WARN_THRESHOLD } from "../tools/context-reminders.ts";
 import type { RunningSubagent, SubagentResult } from "../types.ts";
-import {
-	PI_SUBAGENT_CONTEXT_WARN_STEP,
-	PI_SUBAGENT_CONTEXT_WARN_THRESHOLD,
-} from "../tools/context-reminders.ts";
 
 export interface ResumeServiceRuntime {
 	getShellReadyDelayMs(): number;
 	isMuxAvailable(): boolean;
-	watchBackgroundSubagent(
-		running: RunningSubagent,
-		signal: AbortSignal,
-	): Promise<SubagentResult>;
-	watchSubagent(
-		running: RunningSubagent,
-		signal: AbortSignal,
-	): Promise<SubagentResult>;
-	getWatcherSignal(
-		running: RunningSubagent,
-		controller: AbortController,
-	): AbortSignal;
+	watchBackgroundSubagent(running: RunningSubagent, signal: AbortSignal): Promise<SubagentResult>;
+	watchSubagent(running: RunningSubagent, signal: AbortSignal): Promise<SubagentResult>;
+	getWatcherSignal(running: RunningSubagent, controller: AbortController): AbortSignal;
 	startWidgetRefresh(): void;
 	getContextWindow(modelRef: string | undefined): number | undefined;
 	runningSubagents: Map<string, RunningSubagent>;
@@ -104,8 +92,7 @@ export function resolveResumeHerdrPlacementPolicy(
 	launchMetadata: PersistedSubagentLaunchMetadata | undefined,
 	parentPolicy: string | undefined,
 ): ReturnType<typeof resolveHerdrPlacementPolicy> | undefined {
-	const agentPolicy = parseEnvString(launchMetadata?.env)
-		.PI_SUBAGENT_HERDR_PLACEMENT;
+	const agentPolicy = parseEnvString(launchMetadata?.env).PI_SUBAGENT_HERDR_PLACEMENT;
 	if (agentPolicy !== undefined) return resolveHerdrPlacementPolicy(agentPolicy);
 	if (parentPolicy !== undefined) return resolveHerdrPlacementPolicy(parentPolicy);
 	return launchMetadata?.herdrPlacementPolicy;
@@ -115,8 +102,7 @@ export function resolveResumeZellijPlacementPolicy(
 	launchMetadata: PersistedSubagentLaunchMetadata | undefined,
 	parentPolicy: string | undefined,
 ): ReturnType<typeof resolveZellijPlacementPolicy> | undefined {
-	const agentPolicy = parseEnvString(launchMetadata?.env)
-		.PI_SUBAGENT_ZELLIJ_PLACEMENT;
+	const agentPolicy = parseEnvString(launchMetadata?.env).PI_SUBAGENT_ZELLIJ_PLACEMENT;
 	if (agentPolicy !== undefined) return resolveZellijPlacementPolicy(agentPolicy);
 	if (parentPolicy !== undefined) return resolveZellijPlacementPolicy(parentPolicy);
 	return launchMetadata?.zellijPlacementPolicy;
@@ -149,10 +135,7 @@ export function resolveResumeLaunchMetadataForInvocation(
 		modelRegistry,
 		launchMetadata.modelRef,
 	);
-	const { effectiveModel, effectiveThinking, effectiveModelRef } = normalizeModelRef(
-		resolved.model,
-		resolved.thinking,
-	);
+	const { effectiveModel, effectiveThinking, effectiveModelRef } = normalizeModelRef(resolved.model, resolved.thinking);
 	const implicitDefaultRef = buildModelRef(launchMetadata.definitionModel, launchMetadata.definitionThinking);
 	const implicitAllowed = implicitDefaultRef
 		? [implicitDefaultRef]
@@ -205,18 +188,13 @@ export async function resumeSubagentSession(
 	const displayName = input.name ?? name;
 
 	if (metadata.mode === "interactive" && !runtime.isMuxAvailable()) {
-		throw new Error(
-			`Subagents require a supported terminal multiplexer. ${muxSetupHint()}`,
-		);
+		throw new Error(`Subagents require a supported terminal multiplexer. ${muxSetupHint()}`);
 	}
 
 	// Guard: reject duplicate resume of the same session file
 	const normalizedFile = resolve(sessionFile);
 	for (const existing of runtime.runningSubagents.values()) {
-		if (
-			existing.sessionFile &&
-			resolve(existing.sessionFile) === normalizedFile
-		) {
+		if (existing.sessionFile && resolve(existing.sessionFile) === normalizedFile) {
 			throw new Error(
 				`Session "${existing.name}" (${existing.agent ?? "subagent"}) is already running with id ${existing.id}. ` +
 					"Use subagent_kill first or wait for it to complete.",
@@ -226,18 +204,12 @@ export async function resumeSubagentSession(
 
 	const entryCountBefore = getEntryCount(sessionFile);
 	clearSubagentExitSidecar(sessionFile);
-	const subagentDonePath = join(
-		dirname(fileURLToPath(import.meta.url)),
-		"..",
-		"tools",
-		"subagent-done.ts",
-	);
-	const savedExtensions = invocationMetadata
-		? invocationMetadata.extensions
-		: readSubagentExtensionEntry(sessionFile);
-	const extensionArgs = invocationMetadata !== undefined || savedExtensions !== undefined
-		? getExtensionLaunchArgs(savedExtensions, subagentDonePath)
-		: ["--no-extensions", "-e", subagentDonePath];
+	const subagentDonePath = join(dirname(fileURLToPath(import.meta.url)), "..", "tools", "subagent-done.ts");
+	const savedExtensions = invocationMetadata ? invocationMetadata.extensions : readSubagentExtensionEntry(sessionFile);
+	const extensionArgs =
+		invocationMetadata !== undefined || savedExtensions !== undefined
+			? getExtensionLaunchArgs(savedExtensions, subagentDonePath)
+			: ["--no-extensions", "-e", subagentDonePath];
 	const parityArgs = [
 		...getPersistedPromptLaunchArgs(invocationMetadata),
 		...(await getPersistedSessionParityArgs(invocationMetadata, metadata.mode)),
@@ -246,9 +218,9 @@ export async function resumeSubagentSession(
 	const resumeCwd = getResumeCwd(invocationMetadata);
 	const expandedTask = task
 		? await expandSubagentTask(task, {
-			enabled: invocationMetadata?.taskExpansion === "shell",
-			cwd: resumeCwd ?? process.cwd(),
-		})
+				enabled: invocationMetadata?.taskExpansion === "shell",
+				cwd: resumeCwd ?? process.cwd(),
+			})
 		: undefined;
 
 	const resumedAgent = invocationMetadata?.agent ?? metadata.agent ?? input.agent;
@@ -265,9 +237,7 @@ export async function resumeSubagentSession(
 			inheritAppendSystem: invocationMetadata?.inheritAppendSystem === true,
 			systemPromptMode: invocationMetadata?.systemPromptMode,
 			systemPrompt: invocationMetadata?.systemPrompt,
-			boundarySystemPrompt: invocationMetadata?.boundarySystemPrompt
-				? CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT
-				: undefined,
+			boundarySystemPrompt: invocationMetadata?.boundarySystemPrompt ? CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT : undefined,
 		}).env,
 	);
 	if (invocationMetadata?.agentConfigDir) {
@@ -288,17 +258,14 @@ export async function resumeSubagentSession(
 	if (process.env.PI_SUBAGENT_ENABLE_SET_TAB_TITLE === "1") {
 		resumeEnvVars.PI_SUBAGENT_ENABLE_SET_TAB_TITLE = "1";
 	}
-	resumeEnvVars[PI_SUBAGENT_CONTEXT_WARN_THRESHOLD] =
-		invocationMetadata?.contextWarnThreshold ?? "";
-	resumeEnvVars[PI_SUBAGENT_CONTEXT_WARN_STEP] =
-		invocationMetadata?.contextWarnStep ?? "";
+	resumeEnvVars[PI_SUBAGENT_CONTEXT_WARN_THRESHOLD] = invocationMetadata?.contextWarnThreshold ?? "";
+	resumeEnvVars[PI_SUBAGENT_CONTEXT_WARN_STEP] = invocationMetadata?.contextWarnStep ?? "";
 	resumeEnvVars.PI_SUBAGENT_NAME = invocationMetadata?.name ?? name;
 	if (resumedAgent) resumeEnvVars.PI_SUBAGENT_AGENT = resumedAgent;
 	resumeEnvVars.PI_SUBAGENT_SESSION = sessionFile;
 
 	const resumedAsync = invocationMetadata?.async ?? metadata.async ?? true;
-	const resumedAutoExit =
-		invocationMetadata?.autoExit ?? metadata.autoExit ?? true;
+	const resumedAutoExit = invocationMetadata?.autoExit ?? metadata.autoExit ?? true;
 	if (resumedAutoExit) resumeEnvVars.PI_SUBAGENT_AUTO_EXIT = "1";
 	resumeEnvVars.PI_PACKAGE_DIR = "";
 	resumeEnvVars.PI_ARTIFACT_PROJECT_ROOT = getArtifactStorageRoot();
@@ -312,10 +279,7 @@ export async function resumeSubagentSession(
 		mode: metadata.mode,
 		executionState: "running",
 		deliveryState: "detached",
-		parentClosePolicy:
-			invocationMetadata?.parentClosePolicy ??
-			metadata.parentClosePolicy ??
-			"terminate",
+		parentClosePolicy: invocationMetadata?.parentClosePolicy ?? metadata.parentClosePolicy ?? "terminate",
 		async: resumedAsync,
 		blocking: resumedAsync === false,
 		autoExit: resumedAutoExit,
@@ -361,10 +325,7 @@ export async function resumeSubagentSession(
 		const herdrContext =
 			backend === "herdr"
 				? {
-						policy: resolveResumeHerdrPlacementPolicy(
-							invocationMetadata,
-							process.env.PI_SUBAGENT_HERDR_PLACEMENT,
-						),
+						policy: resolveResumeHerdrPlacementPolicy(invocationMetadata, process.env.PI_SUBAGENT_HERDR_PLACEMENT),
 					}
 				: undefined;
 		const parentPaneId = Number(process.env.ZELLIJ_PANE_ID);
@@ -380,8 +341,7 @@ export async function resumeSubagentSession(
 						policy: configuredZellijPolicy,
 					}
 				: undefined;
-		const zellijTarget =
-			backend === "zellij" ? await resolveZellijTarget() : undefined;
+		const zellijTarget = backend === "zellij" ? await resolveZellijTarget() : undefined;
 		const ordinarySurface = zellijTarget
 			? undefined
 			: await createSurface(surfaceName, {
@@ -394,12 +354,7 @@ export async function resumeSubagentSession(
 			parts.push(shellEscape(arg));
 		}
 		if (expandedTask !== undefined) {
-			const taskPath = writeResumeTaskArtifact(
-				name,
-				expandedTask,
-				sessionFile,
-				resumeCwd ?? process.cwd(),
-			);
+			const taskPath = writeResumeTaskArtifact(name, expandedTask, sessionFile, resumeCwd ?? process.cwd());
 			parts.push(shellEscape(`@${taskPath}`));
 		}
 		if (zellijTarget) resumeEnvVars.ZELLIJ_SESSION_NAME = zellijTarget.sessionName;
@@ -408,22 +363,13 @@ export async function resumeSubagentSession(
 			.map(([key, value]) => `${key}=${shellEscape(value)}`)
 			.join(" ")} `;
 		const sentinel = buildInteractiveSentinelShellCommands(doneSentinelFile);
-		const surfacePrefix = zellijTarget
-			? "PI_SUBAGENT_SURFACE=pane:$ZELLIJ_PANE_ID "
-			: "";
+		const surfacePrefix = zellijTarget ? "PI_SUBAGENT_SURFACE=pane:$ZELLIJ_PANE_ID " : "";
 		const command = `trap ${shellEscape(sentinel.exitTrap)} EXIT; ${buildShellChangeDirectoryPrefix(resumeCwd)}${resumeEnvPrefix}${surfacePrefix}${parts.join(" ")}; ${sentinel.direct}`;
 		const surface =
 			ordinarySurface ??
-			(await createZellijCommandSurface(
-				surfaceName,
-				zellijTarget!,
-				getZellijShellCommand(command),
-				zellijContext,
-			));
+			(await createZellijCommandSurface(surfaceName, zellijTarget!, getZellijShellCommand(command), zellijContext));
 		if (!zellijTarget) {
-			await new Promise<void>((resolve) =>
-				setTimeout(resolve, runtime.getShellReadyDelayMs()),
-			);
+			await new Promise<void>((resolve) => setTimeout(resolve, runtime.getShellReadyDelayMs()));
 			sendShellCommand(surface, command);
 		}
 		running.surface = surface;
@@ -444,21 +390,12 @@ export async function resumeSubagentSession(
 	running.abortController = watcherAbort;
 	running.completionPromise =
 		metadata.mode === "background"
-			? runtime.watchBackgroundSubagent(
-					running,
-					runtime.getWatcherSignal(running, watcherAbort),
-				)
-			: runtime.watchSubagent(
-					running,
-					runtime.getWatcherSignal(running, watcherAbort),
-				);
+			? runtime.watchBackgroundSubagent(running, runtime.getWatcherSignal(running, watcherAbort))
+			: runtime.watchSubagent(running, runtime.getWatcherSignal(running, watcherAbort));
 
 	return running;
 }
 
-function rememberTail(
-	current: string | undefined,
-	chunk: Buffer | string,
-): string {
+function rememberTail(current: string | undefined, chunk: Buffer | string): string {
 	return `${current ?? ""}${chunk.toString()}`.slice(-4000);
 }

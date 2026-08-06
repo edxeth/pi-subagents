@@ -1,19 +1,19 @@
+import { coordinateSubagentLaunch } from "../../src/launch/launch-coordinator.ts";
 import {
 	ASSISTANT_MSG,
-	MODEL_CHANGE,
-	SESSION_HEADER,
-	USER_MSG,
 	assert,
 	createTestDir,
 	describe,
 	getEntries,
 	it,
 	join,
+	MODEL_CHANGE,
 	mkdirSync,
+	SESSION_HEADER,
+	USER_MSG,
 	writeExecutable,
 	writeFileSync,
 } from "../support/index.ts";
-import { coordinateSubagentLaunch } from "../../src/launch/launch-coordinator.ts";
 
 describe("launch coordinator", () => {
 	it("prepares, seeds, persists, and returns common launch facts", async () => {
@@ -41,9 +41,7 @@ describe("launch coordinator", () => {
 		const parentSession = join(cwd, "parent.jsonl");
 		writeFileSync(
 			parentSession,
-			`${[SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG]
-				.map((entry) => JSON.stringify(entry))
-				.join("\n")}\n`,
+			`${[SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
 		);
 
 		const launch = await coordinateSubagentLaunch(
@@ -75,28 +73,33 @@ describe("launch coordinator", () => {
 		assert.equal(launch.launchMetadata.trustProject, true);
 		assert.equal(launch.envVars.PI_SUBAGENT_SESSION, launch.prepared.subagentSessionFile);
 		assert.equal(launch.envVars.PI_SUBAGENT_AUTO_EXIT, "1");
-		assert.deepEqual(launch.envVars.PI_DENY_TOOLS.split(",").sort(), [
-			"bash",
-			"subagent",
-			"subagent_resume",
-		]);
+		assert.deepEqual(launch.envVars.PI_DENY_TOOLS.split(",").sort(), ["bash", "subagent", "subagent_resume"]);
 
 		const entries = getEntries(launch.prepared.subagentSessionFile) as Array<Record<string, unknown>>;
 		assert.equal(entries[0].type, "session");
-		assert.equal(entries.some((entry) => entry.customType === "subagent_boundary"), true);
-		assert.equal(entries.some((entry) => entry.type === "model_change"), true);
-		assert.equal(entries.some((entry) => entry.type === "thinking_level_change"), true);
-		assert.equal(entries.some((entry) => entry.customType === "pi-subagents_launch_metadata"), true);
+		assert.equal(
+			entries.some((entry) => entry.customType === "subagent_boundary"),
+			true,
+		);
+		assert.equal(
+			entries.some((entry) => entry.type === "model_change"),
+			true,
+		);
+		assert.equal(
+			entries.some((entry) => entry.type === "thinking_level_change"),
+			true,
+		);
+		assert.equal(
+			entries.some((entry) => entry.customType === "pi-subagents_launch_metadata"),
+			true,
+		);
 		assert.equal(launch.launchEntryCount, entries.length);
 	});
 
 	it("persists the operator Zellij placement policy and immediate parent group", async () => {
 		const cwd = createTestDir();
 		mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
-		writeFileSync(
-			join(cwd, ".pi", "agents", "scout.md"),
-			"---\nname: scout\nmode: interactive\n---\nScout.",
-		);
+		writeFileSync(join(cwd, ".pi", "agents", "scout.md"), "---\nname: scout\nmode: interactive\n---\nScout.");
 		const parentSession = join(cwd, "parent-zellij.jsonl");
 		writeFileSync(parentSession, `${JSON.stringify(SESSION_HEADER)}\n`);
 		process.env.ZELLIJ_PANE_ID = "7";
@@ -259,14 +262,9 @@ describe("launch coordinator", () => {
 		mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
 		writeFileSync(
 			join(cwd, ".pi", "agents", "reviewer.md"),
-			[
-				"---",
-				"name: reviewer",
-				"mode: interactive",
-				"env: PI_SUBAGENT_HERDR_PLACEMENT=tab",
-				"---",
-				"Review.",
-			].join("\n"),
+			["---", "name: reviewer", "mode: interactive", "env: PI_SUBAGENT_HERDR_PLACEMENT=tab", "---", "Review."].join(
+				"\n",
+			),
 		);
 		const binDir = join(cwd, "bin");
 		mkdirSync(binDir, { recursive: true });
@@ -327,14 +325,9 @@ exit 1
 		writeExecutable(binDir, "tmux", "#!/bin/sh\nexit 0\n");
 		writeFileSync(
 			join(cwd, ".pi", "agents", "reviewer.md"),
-			[
-				"---",
-				"name: reviewer",
-				"mode: interactive",
-				"env: PI_SUBAGENT_HERDR_PLACEMENT=bogus",
-				"---",
-				"Review.",
-			].join("\n"),
+			["---", "name: reviewer", "mode: interactive", "env: PI_SUBAGENT_HERDR_PLACEMENT=bogus", "---", "Review."].join(
+				"\n",
+			),
 		);
 		const parentSession = join(cwd, "parent-forced-tmux.jsonl");
 		writeFileSync(parentSession, `${JSON.stringify(SESSION_HEADER)}\n`);
@@ -416,8 +409,9 @@ exit 1
 		assert.equal(launch.envVars.PI_SUBAGENT_APPEND_SYSTEM_PROMPT, "");
 		assert.equal(launch.envVars.PI_SUBAGENT_SESSION, launch.prepared.subagentSessionFile);
 
-		const metadataEntries = (getEntries(launch.prepared.subagentSessionFile) as Array<Record<string, unknown>>)
-			.filter((entry) => entry.customType === "pi-subagents_launch_metadata");
+		const metadataEntries = (getEntries(launch.prepared.subagentSessionFile) as Array<Record<string, unknown>>).filter(
+			(entry) => entry.customType === "pi-subagents_launch_metadata",
+		);
 		assert.equal(metadataEntries.length, 1);
 	});
 
@@ -458,13 +452,7 @@ exit 1
 
 		assert.equal(launch.systemPrompt, undefined);
 		assert.equal(launch.launchMetadata.inheritAppendSystem, true);
-		assert.equal(
-			launch.envVars.PI_SUBAGENT_APPEND_SYSTEM_PROMPT,
-			"You are the reviewer identity.",
-		);
-		assert.equal(
-			launch.launchMetadata.systemPrompt,
-			"You are the reviewer identity.",
-		);
+		assert.equal(launch.envVars.PI_SUBAGENT_APPEND_SYSTEM_PROMPT, "You are the reviewer identity.");
+		assert.equal(launch.launchMetadata.systemPrompt, "You are the reviewer identity.");
 	});
 });

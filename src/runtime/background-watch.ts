@@ -1,8 +1,8 @@
 import { existsSync, statSync } from "node:fs";
-import { consumeSubagentExitSignal } from "../mux.ts";
-import type { RunningSubagent, SessionEntryLike, SubagentResult, SubagentSummarySource } from "../types.ts";
-import { findLastSubagentOutputWithSource, getEntries, getEntryCount, getNewEntries } from "../session/session.ts";
 import { getTerminalAssistantSummary, shouldReapStableTerminalSummary } from "../agents/titles.ts";
+import { consumeSubagentExitSignal } from "../mux.ts";
+import { findLastSubagentOutputWithSource, getEntries, getEntryCount, getNewEntries } from "../session/session.ts";
+import type { RunningSubagent, SessionEntryLike, SubagentResult, SubagentSummarySource } from "../types.ts";
 import { resolveFinalContextUsage } from "./final-context-usage.ts";
 
 export interface BackgroundWatchRuntime {
@@ -10,10 +10,7 @@ export interface BackgroundWatchRuntime {
 	terminateBackgroundChildProcess(running: RunningSubagent, signal: NodeJS.Signals): void;
 }
 
-function terminateChildProcessGroup(
-	running: RunningSubagent,
-	signal: NodeJS.Signals,
-): void {
+function terminateChildProcessGroup(running: RunningSubagent, signal: NodeJS.Signals): void {
 	const child = running.childProcess!;
 	if (!child.pid) return;
 	try {
@@ -64,9 +61,7 @@ export function watchBackgroundSubagent(
 				if (running.noSession) return;
 				if (!shouldReapStableTerminalSummary(running)) return;
 				const summary = getTerminalAssistantSummary(
-					(getEntries(running.sessionFile) as SessionEntryLike[]).slice(
-						running.launchEntryCount ?? 0,
-					),
+					(getEntries(running.sessionFile) as SessionEntryLike[]).slice(running.launchEntryCount ?? 0),
 				);
 				if (!summary) {
 					terminalSummary = null;
@@ -93,20 +88,14 @@ export function watchBackgroundSubagent(
 			const elapsed = Math.floor((Date.now() - running.startTime) / 1000);
 			const exitSignal = consumeSubagentExitSignal(running.sessionFile);
 			const exitCode = exitSignal?.exitCode ?? code ?? 1;
-			const errorMessage =
-				exitSignal?.reason === "error"
-					? exitSignal.errorMessage
-					: undefined;
+			const errorMessage = exitSignal?.reason === "error" ? exitSignal.errorMessage : undefined;
 			const finalContextUsage = resolveFinalContextUsage(running, exitSignal);
 			const stderr = running.stderrTail?.trim();
 			const stdout = running.stdoutTail?.trim();
 			let summary = `Background agent exited with code ${exitCode}`;
 			let summarySource: SubagentSummarySource = "runtime";
 			if (!running.noSession && existsSync(running.sessionFile)) {
-				const allEntries = getNewEntries(
-					running.sessionFile,
-					running.launchEntryCount ?? 0,
-				);
+				const allEntries = getNewEntries(running.sessionFile, running.launchEntryCount ?? 0);
 				const output = findLastSubagentOutputWithSource(allEntries);
 				if (output) {
 					({ summary, summarySource } = output);

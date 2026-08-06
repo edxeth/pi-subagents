@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ParentClosePolicy } from "../types.ts";
+import { shellEscape } from "../mux.ts";
 import { getEntries } from "../session/session.ts";
 import {
 	isResumeMode,
-	readSubagentLaunchMetadata,
 	type PersistedSubagentLaunchMetadata,
+	readSubagentLaunchMetadata,
 } from "../session/session-files.ts";
-import { shellEscape } from "../mux.ts";
+import type { ParentClosePolicy } from "../types.ts";
 
 export type ResumeMode = "interactive" | "background";
 type ResumeModeSource = "explicit" | "metadata" | "fallback";
@@ -32,15 +32,10 @@ function normalizeSessionFilePath(file: string): string {
 }
 
 function sameSessionFile(left: unknown, right: string): boolean {
-	return (
-		typeof left === "string" &&
-		normalizeSessionFilePath(left) === normalizeSessionFilePath(right)
-	);
+	return typeof left === "string" && normalizeSessionFilePath(left) === normalizeSessionFilePath(right);
 }
 
-export function getResumeCwd(
-	metadata: PersistedSubagentLaunchMetadata | undefined,
-): string | undefined {
+export function getResumeCwd(metadata: PersistedSubagentLaunchMetadata | undefined): string | undefined {
 	return metadata?.cwd || undefined;
 }
 
@@ -61,23 +56,17 @@ function findLaunchMetadataInValue(
 		if (seen.has(current)) continue;
 		seen.add(current);
 		const record = current as Record<string, unknown>;
-		if (
-			sameSessionFile(record.sessionFile, sessionFile) &&
-			isResumeMode(record.mode)
-		) {
+		if (sameSessionFile(record.sessionFile, sessionFile) && isResumeMode(record.mode)) {
 			return {
 				mode: record.mode,
 				agent: typeof record.agent === "string" ? record.agent : undefined,
 				name: typeof record.name === "string" ? record.name : undefined,
-				autoExit:
-					typeof record.autoExit === "boolean" ? record.autoExit : undefined,
+				autoExit: typeof record.autoExit === "boolean" ? record.autoExit : undefined,
 				parentClosePolicy:
-					record.parentClosePolicy === "terminate" ||
-					record.parentClosePolicy === "continue"
+					record.parentClosePolicy === "terminate" || record.parentClosePolicy === "continue"
 						? record.parentClosePolicy
 						: undefined,
-				blocking:
-					typeof record.blocking === "boolean" ? record.blocking : undefined,
+				blocking: typeof record.blocking === "boolean" ? record.blocking : undefined,
 				async: typeof record.async === "boolean" ? record.async : undefined,
 			};
 		}
@@ -88,23 +77,17 @@ function findLaunchMetadataInValue(
 	return null;
 }
 
-function getParentSessionFileFromChildSession(
-	sessionFile: string,
-): string | null {
+function getParentSessionFileFromChildSession(sessionFile: string): string | null {
 	try {
 		for (const entry of getEntries(sessionFile)) {
 			const parentSession = (entry as Record<string, unknown>).parentSession;
-			if (typeof parentSession === "string" && parentSession)
-				return parentSession;
+			if (typeof parentSession === "string" && parentSession) return parentSession;
 		}
 	} catch {}
 	return null;
 }
 
-export function resolveResumeLaunchMetadata(
-	sessionFile: string,
-	explicitMode?: ResumeMode,
-): ResumeLaunchMetadata {
+export function resolveResumeLaunchMetadata(sessionFile: string, explicitMode?: ResumeMode): ResumeLaunchMetadata {
 	const launchMetadata = readSubagentLaunchMetadata(sessionFile);
 	if (launchMetadata) {
 		return {
@@ -130,8 +113,7 @@ export function resolveResumeLaunchMetadata(
 		try {
 			for (const entry of getEntries(parentSession)) {
 				const parentMetadata = findLaunchMetadataInValue(entry, sessionFile);
-				if (parentMetadata)
-					return { ...parentMetadata, modeSource: "metadata" };
+				if (parentMetadata) return { ...parentMetadata, modeSource: "metadata" };
 			}
 		} catch {}
 	}
@@ -143,11 +125,6 @@ export function resolveResumeLaunchMetadata(
 	return { mode: "interactive", modeSource: "fallback" };
 }
 
-export function buildResumePiArgs(
-	sessionFile: string,
-	mode: ResumeMode = "background",
-): string[] {
-	return mode === "background"
-		? ["-p", "--session", sessionFile]
-		: ["--session", sessionFile];
+export function buildResumePiArgs(sessionFile: string, mode: ResumeMode = "background"): string[] {
+	return mode === "background" ? ["-p", "--session", sessionFile] : ["--session", sessionFile];
 }

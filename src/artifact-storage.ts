@@ -32,21 +32,13 @@ export function getArtifactProjectName(cwd: string): string {
 }
 
 export function getProjectArtifactsDir(cwd: string): string {
-	return join(
-		getArtifactStorageRoot(),
-		getArtifactProjectName(cwd),
-		"artifacts",
-	);
+	return join(getArtifactStorageRoot(), getArtifactProjectName(cwd), "artifacts");
 }
 
 export function getSessionArtifactDir(cwd: string, sessionId: string): string {
 	return join(getProjectArtifactsDir(cwd), sessionId);
 }
 
-export function resolveSessionArtifactPath(
-	cwd: string,
-	sessionId: string,
-	name: string,
-): string {
+export function resolveSessionArtifactPath(cwd: string, sessionId: string, name: string): string {
 	return resolve(getSessionArtifactDir(cwd, sessionId), name);
 }

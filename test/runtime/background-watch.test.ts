@@ -1,17 +1,9 @@
-import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import {
-	assert,
-	afterEach,
-	createSessionFile,
-	createTestDir,
-	rmSync,
-	describe,
-	it,
-} from "../support/index.ts";
+import { EventEmitter } from "node:events";
 import { watchBackgroundSubagent } from "../../src/runtime/background-watch.ts";
 import { writeSubagentExitSidecar } from "../../src/session/exit-sidecar.ts";
 import type { RunningSubagent } from "../../src/types.ts";
+import { afterEach, assert, createSessionFile, createTestDir, describe, it, rmSync } from "../support/index.ts";
 
 const dirs: string[] = [];
 

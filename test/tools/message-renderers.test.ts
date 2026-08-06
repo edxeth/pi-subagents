@@ -1,9 +1,9 @@
-import { assert, describe, it } from "../support/index.ts";
 import {
 	formatSubagentBatchLines,
 	formatSubagentCompletionLines,
 	formatTaskPreview,
 } from "../../src/tools/message-renderers.ts";
+import { assert, describe, it } from "../support/index.ts";
 
 const theme = {
 	fg(_tone: string, text: string) {
@@ -70,7 +70,18 @@ describe("subagent message renderers", () => {
 		);
 
 		assert.equal(lines[0], "✓ magician-anarcho-communism (magician) — completed (12s)");
-		assert.deepEqual(lines.slice(1, 11), ["result 1", "result 2", "result 3", "result 4", "result 5", "result 6", "result 7", "result 8", "result 9", "result 10"]);
+		assert.deepEqual(lines.slice(1, 11), [
+			"result 1",
+			"result 2",
+			"result 3",
+			"result 4",
+			"result 5",
+			"result 6",
+			"result 7",
+			"result 8",
+			"result 9",
+			"result 10",
+		]);
 		assert.match(lines[11], /\.\.\. \(2 more lines,.*to expand\)/);
 		assert.doesNotMatch(lines.join("\n"), /Task:|Response:|task 1/);
 	});
@@ -81,7 +92,7 @@ describe("subagent message renderers", () => {
 				content: [
 					{
 						type: "text",
-						text: "Sub-agent \"astronaut\" completed (exit code 0).\n\nignored fallback",
+						text: 'Sub-agent "astronaut" completed (exit code 0).\n\nignored fallback',
 					},
 				],
 				details: {
@@ -90,19 +101,7 @@ describe("subagent message renderers", () => {
 					status: "completed",
 					exitCode: 0,
 					elapsed: 7,
-					summary: [
-						"result",
-						"a",
-						"b",
-						"c",
-						"d",
-						"e",
-						"f",
-						"g",
-						"h",
-						"i",
-						"j",
-					].join("\n"),
+					summary: ["result", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].join("\n"),
 				},
 			},
 			{ expanded: false },

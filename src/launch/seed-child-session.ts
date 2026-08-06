@@ -1,8 +1,8 @@
-import { buildChildContextBoundary, isChildContextBoundaryDisabled } from "./context-boundary.ts";
-import type { SubagentLaunchContext, PreparedSubagentLaunch } from "./prep.ts";
-import type { SubagentParamsInput } from "../types.ts";
-import type { SubagentSessionMode } from "../session/session-files.ts";
 import { ChildSessionStorage } from "../session/child-session-storage.ts";
+import type { SubagentSessionMode } from "../session/session-files.ts";
+import type { SubagentParamsInput } from "../types.ts";
+import { buildChildContextBoundary, isChildContextBoundaryDisabled } from "./context-boundary.ts";
+import type { PreparedSubagentLaunch, SubagentLaunchContext } from "./prep.ts";
 
 export function getNoSessionSeedMode(
 	sessionMode: SubagentSessionMode,
@@ -19,9 +19,7 @@ function getChildSeedMode(
 	return sessionMode === "standalone" ? null : sessionMode;
 }
 
-function shouldWriteChildContextBoundary(
-	seedMode: Exclude<SubagentSessionMode, "standalone"> | null,
-): boolean {
+function shouldWriteChildContextBoundary(seedMode: Exclude<SubagentSessionMode, "standalone"> | null): boolean {
 	return seedMode === "fork" && !isChildContextBoundaryDisabled();
 }
 
@@ -46,24 +44,16 @@ export function seedPreparedSubagentSession(
 					`or start pi with a persistent session (--session or --session-dir).`,
 			);
 		}
-		storage.seed(
-			seedMode,
-			prepared.sessionFile,
-			prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
-			{
-				...(prepared.sessionTitle ? { sessionName: prepared.sessionTitle } : {}),
-				activeLeafId: ctx.sessionManager.getLeafId?.(),
-			},
-		);
+		storage.seed(seedMode, prepared.sessionFile, prepared.runtimePaths.effectiveCwd ?? ctx.cwd, {
+			...(prepared.sessionTitle ? { sessionName: prepared.sessionTitle } : {}),
+			activeLeafId: ctx.sessionManager.getLeafId?.(),
+		});
 		if (boundarySystemPrompt) {
 			const boundaryOptions = {
 				name: params.name,
 				spawningAllowed: prepared.agentDefs?.spawning === true,
 			};
-			storage.writeBoundary(
-				boundaryOptions,
-				buildChildContextBoundary(boundaryOptions),
-			);
+			storage.writeBoundary(boundaryOptions, buildChildContextBoundary(boundaryOptions));
 		}
 	}
 	storage.writeExtensionEntry(prepared.effectiveExtensions);

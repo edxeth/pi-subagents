@@ -1,14 +1,14 @@
 import {
-	assert,
 	afterEach,
+	assert,
 	describe,
-	it,
 	getCompletedSubagentResultForTest,
+	it,
 	resetSubagentStateForTest,
 	routeDetachedSubagentCompletionForTest,
 	setRunningSubagentForTest,
-	waitForSubagentForTest,
 	sleep,
+	waitForSubagentForTest,
 } from "../support/index.ts";
 
 describe("subagent wait behavior", () => {
@@ -216,10 +216,7 @@ describe("subagent wait behavior", () => {
 		assert.equal(sent.length, 1);
 		assert.equal((sent[0].message.details as any).id, running.id);
 		assert.equal((sent[0].message.details as any).deliveryState, "detached");
-		assert.equal(
-			getCompletedSubagentResultForTest(running.id)?.deliveredTo,
-			"steer",
-		);
+		assert.equal(getCompletedSubagentResultForTest(running.id)?.deliveredTo, "steer");
 	});
 
 	it("returns timeout errors for wait and restores detached delivery", async () => {
@@ -274,10 +271,7 @@ describe("subagent wait behavior", () => {
 
 		assert.equal(sent.length, 1);
 		assert.equal((sent[0].message.details as any).id, running.id);
-		assert.equal(
-			getCompletedSubagentResultForTest(running.id)?.deliveredTo,
-			"steer",
-		);
+		assert.equal(getCompletedSubagentResultForTest(running.id)?.deliveredTo, "steer");
 	});
 
 	it("releases awaited children back to steer when wait is interrupted", async () => {
@@ -313,10 +307,7 @@ describe("subagent wait behavior", () => {
 		});
 
 		const abort = new AbortController();
-		const waitPromise = waitForSubagentForTest(
-			{ id: running.id },
-			abort.signal,
-		);
+		const waitPromise = waitForSubagentForTest({ id: running.id }, abort.signal);
 		assert.equal(running.deliveryState, "awaited");
 
 		abort.abort();
@@ -337,9 +328,6 @@ describe("subagent wait behavior", () => {
 
 		assert.equal(sent.length, 1);
 		assert.equal(sent[0].options.deliverAs, "steer");
-		assert.equal(
-			getCompletedSubagentResultForTest(running.id)?.deliveredTo,
-			"steer",
-		);
+		assert.equal(getCompletedSubagentResultForTest(running.id)?.deliveredTo, "steer");
 	});
 });

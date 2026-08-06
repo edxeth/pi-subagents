@@ -18,12 +18,7 @@ export interface ZellijPaneSnapshot {
 }
 
 export type ZellijSplitDirection = "down" | "right";
-export type ZellijPlacementPolicy =
-	| "auto"
-	| "right-stack"
-	| "down-stack"
-	| "floating"
-	| "tab-stack";
+export type ZellijPlacementPolicy = "auto" | "right-stack" | "down-stack" | "floating" | "tab-stack";
 
 export interface ZellijPlacementContext {
 	groupKey: string;
@@ -49,9 +44,7 @@ const ZELLIJ_PLACEMENT_POLICIES = new Set<ZellijPlacementPolicy>([
 	"tab-stack",
 ]);
 
-export function resolveZellijPlacementPolicy(
-	value: string | undefined,
-): ZellijPlacementPolicy {
+export function resolveZellijPlacementPolicy(value: string | undefined): ZellijPlacementPolicy {
 	if (!value) return "auto";
 	if (ZELLIJ_PLACEMENT_POLICIES.has(value as ZellijPlacementPolicy)) {
 		return value as ZellijPlacementPolicy;
@@ -62,9 +55,7 @@ export function resolveZellijPlacementPolicy(
 	);
 }
 
-export function isUsableZellijTiledPane(
-	pane: ZellijPaneSnapshot,
-): boolean {
+export function isUsableZellijTiledPane(pane: ZellijPaneSnapshot): boolean {
 	return (
 		!pane.is_plugin &&
 		!pane.is_floating &&
@@ -75,18 +66,13 @@ export function isUsableZellijTiledPane(
 	);
 }
 
-function predictZellijSplitDirection(
-	pane: ZellijPaneSnapshot,
-): ZellijSplitDirection | null {
+function predictZellijSplitDirection(pane: ZellijPaneSnapshot): ZellijSplitDirection | null {
 	const columns = pane.pane_columns ?? 0;
 	const rows = pane.pane_rows ?? 0;
 	if (columns < ZELLIJ_MIN_TERMINAL_WIDTH || rows < ZELLIJ_MIN_TERMINAL_HEIGHT) {
 		return null;
 	}
-	if (
-		rows * ZELLIJ_CURSOR_HEIGHT_WIDTH_RATIO > columns &&
-		rows > ZELLIJ_MIN_TERMINAL_HEIGHT * 2
-	) {
+	if (rows * ZELLIJ_CURSOR_HEIGHT_WIDTH_RATIO > columns && rows > ZELLIJ_MIN_TERMINAL_HEIGHT * 2) {
 		return "down";
 	}
 	return columns > ZELLIJ_MIN_TERMINAL_WIDTH * 2 ? "right" : null;
@@ -112,11 +98,7 @@ export function selectLiveOwnedZellijAnchor(
 ): ZellijPaneSnapshot | null {
 	for (const paneId of ownedPaneIds) {
 		const pane = panes.find((candidate) => candidate.id === paneId);
-		if (
-			pane &&
-			isUsableZellijTiledPane(pane) &&
-			(expectedTabId === undefined || pane.tab_id === expectedTabId)
-		) {
+		if (pane && isUsableZellijTiledPane(pane) && (expectedTabId === undefined || pane.tab_id === expectedTabId)) {
 			return pane;
 		}
 	}
@@ -131,23 +113,14 @@ export function selectZellijFirstPlacement(
 	minRows = DEFAULT_ZELLIJ_SUBAGENT_MIN_ROWS,
 ): ZellijFirstPlacementPlan {
 	if (policy === "tab-stack") return { mode: "tab" };
-	const parentPane = panes.find(
-		(pane) => !pane.is_plugin && pane.id === parentPaneId,
-	);
+	const parentPane = panes.find((pane) => !pane.is_plugin && pane.id === parentPaneId);
 	if (!parentPane || typeof parentPane.tab_id !== "number") return { mode: "tab" };
 	if (policy === "floating") {
 		return { mode: "floating", parentPaneId, tabId: parentPane.tab_id };
 	}
 	const direction =
-		policy === "right-stack"
-			? "right"
-			: policy === "down-stack"
-				? "down"
-				: predictZellijSplitDirection(parentPane);
-	if (
-		direction &&
-		canSplitZellijPaneInDirection(parentPane, direction, minColumns, minRows)
-	) {
+		policy === "right-stack" ? "right" : policy === "down-stack" ? "down" : predictZellijSplitDirection(parentPane);
+	if (direction && canSplitZellijPaneInDirection(parentPane, direction, minColumns, minRows)) {
 		return {
 			mode: "split",
 			parentPaneId,

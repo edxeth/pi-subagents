@@ -1,11 +1,8 @@
 import { existsSync } from "node:fs";
 import { splitModelRef } from "../agents/model-refs.ts";
-import {
-	findLatestAssistantContextSnapshot,
-	getNewEntries,
-} from "../session/session.ts";
-import type { RunningSubagent } from "../types.ts";
 import type { PollResult } from "../mux/poll.ts";
+import { findLatestAssistantContextSnapshot, getNewEntries } from "../session/session.ts";
+import type { RunningSubagent } from "../types.ts";
 
 export interface FinalContextUsage {
 	contextTokens?: number;
@@ -44,32 +41,21 @@ export function resolveFinalContextUsage(
 	running: RunningSubagent,
 	exitSignal: PollResult | null | undefined,
 ): FinalContextUsage {
-	if (
-		typeof exitSignal?.contextTokens === "number" &&
-		typeof exitSignal.contextWindow === "number"
-	) {
+	if (typeof exitSignal?.contextTokens === "number" && typeof exitSignal.contextWindow === "number") {
 		return {
 			contextTokens: exitSignal.contextTokens,
 			contextWindow: exitSignal.contextWindow,
 		};
 	}
-	if (
-		running.noSession ||
-		!running.modelContextWindow ||
-		!existsSync(running.sessionFile)
-	) {
+	if (running.noSession || !running.modelContextWindow || !existsSync(running.sessionFile)) {
 		return {};
 	}
 	try {
 		const snapshot = findLatestAssistantContextSnapshot(
 			getNewEntries(running.sessionFile, running.launchEntryCount ?? 0),
 		);
-		const launchModel = running.modelRef
-			? splitModelRef(running.modelRef).model
-			: undefined;
-		const snapshotModel = snapshot?.provider && snapshot.model
-			? `${snapshot.provider}/${snapshot.model}`
-			: undefined;
+		const launchModel = running.modelRef ? splitModelRef(running.modelRef).model : undefined;
+		const snapshotModel = snapshot?.provider && snapshot.model ? `${snapshot.provider}/${snapshot.model}` : undefined;
 		if (!snapshot || !launchModel || launchModel !== snapshotModel) return {};
 		return {
 			contextTokens: snapshot.contextTokens,

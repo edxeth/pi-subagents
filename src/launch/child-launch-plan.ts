@@ -4,28 +4,13 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { AgentDefaults } from "../agents/definitions.ts";
 import { assertModelAllowed, splitModelRef } from "../agents/model-refs.ts";
 import { buildSubagentSessionTitle } from "../agents/titles.ts";
-import {
-	generateSubagentSessionFile,
-	type ResumeMode,
-} from "../session/session-files.ts";
+import { generateSubagentSessionFile, type ResumeMode } from "../session/session-files.ts";
+import { addToolModeDeniedNames, resolveDenyTools } from "../tools/policy.ts";
 import type { SubagentParamsInput } from "../types.ts";
-import {
-	addToolModeDeniedNames,
-	resolveDenyTools,
-} from "../tools/policy.ts";
-import {
-	resolveSubagentExtensions,
-	resolveSubagentNoSession,
-} from "./policy.ts";
-import {
-	resolveSubagentRuntimePaths,
-	type ResolvedSubagentRuntimePaths,
-} from "./runtime-paths.ts";
 import { resolveConfiguredExtensionSources } from "./extensions.ts";
-import {
-	buildSkillLaunchPlan,
-	type SkillLaunchPlan,
-} from "./skills.ts";
+import { resolveSubagentExtensions, resolveSubagentNoSession } from "./policy.ts";
+import { type ResolvedSubagentRuntimePaths, resolveSubagentRuntimePaths } from "./runtime-paths.ts";
+import { buildSkillLaunchPlan, type SkillLaunchPlan } from "./skills.ts";
 
 export interface ModelRegistryLike {
 	getAvailable(): Array<{
@@ -70,7 +55,11 @@ export interface ChildLaunchPlanOptions {
 export function splitModelRefThinking(
 	model: string | undefined,
 	fallbackThinking: string | undefined,
-): { model: string | undefined; thinking: string | undefined; explicitThinking: boolean } {
+): {
+	model: string | undefined;
+	thinking: string | undefined;
+	explicitThinking: boolean;
+} {
 	if (!model) return { model, thinking: fallbackThinking, explicitThinking: false };
 	const split = splitModelRef(model);
 	return split.thinking === undefined
@@ -89,14 +78,26 @@ export function splitModelRefThinking(
 export function normalizeModelRef(
 	model: string | undefined,
 	thinking: string | undefined,
-): { effectiveModel: string | undefined; effectiveThinking: string | undefined; effectiveModelRef: string | undefined } {
+): {
+	effectiveModel: string | undefined;
+	effectiveThinking: string | undefined;
+	effectiveModelRef: string | undefined;
+} {
 	if (!model) {
-		return { effectiveModel: undefined, effectiveThinking: undefined, effectiveModelRef: undefined };
+		return {
+			effectiveModel: undefined,
+			effectiveThinking: undefined,
+			effectiveModelRef: undefined,
+		};
 	}
 	let baseModel = model;
 	if (thinking) baseModel = splitModelRef(model).model;
 	const ref = thinking ? `${baseModel}:${thinking}` : baseModel;
-	return { effectiveModel: baseModel, effectiveThinking: thinking, effectiveModelRef: ref };
+	return {
+		effectiveModel: baseModel,
+		effectiveThinking: thinking,
+		effectiveModelRef: ref,
+	};
 }
 
 export function resolveAvailableModelRef(
@@ -149,23 +150,25 @@ export function resolveAvailableModelRef(
 			if (!explicitThinking) return { model: resolved, thinking: undefined };
 			throw new Error(
 				`Model '${resolved}' does not support thinking level '${thinking}'. ` +
-				`Supported levels: ${supported.join(", ")}.`,
+					`Supported levels: ${supported.join(", ")}.`,
 			);
 		}
 	}
 	return { model: resolved, thinking };
 }
 
-export async function buildChildLaunchPlan(
-	options: ChildLaunchPlanOptions,
-): Promise<ChildLaunchPlan> {
+export async function buildChildLaunchPlan(options: ChildLaunchPlanOptions): Promise<ChildLaunchPlan> {
 	const { params, agentDefs, parentCwd, parentSessionDir } = options;
 	const hasAllowedModels = !!agentDefs?.allowedModels?.trim();
 	const resolveRef = (
 		model: string | undefined,
 		fallbackThinking: string | undefined,
 		opts: { resolveAlways: boolean; explicitThinking: boolean },
-	): { effectiveModel?: string; effectiveThinking?: string; effectiveModelRef?: string } => {
+	): {
+		effectiveModel?: string;
+		effectiveThinking?: string;
+		effectiveModelRef?: string;
+	} => {
 		const split = splitModelRefThinking(model, fallbackThinking);
 		const explicit = split.explicitThinking || opts.explicitThinking;
 		// Resolve a bare id (no provider) through the registry only when this is a
@@ -183,7 +186,10 @@ export async function buildChildLaunchPlan(
 	const { effectiveModel, effectiveThinking, effectiveModelRef } = resolveRef(
 		requestedModel,
 		params.thinking ?? agentDefs?.thinking ?? options.parentThinking,
-		{ resolveAlways: params.model != null, explicitThinking: params.thinking != null },
+		{
+			resolveAlways: params.model != null,
+			explicitThinking: params.thinking != null,
+		},
 	);
 	if (hasAllowedModels) {
 		const defaultModelRef = resolveRef(
@@ -199,16 +205,9 @@ export async function buildChildLaunchPlan(
 		);
 	}
 
-	const runtimePaths = resolveSubagentRuntimePaths(
-		params,
-		agentDefs,
-		parentCwd,
-		parentSessionDir,
-	);
+	const runtimePaths = resolveSubagentRuntimePaths(params, agentDefs, parentCwd, parentSessionDir);
 	const subagentSessionFile = generateSubagentSessionFile(
-		resolveSubagentNoSession(agentDefs)
-			? join(tmpdir(), "pi-subagents", "sessions")
-			: runtimePaths.sessionDir,
+		resolveSubagentNoSession(agentDefs) ? join(tmpdir(), "pi-subagents", "sessions") : runtimePaths.sessionDir,
 	);
 	const tools = params.tools ?? agentDefs?.tools;
 	const skills = params.skills ?? agentDefs?.skills;

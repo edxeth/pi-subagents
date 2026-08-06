@@ -6,15 +6,10 @@ import {
 	installSubagentContextReminders,
 	parseContextWarnStep,
 	parseContextWarnThreshold,
-	selectContextReminder,
 	SUBAGENT_CONTEXT_REMINDER_ENTRY,
+	selectContextReminder,
 } from "../../src/tools/context-reminders.ts";
-import {
-	assert,
-	createTestDir,
-	sleep,
-	subagentDoneExtension,
-} from "../support/index.ts";
+import { assert, createTestDir, sleep, subagentDoneExtension } from "../support/index.ts";
 
 describe("subagent context reminders", () => {
 	it("treats the configured percentage as the first of three reminders", () => {
@@ -40,12 +35,7 @@ describe("subagent context reminders", () => {
 	});
 
 	it("includes current and maximum tokens in each progressive reminder", () => {
-		const first = selectContextReminder(
-			80,
-			5,
-			{ tokens: 160_000, contextWindow: 200_000, percent: 80 },
-			new Set(),
-		);
+		const first = selectContextReminder(80, 5, { tokens: 160_000, contextWindow: 200_000, percent: 80 }, new Set());
 		assert.equal(first?.threshold, 80);
 		assert.match(first?.message ?? "", /160K\/200K tokens \(80\.0%\)/);
 		assert.match(first?.message ?? "", /Start wrapping up/);
@@ -79,12 +69,7 @@ describe("subagent context reminders", () => {
 	});
 
 	it("uses the most urgent warning when usage jumps across levels", () => {
-		const reminder = selectContextReminder(
-			80,
-			5,
-			{ tokens: 182_000, contextWindow: 200_000, percent: 91 },
-			new Set(),
-		);
+		const reminder = selectContextReminder(80, 5, { tokens: 182_000, contextWindow: 200_000, percent: 91 }, new Set());
 		assert.equal(reminder?.threshold, 90);
 		assert.deepEqual(reminder?.sentThresholds, [80, 85, 90]);
 		assert.match(reminder?.message ?? "", /Final context warning/);
@@ -121,8 +106,7 @@ describe("subagent context reminders", () => {
 			assert.equal(sent.length, 1);
 			assert.match(sent[0], /160K\/200K tokens \(80\.0%\)/);
 		} finally {
-			if (originalThreshold == null)
-				delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+			if (originalThreshold == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
 			else process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = originalThreshold;
 		}
 	});
@@ -184,11 +168,7 @@ describe("subagent context reminders", () => {
 			};
 			emit("session_start", {}, ctx);
 			emit("agent_start", {}, ctx);
-			emit(
-				"agent_end",
-				{ messages: [{ role: "assistant", stopReason: "stop" }] },
-				ctx,
-			);
+			emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
 
 			assert.equal(sent.length, 1);
 			assert.match(sent[0].message, /160K\/200K tokens \(80\.0%\)/);
@@ -200,10 +180,7 @@ describe("subagent context reminders", () => {
 			const retrySent: unknown[] = [];
 			installSubagentContextReminders({
 				on(event: string, handler: any) {
-					retryHandlers.set(event, [
-						...(retryHandlers.get(event) ?? []),
-						handler,
-					]);
+					retryHandlers.set(event, [...(retryHandlers.get(event) ?? []), handler]);
 				},
 				sendUserMessage(message: unknown) {
 					retrySent.push(message);
@@ -214,16 +191,9 @@ describe("subagent context reminders", () => {
 				handler({}, ctx);
 			}
 			for (const handler of retryHandlers.get("agent_end") ?? []) {
-				handler(
-					{ messages: [{ role: "assistant", stopReason: "stop" }] },
-					ctx,
-				);
+				handler({ messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
 			}
-			assert.equal(
-				retrySent.length,
-				1,
-				"an undelivered queued reminder must be retried after resume",
-			);
+			assert.equal(retrySent.length, 1, "an undelivered queued reminder must be retried after resume");
 			hasPendingMessages = false;
 			emit("message_end", {
 				message: {
@@ -238,11 +208,7 @@ describe("subagent context reminders", () => {
 			});
 
 			usage = { tokens: 170_000, contextWindow: 200_000, percent: 85 };
-			emit(
-				"agent_end",
-				{ messages: [{ role: "assistant", stopReason: "stop" }] },
-				ctx,
-			);
+			emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
 			assert.equal(sent.length, 2);
 			assert.match(sent[1].message, /170K\/200K tokens \(85\.0%\)/);
 			hasPendingMessages = false;
@@ -260,10 +226,7 @@ describe("subagent context reminders", () => {
 			const resumedSent: unknown[] = [];
 			installSubagentContextReminders({
 				on(event: string, handler: any) {
-					resumedHandlers.set(event, [
-						...(resumedHandlers.get(event) ?? []),
-						handler,
-					]);
+					resumedHandlers.set(event, [...(resumedHandlers.get(event) ?? []), handler]);
 				},
 				sendUserMessage(message: unknown) {
 					resumedSent.push(message);
@@ -271,31 +234,15 @@ describe("subagent context reminders", () => {
 				appendEntry() {},
 			} as any);
 			emitResumed("session_start", {}, ctx);
-			emitResumed(
-				"agent_end",
-				{ messages: [{ role: "assistant", stopReason: "stop" }] },
-				ctx,
-			);
-			assert.equal(
-				resumedSent.length,
-				0,
-				"persisted levels must not repeat after resume or reload",
-			);
+			emitResumed("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
+			assert.equal(resumedSent.length, 0, "persisted levels must not repeat after resume or reload");
 
-			emit(
-				"agent_end",
-				{ messages: [{ role: "assistant", stopReason: "stop" }] },
-				ctx,
-			);
+			emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
 			await sleep(0);
 			assert.equal(shutdowns, 1);
-			assert.deepEqual(
-				JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")),
-				{ type: "done", outputTokens: 0 },
-			);
+			assert.deepEqual(JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")), { type: "done", outputTokens: 0 });
 		} finally {
-			if (originalThreshold == null)
-				delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+			if (originalThreshold == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
 			else process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = originalThreshold;
 			if (originalAutoExit == null) delete process.env.PI_SUBAGENT_AUTO_EXIT;
 			else process.env.PI_SUBAGENT_AUTO_EXIT = originalAutoExit;

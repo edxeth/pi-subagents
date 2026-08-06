@@ -1,16 +1,14 @@
 import {
-	assert,
-	mkdirSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-	join,
+	ASSISTANT_MSG,
+	ASSISTANT_MSG_2,
 	after,
-	before,
-	describe,
-	it,
 	appendBranchSummary,
+	assert,
+	before,
 	copySessionFile,
+	createSessionFile,
+	createTestDir,
+	describe,
 	findLastAssistantMessage,
 	findLastSubagentOutput,
 	findLastSubagentOutputWithSource,
@@ -19,15 +17,17 @@ import {
 	getEntryCount,
 	getLeafId,
 	getNewEntries,
-	mergeNewEntries,
-	createTestDir,
-	createSessionFile,
-	SESSION_HEADER,
+	it,
+	join,
 	MODEL_CHANGE,
-	USER_MSG,
-	ASSISTANT_MSG,
-	ASSISTANT_MSG_2,
+	mergeNewEntries,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	SESSION_HEADER,
 	TOOL_RESULT,
+	USER_MSG,
+	writeFileSync,
 } from "../support/index.ts";
 
 describe("session.ts", () => {
@@ -46,21 +46,13 @@ describe("session.ts", () => {
 			const file = join(dir, "invalid-session.jsonl");
 			writeFileSync(file, '{"type":"session","id":"ok"}\nnot-json\n');
 
-			assert.throws(
-				() => getEntries(file),
-				/Invalid session JSONL at .*invalid-session\.jsonl:2:/,
-			);
+			assert.throws(() => getEntries(file), /Invalid session JSONL at .*invalid-session\.jsonl:2:/);
 		});
 	});
 
 	describe("getLeafId", () => {
 		it("returns last entry id", () => {
-			const file = createSessionFile(dir, [
-				SESSION_HEADER,
-				MODEL_CHANGE,
-				USER_MSG,
-				ASSISTANT_MSG,
-			]);
+			const file = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG]);
 			assert.equal(getLeafId(file), "asst-001");
 		});
 
@@ -73,11 +65,7 @@ describe("session.ts", () => {
 
 	describe("getEntryCount", () => {
 		it("counts non-empty lines", () => {
-			const file = createSessionFile(dir, [
-				SESSION_HEADER,
-				MODEL_CHANGE,
-				USER_MSG,
-			]);
+			const file = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE, USER_MSG]);
 			assert.equal(getEntryCount(file), 3);
 		});
 
@@ -90,12 +78,7 @@ describe("session.ts", () => {
 
 	describe("getNewEntries", () => {
 		it("returns entries after a given line", () => {
-			const file = createSessionFile(dir, [
-				SESSION_HEADER,
-				MODEL_CHANGE,
-				USER_MSG,
-				ASSISTANT_MSG,
-			]);
+			const file = createSessionFile(dir, [SESSION_HEADER, MODEL_CHANGE, USER_MSG, ASSISTANT_MSG]);
 			const entries = getNewEntries(file, 2);
 			assert.equal(entries.length, 2);
 			assert.equal(entries[0].id, "user-001");
@@ -110,15 +93,9 @@ describe("session.ts", () => {
 
 		it("reports the correct original line number for invalid new entries", () => {
 			const file = join(dir, "invalid-new-entries.jsonl");
-			writeFileSync(
-				file,
-				`${[JSON.stringify(SESSION_HEADER), JSON.stringify(MODEL_CHANGE), "not-json"].join("\n")}\n`,
-			);
+			writeFileSync(file, `${[JSON.stringify(SESSION_HEADER), JSON.stringify(MODEL_CHANGE), "not-json"].join("\n")}\n`);
 
-			assert.throws(
-				() => getNewEntries(file, 2),
-				/Invalid session JSONL at .*invalid-new-entries\.jsonl:3:/,
-			);
+			assert.throws(() => getNewEntries(file, 2), /Invalid session JSONL at .*invalid-new-entries\.jsonl:3:/);
 		});
 	});
 
@@ -143,10 +120,7 @@ describe("session.ts", () => {
 				},
 			] as any[];
 
-			assert.equal(
-				findLastAssistantMessage(entries),
-				"First line\nSecond line",
-			);
+			assert.equal(findLastAssistantMessage(entries), "First line\nSecond line");
 		});
 
 		it("skips thinking blocks, gets text only", () => {
@@ -207,10 +181,7 @@ describe("session.ts", () => {
 				},
 			};
 			const entries = [earlierGood, overloadError] as any[];
-			assert.equal(
-				findLastAssistantMessage(entries),
-				"Subagent error: Anthropic 529 Overloaded after 3 retries",
-			);
+			assert.equal(findLastAssistantMessage(entries), "Subagent error: Anthropic 529 Overloaded after 3 retries");
 		});
 
 		it("prefers text content even when error stopReason is set", () => {
@@ -242,10 +213,7 @@ describe("session.ts", () => {
 					stopReason: "error",
 				},
 			};
-			assert.equal(
-				findLastAssistantMessage([earlierStatus, msg] as any[]),
-				"Subagent error",
-			);
+			assert.equal(findLastAssistantMessage([earlierStatus, msg] as any[]), "Subagent error");
 		});
 
 		it("does not scan past a final assistant length stop with no text", () => {
@@ -326,13 +294,10 @@ describe("session.ts", () => {
 				},
 			};
 
-			assert.deepEqual(
-				findLastSubagentOutputWithSource([terminalError] as any[]),
-				{
-					summary: "Subagent error: Provider unavailable",
-					summarySource: "runtime",
-				},
-			);
+			assert.deepEqual(findLastSubagentOutputWithSource([terminalError] as any[]), {
+				summary: "Subagent error: Provider unavailable",
+				summarySource: "runtime",
+			});
 		});
 
 		it("does not fall back to stale output after a terminal length stop", () => {
@@ -362,10 +327,7 @@ describe("session.ts", () => {
 				},
 			] as any[];
 
-			assert.equal(
-				findLastSubagentOutput(entries),
-				"Subagent stopped before producing a result (stopReason: length)",
-			);
+			assert.equal(findLastSubagentOutput(entries), "Subagent stopped before producing a result (stopReason: length)");
 		});
 
 		it("uses a terminating tool result after a textless tool-use boundary", () => {
@@ -408,9 +370,7 @@ describe("session.ts", () => {
 					type: "message",
 					message: {
 						role: "assistant",
-						content: [
-							{ type: "toolCall", name: "subagent_done", arguments: {} },
-						],
+						content: [{ type: "toolCall", name: "subagent_done", arguments: {} }],
 					},
 				},
 				{
@@ -429,17 +389,8 @@ describe("session.ts", () => {
 
 	describe("appendBranchSummary", () => {
 		it("appends valid branch_summary entry", () => {
-			const file = createSessionFile(dir, [
-				SESSION_HEADER,
-				USER_MSG,
-				ASSISTANT_MSG,
-			]);
-			const id = appendBranchSummary(
-				file,
-				"user-001",
-				"asst-001",
-				"The outline was created.",
-			);
+			const file = createSessionFile(dir, [SESSION_HEADER, USER_MSG, ASSISTANT_MSG]);
+			const id = appendBranchSummary(file, "user-001", "asst-001", "The outline was created.");
 
 			assert.ok(id, "should return an id");
 			assert.equal(typeof id, "string");
@@ -487,10 +438,7 @@ describe("session.ts", () => {
 				sourceFile,
 				`${[SESSION_HEADER, USER_MSG, ASSISTANT_MSG].map((e) => JSON.stringify(e)).join("\n")}\n`,
 			);
-			writeFileSync(
-				targetFile,
-				`${[SESSION_HEADER, USER_MSG].map((e) => JSON.stringify(e)).join("\n")}\n`,
-			);
+			writeFileSync(targetFile, `${[SESSION_HEADER, USER_MSG].map((e) => JSON.stringify(e)).join("\n")}\n`);
 
 			const merged = mergeNewEntries(sourceFile, targetFile, 2);
 			assert.equal(merged.length, 1);
@@ -506,10 +454,7 @@ describe("session.ts", () => {
 			writeFileSync(targetFile, readFileSync(sourceFile, "utf8"));
 
 			assert.deepEqual(mergeNewEntries(sourceFile, targetFile, 2), []);
-			assert.equal(
-				readFileSync(targetFile, "utf8"),
-				readFileSync(sourceFile, "utf8"),
-			);
+			assert.equal(readFileSync(targetFile, "utf8"), readFileSync(sourceFile, "utf8"));
 		});
 	});
 });

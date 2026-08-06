@@ -34,10 +34,7 @@ export function getSubagentAgentRequirementError(
 	return null;
 }
 
-export function getSubagentAgentOverrideError(
-	_params: Partial<SubagentParamsInput>,
-	_agentDefs: AgentDefaults | null,
-) {
+export function getSubagentAgentOverrideError(_params: Partial<SubagentParamsInput>, _agentDefs: AgentDefaults | null) {
 	// Named-agent frontmatter is authoritative by default. Call-time model and
 	// thinking overrides are allowed unless the definition opts out with
 	// allow-model-override: false; other call-time runtime fields are ignored
@@ -52,47 +49,31 @@ export function resolveSubagentBlocking(
 	return agentDefs?.async === false;
 }
 
-function resolveSubagentAsync(
-	params: Partial<SubagentParamsInput>,
-	agentDefs: AgentDefaults | null,
-): boolean {
+function resolveSubagentAsync(params: Partial<SubagentParamsInput>, agentDefs: AgentDefaults | null): boolean {
 	return !resolveSubagentBlocking(params, agentDefs);
 }
 
-export function resolveSubagentNoContextFiles(
-	agentDefs: AgentDefaults | null,
-): boolean {
+export function resolveSubagentNoContextFiles(agentDefs: AgentDefaults | null): boolean {
 	return agentDefs?.noContextFiles ?? false;
 }
 
-export function resolveSubagentNoSession(
-	agentDefs: AgentDefaults | null,
-): boolean {
+export function resolveSubagentNoSession(agentDefs: AgentDefaults | null): boolean {
 	return agentDefs?.noSession ?? false;
 }
 
-export function resolveSubagentReportContextUsage(
-	agentDefs: AgentDefaults | null,
-): boolean {
+export function resolveSubagentReportContextUsage(agentDefs: AgentDefaults | null): boolean {
 	return agentDefs?.reportContextUsage ?? true;
 }
 
-export function resolveSubagentParentClosePolicy(
-	agentDefs: AgentDefaults | null,
-): ParentClosePolicy {
+export function resolveSubagentParentClosePolicy(agentDefs: AgentDefaults | null): ParentClosePolicy {
 	return agentDefs?.parentClosePolicy ?? "terminate";
 }
 
 function isSchemeLikePath(value: string): boolean {
-	return (
-		/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value) && !/^[a-zA-Z]:[\\/]/.test(value)
-	);
+	return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value) && !/^[a-zA-Z]:[\\/]/.test(value);
 }
 
-function resolveSubagentExtensionSource(
-	source: string,
-	baseDir: string,
-): string {
+function resolveSubagentExtensionSource(source: string, baseDir: string): string {
 	const trimmed = source.trim();
 	if (!trimmed) return trimmed;
 	if (isSchemeLikePath(trimmed)) return trimmed;
@@ -102,9 +83,7 @@ function resolveSubagentExtensionSource(
 	return resolve(baseDir, trimmed);
 }
 
-export function resolveSubagentExtensions(
-	agentDefs: AgentDefaults | null,
-): string[] | undefined {
+export function resolveSubagentExtensions(agentDefs: AgentDefaults | null): string[] | undefined {
 	if (!agentDefs?.extensions) return undefined;
 	const raw = agentDefs.extensions.trim().toLowerCase();
 	if (raw === "all") return undefined;
@@ -132,12 +111,8 @@ export function enforceAgentFrontmatter(
 		task: params.task,
 		title: params.title,
 		agent: params.agent,
-		...(agentDefs?.allowModelOverride !== false && params.model
-			? { model: params.model }
-			: {}),
-		...(agentDefs?.allowModelOverride !== false && params.thinking
-			? { thinking: params.thinking }
-			: {}),
+		...(agentDefs?.allowModelOverride !== false && params.model ? { model: params.model } : {}),
+		...(agentDefs?.allowModelOverride !== false && params.thinking ? { thinking: params.thinking } : {}),
 		async: resolveSubagentAsync(params, agentDefs),
 		blocking: resolveSubagentBlocking(params, agentDefs),
 	};

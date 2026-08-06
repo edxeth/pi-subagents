@@ -1,27 +1,19 @@
-import {
-	assert,
-	describe,
-	it,
-	beforeEach,
-} from "../support/index.ts";
-import {
-	ForkSessionManager,
-} from "../../src/runtime/fork-session-manager.ts";
 import type {
-	SummaryCandidateEventData,
 	ContextPruneEventData,
 	ForkReadyEventData,
+	SummaryCandidateEventData,
 } from "../../src/runtime/fork-session-manager.ts";
+import { ForkSessionManager } from "../../src/runtime/fork-session-manager.ts";
+import { assert, beforeEach, describe, it } from "../support/index.ts";
 
 const PARENT_SESSION = "/tmp/parent.jsonl";
 const CHILD_SESSION = "/tmp/child.jsonl";
 const CHILD_CTX_WINDOW = 128_000;
 const CANDIDATE_ID = "sc-001";
-const CANDIDATE_TEXT = "Refactored auth module — split JWT validation into separate middleware, added integration tests for token refresh.";
+const CANDIDATE_TEXT =
+	"Refactored auth module — split JWT validation into separate middleware, added integration tests for token refresh.";
 
-function makeSummaryCandidate(
-	overrides?: Partial<SummaryCandidateEventData>,
-): SummaryCandidateEventData {
+function makeSummaryCandidate(overrides?: Partial<SummaryCandidateEventData>): SummaryCandidateEventData {
 	return {
 		event: "summary_candidate",
 		id: CANDIDATE_ID,
@@ -45,9 +37,7 @@ function makeContextPruneWithFork(
 	};
 }
 
-function makeContextPrunePlain(
-	overrides?: Partial<ContextPruneEventData>,
-): ContextPruneEventData {
+function makeContextPrunePlain(overrides?: Partial<ContextPruneEventData>): ContextPruneEventData {
 	return {
 		event: "context_prune",
 		prunedTokens: 2048,
@@ -55,9 +45,7 @@ function makeContextPrunePlain(
 	};
 }
 
-function makeForkReady(
-	overrides?: Partial<ForkReadyEventData>,
-): ForkReadyEventData {
+function makeForkReady(overrides?: Partial<ForkReadyEventData>): ForkReadyEventData {
 	return {
 		event: "fork_ready",
 		childSessionFile: CHILD_SESSION,
@@ -136,7 +124,10 @@ describe("ForkSessionManager", () => {
 
 		it("replaces a previous in-flight candidate (last-in-wins)", () => {
 			const first = makeSummaryCandidate({ id: "sc-old", text: "Old summary" });
-			const second = makeSummaryCandidate({ id: "sc-new", text: "New summary" });
+			const second = makeSummaryCandidate({
+				id: "sc-new",
+				text: "New summary",
+			});
 
 			manager.handleSummaryCandidate(first);
 			manager.handleSummaryCandidate(second);

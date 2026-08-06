@@ -44,9 +44,10 @@ export const TRACKED_ENV_KEYS = [
 	"ZELLIJ_SESSION_NAME",
 ] as const;
 
-export const ORIGINAL_ENV = Object.fromEntries(
-	TRACKED_ENV_KEYS.map((key) => [key, process.env[key]]),
-) as Record<(typeof TRACKED_ENV_KEYS)[number], string | undefined>;
+export const ORIGINAL_ENV = Object.fromEntries(TRACKED_ENV_KEYS.map((key) => [key, process.env[key]])) as Record<
+	(typeof TRACKED_ENV_KEYS)[number],
+	string | undefined
+>;
 
 export const ISOLATED_SUBAGENT_ENV_KEYS = [
 	"PI_DENY_TOOLS",

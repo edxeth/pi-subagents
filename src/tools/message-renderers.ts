@@ -1,10 +1,7 @@
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
-import type {
-	SubagentPingMessageDetails,
-	SubagentResultMessageDetails,
-} from "../types.ts";
+import type { SubagentPingMessageDetails, SubagentResultMessageDetails } from "../types.ts";
 
 type ThemeLike = Parameters<Parameters<ExtensionAPI["registerMessageRenderer"]>[1]>[2];
 type RenderOptions = { expanded: boolean };
@@ -54,9 +51,7 @@ function expandHint(): string {
 }
 
 function stripSessionRef(text: string): string {
-	return text
-		.replace(/\n\nSub-agent context: .+ used at finish\.$/, "")
-		.replace(/\n\nSession: .+\nResume: .+$/, "");
+	return text.replace(/\n\nSub-agent context: .+ used at finish\.$/, "").replace(/\n\nSession: .+\nResume: .+$/, "");
 }
 
 function firstTextContent(result: AgentToolResult<unknown>): string {
@@ -68,7 +63,11 @@ function getChildArg(args: SubagentBatchArgs | undefined, index: number): BatchC
 	return Array.isArray(args?.children) ? args.children[index] : undefined;
 }
 
-function getChildAgent(child: SubagentCompletionDetails, args: SubagentBatchArgs | undefined, index: number): string | undefined {
+function getChildAgent(
+	child: SubagentCompletionDetails,
+	args: SubagentBatchArgs | undefined,
+	index: number,
+): string | undefined {
 	return child.agent ?? getChildArg(args, index)?.agent;
 }
 
@@ -90,10 +89,7 @@ function extractSummary(
 		.replace(`Sub-agent "${name}" failed (exit code ${exitCode}).\n\n`, "")
 		.replace(`Sub-agent "${name}" failed (status failed).\n\n`, "")
 		.replace(`Sub-agent "${name}" was cancelled (status cancelled).\n\n`, "")
-		.replace(
-			`Sub-agent "${name}" failed after ${elapsed} (provider/agent error — auto-retry exhausted).\n\n`,
-			"",
-		);
+		.replace(`Sub-agent "${name}" failed after ${elapsed} (provider/agent error — auto-retry exhausted).\n\n`, "");
 }
 function appendExpandableLines(
 	lines: string[],
@@ -105,27 +101,17 @@ function appendExpandableLines(
 ): void {
 	if (!body) return;
 	const bodyLines = body.split("\n");
-	const visibleLines = options.expanded
-		? bodyLines
-		: bodyLines.slice(0, maxCollapsedLines);
+	const visibleLines = options.expanded ? bodyLines : bodyLines.slice(0, maxCollapsedLines);
 	for (const line of visibleLines) {
 		lines.push(theme.fg(color, line));
 	}
 	const remaining = bodyLines.length - visibleLines.length;
 	if (!options.expanded && remaining > 0) {
-		lines.push(
-			theme.fg("muted", `... (${remaining} more lines,`) +
-				` ${expandHint()}` +
-				theme.fg("muted", ")"),
-		);
+		lines.push(theme.fg("muted", `... (${remaining} more lines,`) + ` ${expandHint()}` + theme.fg("muted", ")"));
 	}
 }
 
-export function formatTaskPreview(
-	task: string | undefined,
-	options: RenderOptions,
-	theme: ThemeLike,
-): string {
+export function formatTaskPreview(task: string | undefined, options: RenderOptions, theme: ThemeLike): string {
 	if (!task) return "";
 	const lines: string[] = [];
 	appendExpandableLines(lines, task, options, theme, 10, "toolOutput");
@@ -221,10 +207,7 @@ export function renderSubagentCompletionText(
 	return text;
 }
 
-export function registerSubagentMessageRenderers(
-	pi: ExtensionAPI,
-	formatElapsed: (elapsed: number) => string,
-): void {
+export function registerSubagentMessageRenderers(pi: ExtensionAPI, formatElapsed: (elapsed: number) => string): void {
 	pi.registerMessageRenderer("subagent_result", (message, options, theme) => {
 		const details = message.details as SubagentResultMessageDetails | undefined;
 		if (!details) return undefined;
@@ -247,18 +230,7 @@ export function registerSubagentMessageRenderers(
 					details,
 				};
 				const box = new Box(1, 1, bgFn);
-				box.addChild(
-					new Text(
-						formatSubagentCompletionLines(
-							result,
-							options,
-							theme,
-							formatElapsed,
-						).join("\n"),
-						0,
-						0,
-					),
-				);
+				box.addChild(new Text(formatSubagentCompletionLines(result, options, theme, formatElapsed).join("\n"), 0, 0));
 				return ["", ...box.render(width)];
 			},
 		};
@@ -272,15 +244,10 @@ export function registerSubagentMessageRenderers(
 			invalidate() {},
 			render(width: number): string[] {
 				const name = details.name ?? "subagent";
-				const elapsed =
-					details.elapsed != null ? formatElapsed(details.elapsed) : "?";
-				const agentTag = details.agent
-					? theme.fg("dim", ` (${details.agent})`)
-					: "";
+				const elapsed = details.elapsed != null ? formatElapsed(details.elapsed) : "?";
+				const agentTag = details.agent ? theme.fg("dim", ` (${details.agent})`) : "";
 				const header = `${theme.fg("accent", "?")} ${theme.fg("toolTitle", theme.bold(name))}${agentTag} ${theme.fg("dim", "—")} needs help ${theme.fg("dim", `(${elapsed})`)}`;
-				const rawMessage =
-					details.message ??
-					(typeof message.content === "string" ? message.content : "");
+				const rawMessage = details.message ?? (typeof message.content === "string" ? message.content : "");
 				const body = stripSessionRef(rawMessage);
 				const contentLines = [header];
 
@@ -288,14 +255,10 @@ export function registerSubagentMessageRenderers(
 				if (options.expanded && details.sessionFile) {
 					contentLines.push("");
 					contentLines.push(theme.fg("dim", `Session: ${details.sessionFile}`));
-					contentLines.push(
-						theme.fg("dim", `Resume:  pi --session ${details.sessionFile}`),
-					);
+					contentLines.push(theme.fg("dim", `Resume:  pi --session ${details.sessionFile}`));
 				}
 
-				const box = new Box(1, 1, (text: string) =>
-					theme.bg("toolPendingBg", text),
-				);
+				const box = new Box(1, 1, (text: string) => theme.bg("toolPendingBg", text));
 				box.addChild(new Text(contentLines.join("\n"), 0, 0));
 				return ["", ...box.render(width)];
 			},

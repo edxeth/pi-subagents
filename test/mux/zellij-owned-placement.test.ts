@@ -11,10 +11,7 @@ import {
 	resetZellijPlacementStateForTests,
 	type ZellijPlacementContext,
 } from "../../src/mux/zellij-placement.ts";
-import {
-	getZellijShellCommand,
-	resolveZellijTargetFromSessions,
-} from "../../src/mux/zellij-runtime.ts";
+import { getZellijShellCommand, resolveZellijTargetFromSessions } from "../../src/mux/zellij-runtime.ts";
 import { watchSubagent } from "../../src/runtime/interactive-watch.ts";
 import type { RunningSubagent } from "../../src/types.ts";
 
@@ -35,14 +32,12 @@ const trackedEnv = [
 	"ZELLIJ_PANE_ID",
 	"ZELLIJ_SESSION_NAME",
 ] as const;
-const originalEnv = Object.fromEntries(
-	trackedEnv.map((key) => [key, process.env[key]]),
-) as Record<(typeof trackedEnv)[number], string | undefined>;
+const originalEnv = Object.fromEntries(trackedEnv.map((key) => [key, process.env[key]])) as Record<
+	(typeof trackedEnv)[number],
+	string | undefined
+>;
 
-function terminalPane(
-	id: number,
-	overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+function terminalPane(id: number, overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {
 		id,
 		is_plugin: false,
@@ -187,10 +182,7 @@ fi
 	});
 
 	it("splits only the parent for the first child and stacks siblings on the owned pane", async () => {
-		writePanes(panesFile, [
-			terminalPane(10),
-			terminalPane(20, { pane_columns: 300, title: "nvim" }),
-		]);
+		writePanes(panesFile, [terminalPane(10), terminalPane(20, { pane_columns: 300, title: "nvim" })]);
 		const context: ZellijPlacementContext = {
 			groupKey: "parent-session-a",
 			parentPaneId: 10,
@@ -231,11 +223,7 @@ fi
 		assert.equal(await createZellijSurface("right-first", right), "pane:30");
 		writePanes(panesFile, [terminalPane(10), terminalPane(30)]);
 		assert.equal(await createZellijSurface("down-first", down), "pane:31");
-		writePanes(panesFile, [
-			terminalPane(10),
-			terminalPane(30),
-			terminalPane(31),
-		]);
+		writePanes(panesFile, [terminalPane(10), terminalPane(30), terminalPane(31)]);
 		assert.equal(await createZellijSurface("right-second", right), "pane:32");
 
 		const log = readFileSync(logFile, "utf8");
@@ -325,10 +313,7 @@ fi
 		);
 
 		assert.equal(result.exitCode, 1);
-		assert.equal(
-			result.errorMessage,
-			"Zellij child pane exited without a completion signal.",
-		);
+		assert.equal(result.errorMessage, "Zellij child pane exited without a completion signal.");
 		assert.equal(closeCount, 1);
 		assert.match(
 			readFileSync(logFile, "utf8"),
@@ -344,10 +329,7 @@ fi
 			policy: "right-stack",
 		};
 		process.env.FAKE_ZELLIJ_GHOST = "1";
-		await assert.rejects(
-			() => createZellijSurface("ghost", context),
-			/pane:30.*never became live/,
-		);
+		await assert.rejects(() => createZellijSurface("ghost", context), /pane:30.*never became live/);
 
 		process.env.FAKE_ZELLIJ_GHOST = "0";
 		assert.equal(await createZellijSurface("real", context), "pane:31");

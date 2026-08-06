@@ -19,31 +19,13 @@ export const SUBAGENT_DONE_TOOL_NAME = "subagent_done";
  * Tools that LAUNCH a subagent run. Used by the mixed-batch classifier to
  * tell launches apart from siblings.
  */
-export const SUBAGENT_LAUNCH_TOOL_NAMES: ReadonlySet<string> = new Set([
-	SUBAGENT_TOOL_NAME,
-	SUBAGENT_RESUME_TOOL_NAME,
-]);
+export const SUBAGENT_LAUNCH_TOOL_NAMES: ReadonlySet<string> = new Set([SUBAGENT_TOOL_NAME, SUBAGENT_RESUME_TOOL_NAME]);
 
 /**
  * Tools the parent uses to manage subagents. Gated by `spawning: false` in
  * agent frontmatter.
  */
-export const SPAWNING_TOOL_NAMES: ReadonlySet<string> = new Set([
-	SUBAGENT_TOOL_NAME,
-	SUBAGENT_RESUME_TOOL_NAME,
-]);
-
-/**
- * Child-side protocol tools owned by pi-subagents. `caller_ping` and
- * `subagent_done` are kept available in narrowed child `tools:` allowlists
- * unless explicitly denied. `set_tab_title` is optional and is added only when
- * PI_SUBAGENT_ENABLE_SET_TAB_TITLE=1 and not denied.
- */
-export const SUBAGENT_PROTOCOL_TOOL_NAMES: readonly string[] = [
-	CALLER_PING_TOOL_NAME,
-	SUBAGENT_DONE_TOOL_NAME,
-	SET_TAB_TITLE_TOOL_NAME,
-];
+export const SPAWNING_TOOL_NAMES: ReadonlySet<string> = new Set([SUBAGENT_TOOL_NAME, SUBAGENT_RESUME_TOOL_NAME]);
 
 /**
  * pi-subagents-internal tools that should NOT count as a "non-subagent
