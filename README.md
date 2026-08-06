@@ -572,6 +572,8 @@ The `tools` field narrows the child to a Pi tool allowlist. Use built-in names s
 
 Pi silently ignores `--tools` names that are not registered by a built-in or a loaded extension. That means a typo (for example `tools: read,edti`) leaves the child silently without `edit`. pi-subagents surfaces a non-blocking warning in the subagent result when a name is within one edit of a built-in (`edti`→`edit`, `raed`→`read`); the launch still proceeds, because a near-miss name can be a legitimate custom tool (for example `hash` is one edit from `bash`). pi-subagents cannot validate arbitrary extension/custom tool names before the child loads its extensions, so ensure every custom/extension name in `tools:` is registered by an extension listed in `extensions:`.
 
+> **Allowlisted `skills:` need a tool named `read`.** Pi core renders the `<available_skills>` block in the child's system prompt only when the active tool set includes `read` (it checks `selectedTools.includes("read")`). If you narrow `tools:` to swap Pi's native file tools for an extension's replacements and drop `read`, every allowlisted (non-injected) skill becomes invisible to the child even though its files exist on disk. Keep the built-in `read` in `tools:` when a child relies on allowlisted skills. `inject-skills` is unaffected — injected skills are pasted into the task text directly. Note that some tool extensions re-inject skills through their own path and may not need `read`; check how yours handles skills.
+
 `deny-tools` is a final named tool denylist. It can remove built-in Pi tools, extension/custom tools, or pi-subagents protocol tools after they have otherwise been selected.
 
 ```md
