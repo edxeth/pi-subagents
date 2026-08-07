@@ -97,6 +97,44 @@ The backend command must exist, and Pi must be able to see the current pane or s
 
 Normal launches use a backend-specific surface. Herdr keeps children beside the parent while the tab has room, then uses dedicated tabs for overflow. Every Herdr child pane is labeled with its session title, such as `[reviewer] Auth implementation review`. Other backends may use windows, splits, or stacked panes.
 
+### Named root agents
+
+A named agent definition can configure the main Pi session directly. Select one
+with the extension CLI flag or environment variable:
+
+```bash
+pi --agent reviewer
+PI_MAIN_AGENT=reviewer pi
+```
+
+`--agent` takes precedence over `PI_MAIN_AGENT`. The selected definition is
+resolved from the normal native and external agent sources; project definitions
+retain their existing precedence. An unknown name emits a warning and safely
+falls back to Pi's normal session, without spawning a child process.
+
+Root-agent behavior in Phase 1:
+
+- `model` and `thinking` are applied through Pi's model and thinking APIs when
+the requested model is available; unavailable models leave the current model
+unchanged.
+- `tools: all`, `tools: none`, or a comma-separated allowlist controls the main
+session. With no `tools` field, Pi's current active tools are preserved;
+`spawning: false` always removes only `subagent` and `subagent_resume`, even
+when an explicit tool set contains them. `deny-tools` is applied last.
+- `system-prompt: append` adds the definition body to Pi's assembled prompt;
+`system-prompt: replace` uses the definition body as the base and preserves
+`APPEND_SYSTEM.md` content. An omitted mode uses append behavior for the root
+body.
+- `inject-skills` loads and injects skill content into the root prompt using the
+same skill resolver as children. Root skill availability (`skills:`) is not
+rewired after startup in Phase 1 because Pi does not expose a public runtime
+skill-allowlist API.
+- `spawning` controls whether the main session can launch subagents. Existing
+`PI_ORCHESTRATOR_MODE=1` behavior takes precedence over root-agent policy.
+
+Child launches are unchanged; `mode`, `async`, `blocking`, `session-mode`,
+`auto-exit`, `parent-close-policy`, and child cwd behavior remain child-only.
+
 ### Orchestrator mode
 
 You can turn the parent session into an orchestrator — an agent that can only

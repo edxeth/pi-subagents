@@ -487,11 +487,13 @@ describe("agent launch configuration", () => {
 		assert.equal(env.PI_SUBAGENT_NAME, "x");
 	});
 
-	it("clears inherited package-dir override for child launches", () => {
+	it("clears inherited package-dir and root-agent selectors for child launches", () => {
 		process.env.PI_PACKAGE_DIR = "/tmp/pi-package";
+		process.env.PI_MAIN_AGENT = "root";
 		const env = getBaseSubagentEnvVarsForTest(null);
 
 		assert.equal(env.PI_PACKAGE_DIR, "");
+		assert.equal(env.PI_MAIN_AGENT, "");
 	});
 
 	it("clears a parent child's generated append prompt before launching a nested child", () => {

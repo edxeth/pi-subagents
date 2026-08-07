@@ -76,12 +76,30 @@ import { markInitialPromptLaunchComplete, registerSubagentCoreTools } from "./to
 import { traceSubagentLaunch } from "./launch/trace.ts";
 import { registerSubagentsView } from "./tools/subagents-view.ts";
 import { discoverExternalAgentSources } from "./agents/external-sources.ts";
+import { ROOT_AGENT_FLAG } from "./agents/root-agent.ts";
+import {
+	applyRootAgentPolicy,
+	buildRootPrompt,
+	getRequestedRootAgentName,
+	prepareRootAgent,
+	type RootAgentRuntime,
+} from "./agents/root-agent-runtime.ts";
 
 export { markSubagentBatchBlocking as markSubagentBatchBlockingForTest } from "./runtime/state.ts";
 export { requestSubagentBatchStop as requestSubagentBatchStopForTest } from "./runtime/state.ts";
 export { getSubagentBatchStopMetadata as getSubagentBatchStopMetadataForTest } from "./runtime/state.ts";
 export { shouldAwaitSubagentLaunch as shouldAwaitSubagentLaunchForTest } from "./runtime/running-registry.ts";
 export { classifyAssistantMessageForMixedBatch as classifyAssistantMessageForMixedBatchForTest } from "./runtime/batch-classifier.ts";
+export {
+	ROOT_AGENT_ENV,
+	ROOT_AGENT_FLAG,
+	buildRootSystemPrompt,
+	getRootAgentDiagnostic,
+	parseRootToolNames,
+	resolveRootAgentName,
+	resolveRootModel,
+	resolveRootToolNames,
+} from "./agents/root-agent.ts";
 export * from "./testing/test-helpers.ts";
 
 export function loadAgentDefaults(
@@ -142,6 +160,19 @@ function muxUnavailableResult(kind: "subagents" | "tab-title" = "subagents") {
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
+	// `--agent` is registered by the extension so it works in Pi's normal CLI
+	// parser. PI_MAIN_AGENT remains useful for shell aliases and CI/print mode.
+	if (typeof pi.registerFlag === "function") {
+		try {
+			pi.registerFlag(ROOT_AGENT_FLAG, {
+				type: "string",
+				description: "Use a named agent definition as the main Pi agent",
+			});
+		} catch {
+			// A host may already own this flag. Environment selection still works.
+		}
+	}
+
 	function attachWidgetContext(ctx: ExtensionContext) {
 		widgetManager.attachContext(ctx);
 	}
@@ -158,11 +189,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const ORCHESTRATOR_MODE = process.env.PI_ORCHESTRATOR_MODE === "1";
 	const ORCHESTRATOR_ALLOWED_TOOLS = ORCHESTRATOR_ALLOWED_TOOL_NAMES;
 	let latestContext: ExtensionContext | undefined;
+	let rootAgentRuntime: RootAgentRuntime | null = null;
 
 	// Capture the UI context early so the widget keeps a stable slot above tasks.
 	pi.on("session_start", (event, ctx) => {
 		latestContext = ctx;
-		const finishSessionStart = () => {
+		const continueSessionStart = () => {
 			resetSubagentBatchStopRequest();
 			applySubagentLineage(ctx);
 			attachWidgetContext(ctx);
@@ -206,11 +238,32 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 		};
 
-		// Older/fake ExtensionAPI implementations may not expose the Pi event
-		// bus. Preserve their synchronous native behavior exactly.
+		const requestedRootAgent = getRequestedRootAgentName(pi);
+		if (!requestedRootAgent) {
+			// Older/fake ExtensionAPI implementations and ordinary sessions retain
+			// the original synchronous startup path exactly.
+			rootAgentRuntime = null;
+			if (!pi.events) return continueSessionStart();
+			return discoverExternalAgentSources(
+				pi.events,
+				ctx.cwd,
+				event.reason,
+				ctx.isProjectTrusted(),
+			)
+				.then(continueSessionStart)
+				.catch(continueSessionStart);
+		}
+
+		const finishSessionStart = async () => {
+			rootAgentRuntime = await prepareRootAgent(pi, ctx, requestedRootAgent);
+			await applyRootAgentPolicy(pi, ctx, rootAgentRuntime, ORCHESTRATOR_MODE);
+			return continueSessionStart();
+		};
+
+		// External definitions are discovered before root resolution so a named
+		// root can come from a registered provider as well as native files.
 		if (!pi.events) {
-			finishSessionStart();
-			return;
+			return finishSessionStart();
 		}
 		return discoverExternalAgentSources(
 			pi.events,
@@ -300,6 +353,14 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 		if (pendingAmbientRoster) {
 			lastAmbientRosterSignature = pendingAmbientRoster.signature;
 			pendingAmbientRoster = null;
+		}
+
+		if (!ORCHESTRATOR_MODE && rootAgentRuntime) {
+			const systemPrompt = buildRootPrompt(event, rootAgentRuntime);
+			return {
+				...(rosterResult ?? {}),
+				systemPrompt,
+			};
 		}
 
 		if (!ORCHESTRATOR_MODE) {

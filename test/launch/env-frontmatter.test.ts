@@ -61,6 +61,7 @@ describe("env frontmatter field", () => {
 		assert.equal(env["BAZ"], "value,with,commas");
 		assert.equal(typeof env.PI_SUBAGENT_NAME, "string");
 		assert.equal(env.PI_PACKAGE_DIR, "");
+		assert.equal(env.PI_MAIN_AGENT, "");
 	});
 
 	it("uses env PI_CODING_AGENT_DIR as the child config and session root", () => {

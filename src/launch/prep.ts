@@ -394,12 +394,17 @@ export function getBaseSubagentEnvVars(
 		agentDefs: AgentDefaults | null,
 	) => SubagentSessionMode,
 ): Record<string, string> {
-	const envVars: Record<string, string> = { PI_PACKAGE_DIR: "" };
+	// A named root agent belongs only to the top-level Pi process. Clear the
+	// inherited selector before launching children so child definitions retain
+	// their own role and do not accidentally reconfigure the root session.
+	const envVars: Record<string, string> = { PI_PACKAGE_DIR: "", PI_MAIN_AGENT: "" };
 	// Merge user-configured env vars from frontmatter first,
 	// so internal PI vars below can override them if needed.
 	if (prepared.agentDefs?.env) {
 		Object.assign(envVars, parseEnvString(prepared.agentDefs.env));
 	}
+	// The selector is process-role state, not an agent-configurable child env.
+	envVars.PI_MAIN_AGENT = "";
 	if (prepared.runtimePaths.localAgentConfigDir) {
 		envVars.PI_CODING_AGENT_DIR = prepared.runtimePaths.localAgentConfigDir;
 	} else if (process.env.PI_CODING_AGENT_DIR) {
