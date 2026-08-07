@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { realpathSync, rmSync } from "node:fs";
 import {
 	ASSISTANT_MSG,
 	MODEL_CHANGE,
@@ -646,7 +646,9 @@ describe("Herdr interactive launch parity", () => {
 		assert.equal(running.mode, "background");
 		assert.equal(running.surface, undefined);
 		assert.equal(running.modelContextWindow, 2048);
-		assert.match(childLog, new RegExp(`PWD=${childCwd.replace(/'/g, "'\\''")}`));
+		const expectedChildCwd = realpathSync(childCwd);
+		const escapedChildCwd = expectedChildCwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		assert.match(childLog, new RegExp(`PWD=${escapedChildCwd}`));
 		assert.match(childLog, /CUSTOM_ENV=from-background-agent/);
 		assert.match(childLog, /SURFACE=\n/);
 		assert.match(childLog, /--no-approve/);
