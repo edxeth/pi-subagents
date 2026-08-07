@@ -420,6 +420,12 @@ export default function (pi: ExtensionAPI) {
 				}
 				if (operatorInputQueuedThisRun && autoExitDisabledByOperator && isInteractive) {
 					ctx.ui.setStatus(AUTO_EXIT_STATUS_KEY, "Auto-exit disabled — close manually or /auto-exit to re-enable");
+					// The turn still ended normally (operator steered or followed up
+					// rather than aborting), so the `!shouldExit` branch above did not
+					// fire its toast. Notify here too so the operator learns auto-exit
+					// is now off and how to re-arm it — a quiet status line is easy to
+					// miss during an active session.
+					ctx.ui.notify("Auto-exit disabled — close manually or /auto-exit to re-enable", "warning");
 				}
 				providerErrorRecovery.cancelPendingRecovery(operatorInputQueuedThisRun);
 				cancelPendingPiRecovery();
