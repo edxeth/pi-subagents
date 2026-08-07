@@ -38,7 +38,7 @@ describe("subagent context reminders", () => {
 		const first = selectContextReminder(80, 5, { tokens: 160_000, contextWindow: 200_000, percent: 80 }, new Set());
 		assert.equal(first?.threshold, 80);
 		assert.match(first?.message ?? "", /160K\/200K tokens \(80\.0%\)/);
-		assert.match(first?.message ?? "", /Start wrapping up/);
+		assert.match(first?.message ?? "", /compaction is approaching/);
 
 		const second = selectContextReminder(
 			80,
@@ -47,7 +47,7 @@ describe("subagent context reminders", () => {
 			new Set(first?.sentThresholds),
 		);
 		assert.equal(second?.threshold, 85);
-		assert.match(second?.message ?? "", /Wrap up now/);
+		assert.match(second?.message ?? "", /Wrap up now, even if the work is partially finished/);
 
 		const third = selectContextReminder(
 			80,
@@ -56,7 +56,7 @@ describe("subagent context reminders", () => {
 			new Set(second?.sentThresholds),
 		);
 		assert.equal(third?.threshold, 90);
-		assert.match(third?.message ?? "", /Finish immediately/);
+		assert.match(third?.message ?? "", /deliver your result now per your instructions/);
 		assert.equal(
 			selectContextReminder(
 				80,
@@ -72,7 +72,7 @@ describe("subagent context reminders", () => {
 		const reminder = selectContextReminder(80, 5, { tokens: 182_000, contextWindow: 200_000, percent: 91 }, new Set());
 		assert.equal(reminder?.threshold, 90);
 		assert.deepEqual(reminder?.sentThresholds, [80, 85, 90]);
-		assert.match(reminder?.message ?? "", /Final context warning/);
+		assert.match(reminder?.message ?? "", /compaction is imminent/);
 	});
 
 	it("queues one reminder from tool results while a long agent run is active", () => {

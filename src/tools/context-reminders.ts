@@ -77,19 +77,19 @@ function getReminderMessage(stage: number, usage: SubagentContextUsage): string 
 	const currentUsage = formatUsage(usage);
 	if (stage === 0) {
 		return (
-			`Context reminder: ${currentUsage} used. ` +
-			"Start wrapping up the current work. Finish the immediate unit, preserve essential findings, and prepare a clean final result before compaction."
+			`Your own context window is at ${currentUsage}; compaction is approaching. ` +
+			"Avoid new scope and start bringing the current work to a close."
 		);
 	}
 	if (stage === 1) {
 		return (
-			`Context warning: ${currentUsage} used. ` +
-			"Wrap up now. Stop expanding scope, complete the current unit, and prepare your final response while the earlier context is still intact."
+			`Your own context window is at ${currentUsage}; compaction is close. ` +
+			"Wrap up now, even if the work is partially finished — still complete and report per your instructions."
 		);
 	}
 	return (
-		`Final context warning: ${currentUsage} used. ` +
-		"Finish immediately and return the best complete result now before compaction removes earlier details."
+		`Your own context window is critically full (${currentUsage}); compaction is imminent. ` +
+		"Stop taking new actions and deliver your result now per your instructions, even if incomplete."
 	);
 }
 
