@@ -11,6 +11,8 @@ import {
 } from "../session/session-files.ts";
 import { PI_SUBAGENT_CONTEXT_WARN_STEP, PI_SUBAGENT_CONTEXT_WARN_THRESHOLD } from "../tools/context-reminders.ts";
 import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
+import { SPAWNING_TOOL_NAMES } from "../tools/tool-names.ts";
+import { parseSpawnEnv, resolveSpawnPolicy, type SpawnPolicyResult } from "../spawn/policy.ts";
 import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
 import { buildAppendSystemInheritancePlan } from "./append-system.ts";
 import { parseCommandWords } from "./child-command.ts";
@@ -70,6 +72,7 @@ export interface PreparedSubagentLaunch {
 	identityInSystemPrompt: boolean;
 	/** Original agent-level auto-exit, preserved before any headless-mode override. */
 	agentAutoExit?: boolean;
+	spawnPolicy?: SpawnPolicyResult;
 }
 
 function loadAgentDefaults(
@@ -80,12 +83,29 @@ function loadAgentDefaults(
 	return loadAgentDefaultsFromDefinitions(agentName, cwdHint, baseCwd, resolveSubagentCwd);
 }
 
+function resolvePreparedSpawnPolicy(params: SubagentParamsInput, agentDefs: AgentDefaults | null): SpawnPolicyResult {
+	const callerEnv = parseSpawnEnv(process.env);
+	return resolveSpawnPolicy({
+		callerAgent: callerEnv.callerAgent,
+		targetAgent: params.agent,
+		callerBudget: callerEnv.callerBudget,
+		callerSpawnable: callerEnv.callerSpawnable,
+		targetSpawning: agentDefs?.spawning ?? false,
+		targetSpawnDepth: agentDefs?.spawnDepth,
+		targetSpawnWidth: agentDefs?.spawnWidth,
+		targetVisibleTo: agentDefs?.visibleTo ?? ["all"],
+		envDepthCeiling: callerEnv.envDepthCeiling,
+		envWidthCeiling: callerEnv.envWidthCeiling,
+	});
+}
+
 export async function prepareSubagentLaunch(
 	params: SubagentParamsInput,
 	ctx: SubagentLaunchContext,
 	mode: ResumeMode = "background",
 ): Promise<PreparedSubagentLaunch> {
 	const agentDefs = params.agent ? loadAgentDefaults(params.agent, params.cwd, ctx.cwd) : null;
+	const spawnPolicy = resolvePreparedSpawnPolicy(params, agentDefs);
 	// Preserve the original agent-level auto-exit before any headless-mode override
 	// so that persisted metadata always reflects the agent file, not the runtime override.
 	const agentAutoExit = agentDefs?.autoExit;
@@ -141,6 +161,7 @@ export async function prepareSubagentLaunch(
 		identity,
 		identityInSystemPrompt,
 		agentAutoExit,
+		spawnPolicy,
 	};
 }
 
@@ -301,6 +322,12 @@ export function buildPersistedSubagentLaunchMetadata(
 		...(prepared.effectiveSkills ? { skills: prepared.effectiveSkills } : {}),
 		...(prepared.effectiveInjectSkills ? { injectSkills: prepared.effectiveInjectSkills } : {}),
 		denyTools: [...prepared.denySet],
+		...(prepared.spawnPolicy
+			? {
+					spawnableAgents: prepared.spawnPolicy.spawnableAgents,
+					spawnBudget: prepared.spawnPolicy.childBudget,
+				}
+			: {}),
 		...(prepared.effectiveExtensions !== undefined ? { extensions: prepared.effectiveExtensions } : {}),
 		noContextFiles: resolveSubagentNoContextFiles(prepared.agentDefs),
 		inheritAppendSystem: prepared.agentDefs?.inheritAppendSystem === true,
@@ -336,14 +363,23 @@ export function getBaseSubagentEnvVars(
 	// Merge user-configured env vars from frontmatter first,
 	// so internal PI vars below can override them if needed.
 	if (prepared.agentDefs?.env) {
-		Object.assign(envVars, parseEnvString(prepared.agentDefs.env));
+		const configuredEnv = parseEnvString(prepared.agentDefs.env);
+		for (const key of [
+			"PI_SUBAGENT_SPAWN_DEPTH",
+			"PI_SUBAGENT_SPAWN_WIDTH",
+			"PI_SUBAGENT_SPAWN_WIDTH_EFFECTIVE",
+			"PI_SUBAGENT_SPAWN_BUDGET",
+			"PI_SUBAGENT_SPAWNABLE",
+		]) {
+			delete configuredEnv[key];
+		}
+		Object.assign(envVars, configuredEnv);
 	}
 	if (prepared.runtimePaths.localAgentConfigDir) {
 		envVars.PI_CODING_AGENT_DIR = prepared.runtimePaths.localAgentConfigDir;
 	} else if (process.env.PI_CODING_AGENT_DIR) {
 		envVars.PI_CODING_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
 	}
-	if (prepared.denySet.size > 0) envVars.PI_DENY_TOOLS = [...prepared.denySet].join(",");
 	if (prepared.effectiveExtensions !== undefined) {
 		envVars.PI_SUBAGENT_EXTENSIONS = prepared.effectiveExtensions.join(",");
 	}
@@ -354,6 +390,17 @@ export function getBaseSubagentEnvVars(
 	envVars[PI_SUBAGENT_CONTEXT_WARN_STEP] = prepared.agentDefs?.contextWarnStep ?? "";
 	envVars.PI_SUBAGENT_NAME = params.name;
 	if (params.agent) envVars.PI_SUBAGENT_AGENT = params.agent;
+	const spawnPolicy = prepared.spawnPolicy ?? resolvePreparedSpawnPolicy(params, prepared.agentDefs);
+	envVars.PI_SUBAGENT_SPAWN_BUDGET = String(spawnPolicy.childBudget ?? 0);
+	envVars.PI_SUBAGENT_SPAWN_WIDTH_EFFECTIVE =
+		spawnPolicy.effectiveWidth === null ? "" : String(spawnPolicy.effectiveWidth);
+	envVars.PI_SUBAGENT_SPAWNABLE =
+		spawnPolicy.spawnableAgents === true ? "true" : spawnPolicy.spawnableAgents.join(",");
+	const deniedTools = new Set(prepared.denySet);
+	if (spawnPolicy.childBudget === null) {
+		for (const toolName of SPAWNING_TOOL_NAMES) deniedTools.add(toolName);
+	}
+	if (deniedTools.size > 0) envVars.PI_DENY_TOOLS = [...deniedTools].join(",");
 	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
 	if (sessionMode !== "standalone") if (prepared.sessionFile) envVars.PI_SUBAGENT_PARENT_SESSION = prepared.sessionFile;
 	envVars.PI_ARTIFACT_PROJECT_ROOT = getArtifactStorageRoot();

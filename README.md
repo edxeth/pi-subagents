@@ -169,7 +169,10 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `context-warn-threshold` | `off` | Send the sub-agent a wrap-up warning when its context window reaches this percentage (`1%`–`99%`). Two more warnings follow at each `context-warn-step` above it. Example: `80%` warns at 80%, 85%, and 90%. |
 | `context-warn-step` | `5%` | The percentage gap between each warning (minimum `1%`). A warning above 99% moves down to 99% so it still arrives before compaction. Decimals round down. |
 | `report-context-usage` | `true` | Add the child's final context use to the result that the parent receives. |
-| `spawning` | `false` | Allow the child to launch subagents |
+| `spawning` | `false` | Let this child launch subagents of its own. `true` lets it launch any agent. A comma-separated list of agent names (for example `spawning: researcher, reviewer`) lets it launch only those agents. |
+| `spawn-depth` | `1` | How many levels of subagents may run below this child. Each subagent it launches gets one less. A subagent left with `0` has no launching tools, so the chain stops. Omit to use the default. |
+| `spawn-width` | omitted | The most subagents this child may run at the same time. Must be a positive whole number. Omit for no limit (a hard ceiling of 16 always applies). |
+| `visible-to` | `all` | Who may launch this agent: `all` (anyone), `root` (only the top-level session), or a comma-separated list of agent names. |
 | `async` | `true` | `false` makes the launch sync |
 | `mode` | `interactive` | `interactive` pane or `background` process |
 | `parent-close-policy` | `terminate` | What happens to the child when the parent session exits: `terminate` (kill) or `continue` (leave running) |
@@ -585,8 +588,13 @@ deny-tools: bash,edit,write,ask_user
 ---
 ```
 
-`spawning` defaults to `false`. That removes `subagent` and `subagent_resume` from children. Set `spawning: true` only for coordinator agents.
+By default a child cannot launch subagents: `spawning` is `false`, which removes its `subagent` and `subagent_resume` tools. Set `spawning` only on agents that coordinate others. The four fields above define what such a child may do; this section adds the rules the table cannot show.
 
+`spawn-depth` is what stops two agents that launch each other from looping forever: the allowance drops by one at each level and never rises. `spawn-depth` and `spawn-width` bound a single burst of launches; they do not cap total token use over a long conversation. These fields are guardrails, not a security sandbox — a child that has `bash` or arbitrary extensions can still run `pi` itself.
+
+Two environment variables set global ceilings when you start Pi: `PI_SUBAGENT_SPAWN_DEPTH` and `PI_SUBAGENT_SPAWN_WIDTH`. An agent file can tighten these for its own subtree but never raise them.
+
+A child's launch allowances are saved in its launch metadata and narrowed again on resume — resuming never restores a larger allowance, and the first metadata entry is authoritative, so a child cannot grant itself more by writing to its own session file.
 ## Parent shutdown policy
 
 Set `parent-close-policy` in the agent frontmatter:

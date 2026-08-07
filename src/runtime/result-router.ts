@@ -1,5 +1,6 @@
 import type { CompletedSubagentResult, RunningSubagent, SubagentPingMessageDetails, SubagentResult } from "../types.ts";
 import { formatFinalContextUsage } from "./final-context-usage.ts";
+import { releaseSpawnWidthSlot } from "./spawn-width.ts";
 import {
 	buildCompletedSubagentResult,
 	cacheCompletedSubagentResult,
@@ -49,6 +50,7 @@ export function routeSubagentOutcome(options: RouteSubagentOutcomeOptions): Rout
 		running.allowSteerDelivery === false && !running.resultOwner
 			? buildCompletedSubagentResult(running, result)
 			: cacheCompletedSubagentResult(running, result);
+	releaseSpawnWidthSlot(running);
 	runningSubagents.delete(running.id);
 	updateWidget();
 	if (running.allowSteerDelivery === false) {

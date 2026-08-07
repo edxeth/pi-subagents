@@ -13,7 +13,10 @@ export interface AgentDefaults {
 	extensions?: string;
 	thinking?: string;
 	denyTools?: string;
-	spawning?: boolean;
+	spawning?: true | string[] | false;
+	spawnDepth?: number;
+	spawnWidth?: number;
+	visibleTo?: string[];
 	autoExit?: boolean;
 	systemPromptMode?: "append" | "replace";
 	cwd?: string;
@@ -58,9 +61,10 @@ function parseAgentDefinition(
 	if (!match) return null;
 	const frontmatter = match[1];
 	const get = (key: string) => {
-		const m = frontmatter.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+		const m = frontmatter.match(new RegExp(`^${key}:[ \\t]*(.+)$`, "m"));
 		return m ? m[1].trim() : undefined;
 	};
+	const hasKey = (key: string) => new RegExp(`^${key}:`, "m").test(frontmatter);
 	const getBlock = (key: string) => {
 		const inline = get(key);
 		if (inline !== "|") return inline;
@@ -91,6 +95,8 @@ function parseAgentDefinition(
 	const contextWarnThresholdRaw = get("context-warn-threshold");
 	const contextWarnStepRaw = get("context-warn-step");
 	const reportContextUsageRaw = get("report-context-usage");
+	const spawnDepthRaw = get("spawn-depth");
+	const spawnWidthRaw = get("spawn-width");
 
 	const systemPromptRaw = get("system-prompt");
 	const extensionsRaw = get("extensions");
@@ -98,6 +104,10 @@ function parseAgentDefinition(
 	const flagsRaw = get("flags");
 	const parentClosePolicyRaw = get("parent-close-policy");
 	const body = content.replace(/^---\n[\s\S]*?\n---\n*/, "").trim();
+	const spawning = parseSpawning(spawningRaw);
+	const spawnDepth = parsePositiveInteger("spawn-depth", spawnDepthRaw, hasKey("spawn-depth"));
+	const spawnWidth = parsePositiveInteger("spawn-width", spawnWidthRaw, hasKey("spawn-width"));
+	const visibleTo = parseVisibleTo(get("visible-to"));
 	return {
 		name: get("name") ?? basename(path, ".md"),
 		description: get("description"),
@@ -113,7 +123,10 @@ function parseAgentDefinition(
 		extensions: extensionsRaw,
 		thinking: get("thinking"),
 		denyTools: get("deny-tools"),
-		spawning: spawningRaw != null ? spawningRaw === "true" : false,
+		spawning,
+		...(spawnDepth !== undefined ? { spawnDepth } : {}),
+		...(spawnWidth !== undefined ? { spawnWidth } : {}),
+		visibleTo,
 		autoExit: autoExitRaw != null ? autoExitRaw === "true" : undefined,
 		systemPromptMode: systemPromptRaw === "append" || systemPromptRaw === "replace" ? systemPromptRaw : undefined,
 		cwd: get("cwd"),
@@ -139,6 +152,44 @@ function parseAgentDefinition(
 		parentClosePolicy:
 			parentClosePolicyRaw === "terminate" || parentClosePolicyRaw === "continue" ? parentClosePolicyRaw : undefined,
 	};
+}
+
+const RESERVED_SPAWNING_NAMES = new Set(["root", "all", "true", "false"]);
+
+function parseCommaSeparated(value: string): string[] {
+	return value
+		.split(",")
+		.map((token) => token.trim())
+		.filter(Boolean);
+}
+
+function parseSpawning(raw: string | undefined): true | string[] | false {
+	if (raw === undefined || raw === "false") return false;
+	if (raw === "true") return true;
+	const names = parseCommaSeparated(raw);
+	for (const name of names) {
+		if (RESERVED_SPAWNING_NAMES.has(name)) {
+			throw new Error(`Invalid spawning value: reserved agent name "${name}" cannot appear in a spawn list.`);
+		}
+	}
+	return names;
+}
+
+function parsePositiveInteger(key: string, raw: string | undefined, present: boolean): number | undefined {
+	if (!present) return undefined;
+	if (raw === undefined || !/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) {
+		throw new Error(`${key} must be a positive safe integer greater than 0.`);
+	}
+	return Number(raw);
+}
+
+function parseVisibleTo(raw: string | undefined): string[] {
+	if (raw === undefined) return ["all"];
+	const names = parseCommaSeparated(raw);
+	if (names.includes("all") && names.length > 1) {
+		throw new Error('visible-to cannot mix "all" with other agent names.');
+	}
+	return names;
 }
 
 export type ResolveAgentCwd = (cwdHint: string | null, baseCwd: string) => string;

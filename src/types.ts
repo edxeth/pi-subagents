@@ -86,6 +86,7 @@ export interface RunningSubagent {
 	reportContextUsage?: boolean;
 	resultOwner?: { kind: CompletedDelivery; ownerId: string };
 	completionPromise?: Promise<SubagentResult>;
+	spawnWidthSlotAcquired?: boolean;
 	surface?: string;
 	childProcess?: ChildProcess;
 	stderrTail?: string;

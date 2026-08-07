@@ -16,13 +16,36 @@ export interface AgentListEntry {
 	thinking?: string;
 	allowedModels?: string;
 	allowModelOverride?: boolean;
+	spawning: true | string[] | false;
+	spawnDepth?: number;
+	spawnWidth?: number;
+	visibleTo: string[];
+}
+
+export interface AgentListOptions {
+	callerAgent: string | null;
+	callerSpawnable: string[] | true;
 }
 
 export type ResolveSubagentSessionMode = (agent: ResolvedAgentDefinition) => SubagentSessionMode;
 
-export function getAgentListEntries(baseCwd: string, resolveSessionMode: ResolveSubagentSessionMode): AgentListEntry[] {
+export function getAgentListEntries(
+	baseCwd: string,
+	resolveSessionMode: ResolveSubagentSessionMode,
+	options: AgentListOptions = { callerAgent: null, callerSpawnable: true },
+): AgentListEntry[] {
 	return getEffectiveAgentDefinitions(baseCwd)
 		.filter((agent) => agent.description?.trim())
+		.filter(
+			(agent) =>
+				(options.callerAgent === null ||
+					options.callerSpawnable === true ||
+					options.callerSpawnable.includes(agent.name)) &&
+				(agent.visibleTo?.includes("all") ||
+					(options.callerAgent === null
+						? agent.visibleTo?.includes("root")
+						: options.callerAgent !== "root" && agent.visibleTo?.includes(options.callerAgent))),
+		)
 		.map((agent) => ({
 			name: agent.name,
 			source: agent.source,
@@ -35,6 +58,10 @@ export function getAgentListEntries(baseCwd: string, resolveSessionMode: Resolve
 			thinking: agent.thinking,
 			allowedModels: agent.allowedModels,
 			allowModelOverride: agent.allowModelOverride,
+			spawning: agent.spawning ?? false,
+			...(agent.spawnDepth !== undefined ? { spawnDepth: agent.spawnDepth } : {}),
+			...(agent.spawnWidth !== undefined ? { spawnWidth: agent.spawnWidth } : {}),
+			visibleTo: agent.visibleTo ?? ["all"],
 		}));
 }
 
@@ -68,23 +95,36 @@ function renderModelsLine(entry: AgentListEntry): string | undefined {
 	return `  models: ${choices.join(" | ")}`;
 }
 
+function renderSpawningLines(entry: AgentListEntry): string[] {
+	if (entry.spawning === false || (Array.isArray(entry.spawning) && entry.spawning.length === 0)) return [];
+	return [
+		`  spawning: ${entry.spawning === true ? "true" : entry.spawning.join(", ")}`,
+		...(entry.spawnDepth !== undefined ? [`  spawn-depth: ${entry.spawnDepth}`] : []),
+		...(entry.spawnWidth !== undefined ? [`  spawn-width: ${entry.spawnWidth}`] : []),
+	];
+}
+
 export function renderAgentListReminder(entries: AgentListEntry[]): string {
 	const hasModelInfo = entries.some(
 		(entry) => buildModelRef(entry.model, entry.thinking) || entry.allowModelOverride !== false,
 	);
-	const agentLines = entries.map((entry) => {
-		return [
-			`- \`${entry.name}\`: ${entry.description}`,
-			`  tool_return: ${getToolReturn(entry)}`,
-			`  runs_as: ${getRunsAs(entry)}`,
-			`  context: ${getContext(entry)}`,
-			`  completion: ${getCompletion(entry)}`,
-			renderDefaultModelLine(entry),
-			renderModelsLine(entry),
-		]
-			.filter(Boolean)
-			.join("\n");
-	});
+	const agentLines =
+		entries.length === 0
+			? ["No agents are spawnable in this session."]
+			: entries.map((entry) => {
+					return [
+						`- \`${entry.name}\`: ${entry.description}`,
+						`  tool_return: ${getToolReturn(entry)}`,
+						`  runs_as: ${getRunsAs(entry)}`,
+						`  context: ${getContext(entry)}`,
+						`  completion: ${getCompletion(entry)}`,
+						renderDefaultModelLine(entry),
+						renderModelsLine(entry),
+						...renderSpawningLines(entry),
+					]
+						.filter(Boolean)
+						.join("\n");
+				});
 	const body = [
 		"You can launch separate helper agents with the subagent tool. Use this roster to choose exact agent names and to understand how each launched agent behaves.",
 		"<subagent-roster>",
@@ -123,6 +163,10 @@ export function getAgentListSignature(entries: AgentListEntry[]): string {
 			thinking: entry.thinking,
 			allowedModels: entry.allowedModels,
 			allowModelOverride: entry.allowModelOverride,
+			spawning: entry.spawning,
+			spawnDepth: entry.spawnDepth,
+			spawnWidth: entry.spawnWidth,
+			visibleTo: entry.visibleTo,
 		})),
 	);
 }

@@ -15,6 +15,9 @@ export interface ChildContextBoundaryOptions {
 	name: string;
 	agent?: string;
 	spawningAllowed: boolean;
+	spawnableAgents?: string[] | true;
+	spawnBudget?: number | null;
+	spawnWidth?: number | null;
 }
 
 export type ResumeMode = "interactive" | "background";
@@ -49,6 +52,10 @@ export interface PersistedSubagentLaunchMetadata {
 	skills?: string;
 	injectSkills?: string;
 	denyTools: string[];
+	/** Optional for legacy sessions; resume treats a missing grant as deny-all. */
+	spawnableAgents?: string[] | true;
+	/** Optional for legacy sessions; resume treats a missing grant as zero. */
+	spawnBudget?: number | null;
 	extensions?: string[];
 	noContextFiles: boolean;
 	inheritAppendSystem?: boolean;
@@ -143,7 +150,19 @@ export function seedSubagentSessionFile(
 			writeHeaderOnlySubagentSessionFile(childSessionFile, cwd, parentSessionFile, seedOptions?.sessionName);
 			return;
 		}
-		const branch = parentManager.getBranch(leafId);
+		// Filter roster reminders out of the inherited branch, then re-chain the
+		// surviving entries. getBranch walks parentId links, so dropping an entry
+		// without re-linking leaves the next entry pointing at a missing id and
+		// silently truncates the fork's inherited context at that point.
+		const rawBranch = parentManager.getBranch(leafId);
+		const branch: Array<Record<string, unknown>> = [];
+		let prevId: string | null = null;
+		for (const entry of rawBranch) {
+			if ((entry as { customType?: unknown }).customType === "subagent_roster") continue;
+			const e = entry as unknown as Record<string, unknown> & { id?: unknown; parentId?: unknown };
+			branch.push({ ...e, ...(typeof e.id === "string" ? { parentId: prevId } : {}) });
+			if (typeof e.id === "string") prevId = e.id;
+		}
 		if (branch.length === 0) {
 			writeHeaderOnlySubagentSessionFile(childSessionFile, cwd, parentSessionFile, seedOptions?.sessionName);
 			return;
@@ -307,20 +326,28 @@ export function getSubagentActivityStartIndex(
 	return 0;
 }
 
-export function readSubagentLaunchMetadata(path: string): PersistedSubagentLaunchMetadata | undefined {
+export function readSubagentLaunchMetadataEntries(path: string): PersistedSubagentLaunchMetadata[] {
+	const metadata: PersistedSubagentLaunchMetadata[] = [];
 	try {
 		const entries = getEntries(path) as Array<Record<string, unknown>>;
-		for (let i = entries.length - 1; i >= 0; i--) {
-			const entry = entries[i];
+		for (const entry of entries) {
 			if (entry?.type !== "custom" || entry.customType !== SUBAGENT_LAUNCH_METADATA_CUSTOM_TYPE) continue;
 			const data = entry.data as Partial<PersistedSubagentLaunchMetadata> | undefined;
-			if (!data || data.version !== 1 || !isResumeMode(data.mode)) return undefined;
-			return data as PersistedSubagentLaunchMetadata;
+			if (!data || data.version !== 1 || !isResumeMode(data.mode)) continue;
+			metadata.push(data as PersistedSubagentLaunchMetadata);
 		}
 	} catch {
-		return undefined;
+		return [];
 	}
-	return undefined;
+	return metadata;
+}
+
+/**
+ * Returns the first valid launch metadata entry. Later entries can be written
+ * by the child session itself, so they are not authoritative for launch grants.
+ */
+export function readSubagentLaunchMetadata(path: string): PersistedSubagentLaunchMetadata | undefined {
+	return readSubagentLaunchMetadataEntries(path)[0];
 }
 
 /**

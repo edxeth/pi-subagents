@@ -22,8 +22,8 @@ export const SUBAGENT_DONE_TOOL_NAME = "subagent_done";
 export const SUBAGENT_LAUNCH_TOOL_NAMES: ReadonlySet<string> = new Set([SUBAGENT_TOOL_NAME, SUBAGENT_RESUME_TOOL_NAME]);
 
 /**
- * Tools the parent uses to manage subagents. Gated by `spawning: false` in
- * agent frontmatter.
+ * Tools the parent uses to manage subagents. Gated by the spawning policy in
+ * agent frontmatter and the caller's inherited spawn budget.
  */
 export const SPAWNING_TOOL_NAMES: ReadonlySet<string> = new Set([SUBAGENT_TOOL_NAME, SUBAGENT_RESUME_TOOL_NAME]);
 

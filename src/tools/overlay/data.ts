@@ -124,7 +124,10 @@ function buildSections(defs: AgentDetailDefaults | null, meta?: PersistedSubagen
 		label: "inject-skills",
 		value: none(meta?.injectSkills ?? defs?.injectSkills),
 	});
-	fields.push({ label: "spawning", value: String(defs?.spawning ?? false) });
+	fields.push({
+		label: "spawning",
+		value: Array.isArray(defs?.spawning) ? defs.spawning.join(",") : String(defs?.spawning ?? false),
+	});
 	fields.push({
 		label: "no-context-files",
 		value: String(meta ? meta.noContextFiles : (defs?.noContextFiles ?? false)),

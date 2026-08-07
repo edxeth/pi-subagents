@@ -135,12 +135,35 @@ describe("child context boundary", () => {
 		const boundary = buildChildContextBoundaryForTest({
 			name: "coordinator",
 			spawningAllowed: true,
+			spawnableAgents: ["scout", "reviewer"],
+			spawnBudget: 2,
+			spawnWidth: 3,
 		});
 		assert.match(boundary, /Subagent-spawning tools may be available in this child session\./);
 		assert.match(
 			boundary,
 			/Use them only if they are actually available to you and your active assignment requires delegation\./,
 		);
+		assert.match(
+			boundary,
+			/You may spawn only these agents: scout, reviewer\. Remaining nested spawn budget: 2\. Max concurrent children: 3\./,
+		);
+		const unrestricted = buildChildContextBoundaryForTest({
+			name: "root-coordinator",
+			spawningAllowed: true,
+			spawnableAgents: true,
+			spawnBudget: 1,
+			spawnWidth: 4,
+		});
+		assert.match(unrestricted, /You may spawn any agent\./);
+		const denied = buildChildContextBoundaryForTest({
+			name: "worker",
+			spawningAllowed: false,
+			spawnableAgents: [],
+			spawnBudget: null,
+			spawnWidth: null,
+		});
+		assert.doesNotMatch(denied, /You may spawn/);
 	});
 
 	it("uses a small system prompt pointer to the boundary tag", () => {

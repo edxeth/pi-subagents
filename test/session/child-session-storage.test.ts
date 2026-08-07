@@ -9,6 +9,7 @@ import {
 	it,
 	join,
 	MODEL_CHANGE,
+	readFileSync,
 	SESSION_HEADER,
 	USER_MSG,
 	writeFileSync,
@@ -77,5 +78,52 @@ describe("child session storage", () => {
 		);
 		assert.deepEqual(storage.readLaunchMetadata(), metadata);
 		assert.deepEqual(storage.readExtensionEntry(), []);
+	});
+
+	it("strips inherited subagent rosters from fork seeds", () => {
+		const dir = createTestDir();
+		const parent = join(dir, "parent-roster.jsonl");
+		const child = join(dir, "child-roster.jsonl");
+		const roster = {
+			type: "custom_message",
+			customType: "subagent_roster",
+			id: "roster-001",
+			parentId: "asst-001",
+			content: "hidden agent names",
+		};
+		writeFileSync(
+			parent,
+			`${[SESSION_HEADER, USER_MSG, ASSISTANT_MSG, roster].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+		);
+
+		new ChildSessionStorage(child).seed("fork", parent, dir, { activeLeafId: roster.id });
+
+		const seeded = readFileSync(child, "utf8");
+		assert.doesNotMatch(seeded, /subagent_roster/);
+	});
+
+	it("re-chains parentId when a roster sits mid-branch so no context is truncated", () => {
+		const dir = createTestDir();
+		const parent = join(dir, "parent-mid.jsonl");
+		const child = join(dir, "child-mid.jsonl");
+		// message → roster → message → leaf: dropping the roster must not orphan the rest.
+		const msg1 = { type: "message", id: "m1", parentId: null, message: { role: "user", content: "first" } };
+		const roster = { type: "custom_message", customType: "subagent_roster", id: "r1", parentId: "m1", content: "x" };
+		const msg2 = { type: "message", id: "m2", parentId: "r1", message: { role: "assistant", content: "second" } };
+		const leaf = { type: "message", id: "m3", parentId: "m2", message: { role: "user", content: "third" } };
+		writeFileSync(parent, `${[SESSION_HEADER, msg1, roster, msg2, leaf].map((e) => JSON.stringify(e)).join("\n")}\n`);
+
+		new ChildSessionStorage(child).seed("fork", parent, dir, { activeLeafId: "m3" });
+
+		const entries = readFileSync(child, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+		const byId = new Map(entries.filter((e) => e.id).map((e) => [e.id, e]));
+		assert.ok(!byId.has("r1"), "roster stripped");
+		// m2 must be re-pointed at m1 (not the dropped r1), m3 at m2 — the walk reaches m1.
+		assert.equal(byId.get("m2")?.parentId, "m1");
+		assert.equal(byId.get("m3")?.parentId, "m2");
+		// Every entry's parentId resolves to a retained entry (or null) — no dangling refs.
+		for (const e of byId.values()) {
+			if (e.parentId != null) assert.ok(byId.has(e.parentId), `dangling parentId ${e.parentId}`);
+		}
 	});
 });

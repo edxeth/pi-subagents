@@ -23,7 +23,7 @@ const KNOWN_TOOL_NAMES = new Set<string>([
 
 /**
  * Resolve the effective set of denied tool names from agent defaults.
- * `spawning` defaults to false; only `spawning: true` allows spawning tools.
+ * `spawning` defaults to false; any truthy spawn list or `true` allows spawning tools.
  * `deny-tools` adds individual tool names on top.
  */
 export function resolveDenyTools(agentDefs: AgentDefaults | null): Set<string> {
@@ -31,7 +31,7 @@ export function resolveDenyTools(agentDefs: AgentDefaults | null): Set<string> {
 	if (!agentDefs) return denied;
 
 	// spawning defaults to false → deny all spawning tools unless explicitly enabled
-	if (agentDefs.spawning !== true) {
+	if (!agentDefs.spawning) {
 		for (const t of SPAWNING_TOOL_NAMES) denied.add(t);
 	}
 

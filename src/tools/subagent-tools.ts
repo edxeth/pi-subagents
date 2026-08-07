@@ -8,6 +8,7 @@ import {
 	resolveSubagentBlocking,
 } from "../launch/policy.ts";
 import type { SubagentLaunchContext } from "../launch/prep.ts";
+import { parseSpawnEnv, resolveSpawnPolicy } from "../spawn/policy.ts";
 import { isMuxAvailable } from "../mux.ts";
 import { findRunningSubagent } from "../runtime/running-registry.ts";
 import {
@@ -16,6 +17,14 @@ import {
 	getSubagentBatchStopMetadata,
 	markSubagentBatchBlocking,
 } from "../runtime/state.ts";
+import {
+	claimSpawnWidthSlot,
+	getLiveSlotCount,
+	getSpawnWidthLimit,
+	releaseSlots,
+	releaseSpawnWidthSlotOnCompletion,
+	tryAcquireSlots,
+} from "../runtime/spawn-width.ts";
 import type { RunningSubagent, SubagentParamsInput, SubagentResult } from "../types.ts";
 
 import { formatSubagentBatchLines, formatTaskPreview, renderSubagentCompletionText } from "./message-renderers.ts";
@@ -112,6 +121,25 @@ function getRequestedChildren(params: SubagentToolParams): SubagentParamsInput[]
 	return [params as SubagentParamsInput];
 }
 
+function getSpawnWidthError(text: string): ToolResult {
+	return asSubagentToolResult({
+		content: [{ type: "text" as const, text }],
+		details: { error: "spawn_width" },
+	});
+}
+
+function getBatchWidthValidationError(count: number, limit: number): ToolResult {
+	return getSpawnWidthError(
+		`Error: batch of ${count} subagents exceeds the spawn width limit of ${limit}. Launch fewer children in this batch.`,
+	);
+}
+
+function getSpawnWidthLimitError(limit: number): ToolResult {
+	return getSpawnWidthError(
+		`Spawn width limit reached (${getLiveSlotCount()}/${limit} slots busy). Wait for a running subagent to finish, or use subagent_kill to free a slot. Interactive children with auto-exit: false keep their slot until the pane closes.`,
+	);
+}
+
 export function getSubagentNameError(name: string | undefined): string | null {
 	const trimmed = name?.trim();
 	if (!trimmed) {
@@ -157,6 +185,20 @@ function getLaunchError(
 	if (params.agent && currentAgent && params.agent === currentAgent) {
 		return `You are the ${currentAgent} agent — do not start another ${currentAgent}. You were spawned to do this work yourself. Complete the task directly.`;
 	}
+	const callerEnv = parseSpawnEnv(process.env);
+	const spawnPolicy = resolveSpawnPolicy({
+		callerAgent: callerEnv.callerAgent,
+		targetAgent: params.agent ?? "",
+		callerBudget: callerEnv.callerBudget,
+		callerSpawnable: callerEnv.callerSpawnable,
+		targetSpawning: agentDefs?.spawning ?? false,
+		targetSpawnDepth: agentDefs?.spawnDepth,
+		targetSpawnWidth: agentDefs?.spawnWidth,
+		targetVisibleTo: agentDefs?.visibleTo ?? ["all"],
+		envDepthCeiling: callerEnv.envDepthCeiling,
+		envWidthCeiling: callerEnv.envWidthCeiling,
+	});
+	if (!spawnPolicy.allowed) return `Error: ${spawnPolicy.reason ?? "Spawn policy denied this target."}`;
 	return null;
 }
 
@@ -195,24 +237,30 @@ async function launchOneSubagent(
 	let running: RunningSubagent;
 	if (isBackground) {
 		running = await runtime.launchBackgroundSubagent(effectiveParams, launchCtx);
+		claimSpawnWidthSlot(running);
 		const watcherAbort = new AbortController();
 		running.abortController = watcherAbort;
-		running.completionPromise = runtime.watchBackgroundSubagent(
+		running.completionPromise = releaseSpawnWidthSlotOnCompletion(
 			running,
-			runtime.getWatcherSignal(running, watcherAbort),
+			runtime.watchBackgroundSubagent(running, runtime.getWatcherSignal(running, watcherAbort)),
 		);
 	} else if (ctx.hasUI && isMuxAvailable()) {
 		running = await runtime.launchSubagent(effectiveParams, launchCtx);
+		claimSpawnWidthSlot(running);
 		const watcherAbort = new AbortController();
 		running.abortController = watcherAbort;
-		running.completionPromise = runtime.watchSubagent(running, runtime.getWatcherSignal(running, watcherAbort));
+		running.completionPromise = releaseSpawnWidthSlotOnCompletion(
+			running,
+		runtime.watchSubagent(running, runtime.getWatcherSignal(running, watcherAbort)),
+		);
 	} else {
 		running = await runtime.launchBackgroundSubagent(effectiveParams, launchCtx);
+		claimSpawnWidthSlot(running);
 		const watcherAbort = new AbortController();
 		running.abortController = watcherAbort;
-		running.completionPromise = runtime.watchBackgroundSubagent(
+		running.completionPromise = releaseSpawnWidthSlotOnCompletion(
 			running,
-			runtime.getWatcherSignal(running, watcherAbort),
+		runtime.watchBackgroundSubagent(running, runtime.getWatcherSignal(running, watcherAbort)),
 		);
 	}
 	return running;
@@ -333,7 +381,9 @@ export function registerSubagentCoreTools(
 			parameters: SubagentParams,
 			execute: async (toolCallId, params, signal, _onUpdate, ctx) => {
 				const children = getRequestedChildren(params as SubagentToolParams);
-				const currentAgent = process.env.PI_SUBAGENT_AGENT;
+				const widthLimit = getSpawnWidthLimit();
+				if (children.length > widthLimit) return getBatchWidthValidationError(children.length, widthLimit);
+				const currentAgent = parseSpawnEnv(process.env).callerAgent ?? undefined;
 				const prepared = children.map((child) => {
 					const agentDefs = runtime.loadAgentDefaults(child.agent, ctx.cwd);
 					const error = getLaunchError(child, agentDefs, currentAgent);
@@ -345,16 +395,24 @@ export function registerSubagentCoreTools(
 						warning: getSubagentToolsWarning(agentDefs?.tools),
 					};
 				});
+				if (!tryAcquireSlots(children.length, widthLimit)) return getSpawnWidthLimitError(widthLimit);
+				let unlaunchedSlots = children.length;
 				const hasBlockingChild = prepared.some((entry) => entry.blocking);
-				if (prepared.length > 1 && hasBlockingChild) {
-					markSubagentBatchBlocking();
-				}
-
 				const launched: RunningSubagent[] = [];
-				for (const entry of prepared) {
-					const running = await launchOneSubagent(toolCallId, entry.child, entry.agentDefs, ctx, runtime, pi);
-					launched.push(running);
-					runtime.wireSubagentSteerBack(pi, running, running.completionPromise!);
+				try {
+					if (prepared.length > 1 && hasBlockingChild) {
+						markSubagentBatchBlocking();
+					}
+
+					for (const entry of prepared) {
+						const running = await launchOneSubagent(toolCallId, entry.child, entry.agentDefs, ctx, runtime, pi);
+						unlaunchedSlots--;
+						launched.push(running);
+						runtime.wireSubagentSteerBack(pi, running, running.completionPromise!);
+					}
+				} catch (error) {
+					releaseSlots(unlaunchedSlots);
+					throw error;
 				}
 				runtime.startWidgetRefresh();
 				const warnings = prepared.map((entry) => entry.warning?.message ?? "");

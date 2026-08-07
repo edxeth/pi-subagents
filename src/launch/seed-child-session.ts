@@ -49,9 +49,13 @@ export function seedPreparedSubagentSession(
 			activeLeafId: ctx.sessionManager.getLeafId?.(),
 		});
 		if (boundarySystemPrompt) {
+			const spawnPolicy = prepared.spawnPolicy;
 			const boundaryOptions = {
 				name: params.name,
-				spawningAllowed: prepared.agentDefs?.spawning === true,
+				spawningAllowed: spawnPolicy ? spawnPolicy.childBudget !== null : !!prepared.agentDefs?.spawning,
+				spawnableAgents: spawnPolicy?.spawnableAgents ?? [],
+				spawnBudget: spawnPolicy?.childBudget ?? null,
+				spawnWidth: spawnPolicy?.effectiveWidth ?? null,
 			};
 			storage.writeBoundary(boundaryOptions, buildChildContextBoundary(boundaryOptions));
 		}

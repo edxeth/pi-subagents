@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadAgentDefaults as loadAgentDefaultsFromDefinitions } from "../agents/definitions.ts";
 import { assertModelAllowed, buildModelRef, splitModelRef } from "../agents/model-refs.ts";
 import { getArtifactStorageRoot } from "../artifact-storage.ts";
 import { buildAppendSystemInheritancePlan } from "../launch/append-system.ts";
@@ -24,6 +25,7 @@ import {
 	resolveResumeLaunchMetadata,
 } from "../launch/resume.ts";
 import { expandSubagentTask } from "../launch/task-expansion.ts";
+import { resolveSubagentCwd } from "../launch/runtime-paths.ts";
 import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
 import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
 import {
@@ -42,12 +44,27 @@ import {
 	isResumeMode,
 	type PersistedSubagentLaunchMetadata,
 	readSubagentExtensionEntry,
-	readSubagentLaunchMetadata,
+	readSubagentLaunchMetadataEntries,
 	writeSubagentLaunchMetadataEntry,
 	writeSubagentModelStateEntries,
 } from "../session/session-files.ts";
+import {
+	buildResumeSpawnEnv,
+	narrowSpawnBudget,
+	parseSpawnEnv,
+	resolveSpawnPolicy,
+} from "../spawn/policy.ts";
 import { PI_SUBAGENT_CONTEXT_WARN_STEP, PI_SUBAGENT_CONTEXT_WARN_THRESHOLD } from "../tools/context-reminders.ts";
 import type { RunningSubagent, SubagentResult } from "../types.ts";
+import {
+	claimSpawnWidthSlot,
+	getLiveSlotCount,
+	getSpawnWidthLimit,
+	releaseSlots,
+	releaseSpawnWidthSlot,
+	releaseSpawnWidthSlotOnCompletion,
+	tryAcquireSlots,
+} from "./spawn-width.ts";
 
 export interface ResumeServiceRuntime {
 	getShellReadyDelayMs(): number;
@@ -155,6 +172,22 @@ export function resolveResumeLaunchMetadataForInvocation(
 	};
 }
 
+function mergeResumeInvocationMetadata(
+	launchMetadata: PersistedSubagentLaunchMetadata,
+	laterMetadata: PersistedSubagentLaunchMetadata,
+): PersistedSubagentLaunchMetadata {
+	return {
+		...launchMetadata,
+		...laterMetadata,
+		// A child can append metadata to its own session. Keep grant authority
+		// anchored to the first launch entry while allowing later entries to
+		// carry legitimate invocation changes such as model and thinking.
+		spawnBudget: launchMetadata.spawnBudget,
+		spawnableAgents: launchMetadata.spawnableAgents,
+		denyTools: launchMetadata.denyTools,
+	};
+}
+
 /**
  * Shared resume logic used by both the LLM subagent_resume tool and the
  * /subagents TUI overlay. Handles validation, deduplication, environment
@@ -168,6 +201,33 @@ export async function resumeSubagentSession(
 	input: ResumeSessionInput,
 	runtime: ResumeServiceRuntime,
 ): Promise<RunningSubagent> {
+	const widthLimit = getSpawnWidthLimit();
+	if (!tryAcquireSlots(1, widthLimit)) {
+		throw new Error(
+			`Spawn width limit reached (${getLiveSlotCount()}/${widthLimit} slots busy). Wait for a running subagent to finish, or use subagent_kill to free a slot. Interactive children with auto-exit: false keep their slot until the pane closes.`,
+		);
+	}
+
+	let claimedRunning: RunningSubagent | undefined;
+	try {
+		const running = await resumeSubagentSessionWithoutWidth(input, runtime);
+		claimSpawnWidthSlot(running);
+		claimedRunning = running;
+		if (running.completionPromise) {
+			running.completionPromise = releaseSpawnWidthSlotOnCompletion(running, running.completionPromise);
+		}
+		return running;
+	} catch (error) {
+		if (claimedRunning) releaseSpawnWidthSlot(claimedRunning);
+		else releaseSlots(1);
+		throw error;
+	}
+}
+
+async function resumeSubagentSessionWithoutWidth(
+	input: ResumeSessionInput,
+	runtime: ResumeServiceRuntime,
+): Promise<RunningSubagent> {
 	const { sessionFile, task } = input;
 
 	if (!existsSync(sessionFile)) {
@@ -176,14 +236,49 @@ export async function resumeSubagentSession(
 
 	const explicitMode = isResumeMode(input.mode) ? input.mode : undefined;
 	const metadata = resolveResumeLaunchMetadata(sessionFile, explicitMode);
-	const launchMetadata = readSubagentLaunchMetadata(sessionFile);
+	const launchMetadataEntries = readSubagentLaunchMetadataEntries(sessionFile);
+	const launchMetadata = launchMetadataEntries[0];
+	const latestLaunchMetadata = launchMetadataEntries[launchMetadataEntries.length - 1];
+	const invocationMetadataSource =
+		launchMetadata && latestLaunchMetadata && latestLaunchMetadata !== launchMetadata
+			? mergeResumeInvocationMetadata(launchMetadata, latestLaunchMetadata)
+			: launchMetadata;
 	const invocationMetadata = resolveResumeLaunchMetadataForInvocation(
-		launchMetadata,
+		invocationMetadataSource,
 		input.model,
 		input.thinking,
 		runtime.modelRegistry,
 	);
-	const shouldPersistInvocationMetadata = invocationMetadata && invocationMetadata !== launchMetadata;
+	const shouldPersistInvocationMetadata = invocationMetadata && invocationMetadata !== invocationMetadataSource;
+	const targetAgent = launchMetadata?.agent ?? metadata.agent ?? input.agent;
+	const targetCwd = launchMetadata?.cwd ?? invocationMetadataSource?.cwd ?? process.cwd();
+	const targetDefs = targetAgent
+		? loadAgentDefaultsFromDefinitions(targetAgent, undefined, targetCwd, resolveSubagentCwd)
+		: null;
+	const callerEnv = parseSpawnEnv(process.env);
+	const targetSpawning =
+		launchMetadata?.spawnableAgents === true ? true : (launchMetadata?.spawnableAgents ?? false);
+	const spawnPolicy = resolveSpawnPolicy({
+		callerAgent: callerEnv.callerAgent,
+		targetAgent: targetAgent ?? "",
+		callerBudget: callerEnv.callerBudget,
+		callerSpawnable: callerEnv.callerSpawnable,
+		targetSpawning,
+		targetSpawnDepth: launchMetadata?.spawnBudget ?? 0,
+		targetSpawnWidth: targetDefs?.spawnWidth,
+		targetVisibleTo: targetDefs?.visibleTo ?? ["all"],
+		envDepthCeiling: callerEnv.envDepthCeiling,
+		envWidthCeiling: callerEnv.envWidthCeiling,
+	});
+	if (!spawnPolicy.allowed) {
+		throw new Error(`Error: ${spawnPolicy.reason ?? "Spawn policy denied this target."}`);
+	}
+	const narrowedSpawnBudget = narrowSpawnBudget(
+		launchMetadata,
+		callerEnv.callerBudget,
+		callerEnv.envDepthCeiling,
+	);
+	const resumeSpawnEnv = buildResumeSpawnEnv(launchMetadata, narrowedSpawnBudget, spawnPolicy.effectiveWidth);
 	const name = invocationMetadata?.name ?? metadata.name ?? input.name ?? "Resume";
 	const displayName = input.name ?? name;
 
@@ -229,7 +324,19 @@ export async function resumeSubagentSession(
 	// Restore user-configured env vars from the original launch FIRST,
 	// so internal PI vars below can override them if needed.
 	if (invocationMetadata?.env) {
-		Object.assign(resumeEnvVars, parseEnvString(invocationMetadata.env));
+		const configuredEnv = parseEnvString(invocationMetadata.env);
+		// Strip internal spawn-grant vars from the persisted frontmatter env so a
+		// forged or stale value cannot override the narrowed grant written below.
+		for (const key of [
+			"PI_SUBAGENT_SPAWN_DEPTH",
+			"PI_SUBAGENT_SPAWN_WIDTH",
+			"PI_SUBAGENT_SPAWN_WIDTH_EFFECTIVE",
+			"PI_SUBAGENT_SPAWN_BUDGET",
+			"PI_SUBAGENT_SPAWNABLE",
+		]) {
+			delete configuredEnv[key];
+		}
+		Object.assign(resumeEnvVars, configuredEnv);
 	}
 	Object.assign(
 		resumeEnvVars,
@@ -245,11 +352,21 @@ export async function resumeSubagentSession(
 	} else if (process.env.PI_CODING_AGENT_DIR) {
 		resumeEnvVars.PI_CODING_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
 	}
-	if (invocationMetadata?.denyTools?.length) {
-		resumeEnvVars.PI_DENY_TOOLS = invocationMetadata.denyTools.join(",");
+	const denyTools = new Set<string>();
+	if (launchMetadata?.denyTools?.length) {
+		for (const toolName of launchMetadata.denyTools) denyTools.add(toolName);
 	} else if (process.env.PI_DENY_TOOLS) {
-		resumeEnvVars.PI_DENY_TOOLS = process.env.PI_DENY_TOOLS;
+		for (const toolName of process.env.PI_DENY_TOOLS.split(",").map((name) => name.trim()).filter(Boolean)) {
+			denyTools.add(toolName);
+		}
 	}
+	for (const toolName of resumeSpawnEnv.denyToolsToAdd) denyTools.add(toolName);
+	if (denyTools.size > 0) resumeEnvVars.PI_DENY_TOOLS = [...denyTools].join(",");
+	// These grant variables are deliberately unconditional. Unlike the deny-tools
+	// fallback above, inheriting process.env here would launder the parent's grant.
+	resumeEnvVars.PI_SUBAGENT_SPAWN_BUDGET = resumeSpawnEnv.PI_SUBAGENT_SPAWN_BUDGET;
+	resumeEnvVars.PI_SUBAGENT_SPAWNABLE = resumeSpawnEnv.PI_SUBAGENT_SPAWNABLE;
+	resumeEnvVars.PI_SUBAGENT_SPAWN_WIDTH_EFFECTIVE = resumeSpawnEnv.PI_SUBAGENT_SPAWN_WIDTH_EFFECTIVE;
 	if (savedExtensions !== undefined) {
 		resumeEnvVars.PI_SUBAGENT_EXTENSIONS = savedExtensions.join(",");
 	} else if (process.env.PI_SUBAGENT_EXTENSIONS) {

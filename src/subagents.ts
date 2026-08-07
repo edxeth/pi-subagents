@@ -6,7 +6,10 @@ import {
 	renderAgentListReminder,
 } from "./agents/agent-list.ts";
 import type { AgentDefaults } from "./agents/definitions.ts";
-import { loadAgentDefaults as loadAgentDefaultsFromDefinitions } from "./agents/definitions.ts";
+import {
+	getEffectiveAgentDefinitions,
+	loadAgentDefaults as loadAgentDefaultsFromDefinitions,
+} from "./agents/definitions.ts";
 import {
 	getSubagentAgentOverrideError,
 	getSubagentAgentRequirementError,
@@ -15,6 +18,8 @@ import {
 } from "./launch/policy.ts";
 import { resolveSubagentCwd } from "./launch/runtime-paths.ts";
 import { getNoSessionSeedMode } from "./launch/seed-child-session.ts";
+import { initializeSpawnWidthForSession } from "./runtime/spawn-width.ts";
+import { parseSpawnEnv } from "./spawn/policy.ts";
 
 export { resolveSubagentConfigDir } from "./launch/runtime-paths.ts";
 export { buildSkillLaunchPlan as buildSkillLaunchPlanForTest } from "./launch/skills.ts";
@@ -92,7 +97,11 @@ export function loadAgentDefaults(
 }
 
 function getAgentListEntries(baseCwd = process.cwd()): AgentListEntry[] {
-	return getAgentListEntriesFromDefinitions(baseCwd, resolveTaskSessionMode);
+	const callerEnv = parseSpawnEnv(process.env);
+	return getAgentListEntriesFromDefinitions(baseCwd, resolveTaskSessionMode, {
+		callerAgent: callerEnv.callerAgent,
+		callerSpawnable: callerEnv.callerSpawnable,
+	});
 }
 
 function resolveEffectiveSessionMode(
@@ -145,6 +154,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// Capture the UI context early so the widget keeps a stable slot above tasks.
 	pi.on("session_start", (event, ctx) => {
+		initializeSpawnWidthForSession();
 		latestContext = ctx;
 		resetSubagentBatchStopRequest();
 		applySubagentLineage(ctx);
@@ -169,8 +179,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const entries = getAgentListEntries(ctx.cwd);
 		const signature = getAgentListSignature(entries);
 		if (entries.length === 0) {
-			if (event.reason === "reload") pendingAmbientRoster = null;
-			lastAmbientRosterSignature = null;
+			const hasDescribedAgents = getEffectiveAgentDefinitions(ctx.cwd).some((agent) => agent.description?.trim());
+			if (!hasDescribedAgents && lastAmbientRosterSignature === null) {
+				pendingAmbientRoster = null;
+				return;
+			}
+			if (signature === lastAmbientRosterSignature) {
+				pendingAmbientRoster = null;
+				return;
+			}
+			pendingAmbientRoster = {
+				signature,
+				content: renderAgentListReminder(entries),
+				entries,
+				supersedes: true,
+			};
 			return;
 		}
 

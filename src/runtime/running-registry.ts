@@ -9,6 +9,7 @@ import {
 	requestSubagentBatchStop,
 	runningSubagents,
 } from "./state.ts";
+import { releaseSpawnWidthSlot } from "./spawn-width.ts";
 
 export interface RunningRegistryRuntime {
 	formatElapsed(elapsed: number): string;
@@ -124,6 +125,7 @@ export async function stopRunningSubagent(
 	try {
 		await closeSurface(running);
 	} catch {}
+	releaseSpawnWidthSlot(running);
 }
 
 export function getStartedSubagentDetails(
@@ -246,6 +248,7 @@ export function wireSubagentSteerBack(
 			handleDetachedSubagentOutcome(pi, running, result, formatElapsed, updateWidget);
 		})
 		.catch((err) => {
+			releaseSpawnWidthSlot(running);
 			runningSubagents.delete(running.id);
 			updateWidget();
 			pi.sendMessage(
