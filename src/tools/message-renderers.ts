@@ -1,6 +1,7 @@
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
+import { formatFinalContextUsage } from "../runtime/final-context-usage.ts";
 import type { SubagentPingMessageDetails, SubagentResultMessageDetails } from "../types.ts";
 
 type ThemeLike = Parameters<Parameters<ExtensionAPI["registerMessageRenderer"]>[1]>[2];
@@ -52,6 +53,25 @@ function expandHint(): string {
 
 function stripSessionRef(text: string): string {
 	return text.replace(/\n\nSub-agent context: .+ used at finish\.$/, "").replace(/\n\nSession: .+\nResume: .+$/, "");
+}
+
+/**
+ * Render the final context-usage line for the TUI from structured details.
+ *
+ * The delivered message content already carries this line for the model, but
+ * `stripSessionRef` intentionally removes it from the rendered summary (the
+ * human-facing box shows a compact view). Re-add it from the structured
+ * `contextTokens`/`contextWindow` details so the operator can see how much of
+ * the child's context window was consumed, matching what the parent model was
+ * told.
+ */
+function formatContextUsageLine(details: SubagentCompletionDetails | undefined): string | undefined {
+	if (!details) return undefined;
+	const formatted = formatFinalContextUsage({
+		contextTokens: details.contextTokens,
+		contextWindow: details.contextWindow,
+	});
+	return formatted ? formatted.trim() : undefined;
 }
 
 function firstTextContent(result: AgentToolResult<unknown>): string {
@@ -156,6 +176,10 @@ export function formatSubagentCompletionLines(
 	const lines = [formatSubagentCompletionHeader(details, theme, formatElapsed)];
 	const summary = extractSummary(rawContent, details, elapsed);
 	appendExpandableLines(lines, summary, options, theme);
+	const contextUsage = formatContextUsageLine(details);
+	if (contextUsage) {
+		lines.push(theme.fg("dim", contextUsage));
+	}
 	if (options.expanded && details?.sessionFile) {
 		lines.push("");
 		lines.push(theme.fg("dim", `Session: ${details.sessionFile}`));
@@ -183,6 +207,11 @@ export function formatSubagentBatchLines(
 
 		const summary = child.summary ?? "";
 		appendExpandableLines(lines, summary, options, theme);
+
+		const contextUsage = formatContextUsageLine(child);
+		if (contextUsage) {
+			lines.push(theme.fg("dim", contextUsage));
+		}
 
 		if (options.expanded && child.sessionFile) {
 			lines.push("");
