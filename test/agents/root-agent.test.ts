@@ -3,8 +3,15 @@ import {
 	describe,
 	it,
 	buildRootSystemPrompt,
+	clearRootAgentCommandSelection,
+	getRootAgentCommandSelection,
+	getRootAgentDeferredFields,
 	getRootAgentDiagnostic,
+	loadAgentDefaults,
+	readRootAgentConfig,
+	registerRootAgentCommand,
 	resolveRootAgentName,
+	resolveRootAgentSelection,
 	resolveRootModel,
 	resolveRootToolNames,
 	subagentsExtension,
@@ -14,7 +21,7 @@ import {
 	writeFileSync,
 } from "../support/index.ts";
 
-describe("named root agent", () => {
+describe("named root agent", { concurrency: 1 }, () => {
 	it("applies PI_MAIN_AGENT to the existing session without launching a child", async () => {
 		const dir = createTestDir();
 		const configDir = join(dir, "agent-root");
@@ -76,6 +83,157 @@ describe("named root agent", () => {
 		assert.equal(resolveRootAgentName(undefined, "  scout  "), "scout");
 		assert.equal(resolveRootAgentName(undefined, ""), undefined);
 		assert.equal(resolveRootAgentName(false, ""), undefined);
+	});
+
+	it("resolves persistent project and user defaults with deterministic precedence", () => {
+		const dir = createTestDir();
+		const configDir = join(dir, "agent-root");
+		mkdirSync(join(dir, ".pi"), { recursive: true });
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(join(dir, ".pi", "subagents.json"), '{"mainAgent":"project"}');
+		writeFileSync(join(configDir, "subagents.json"), '{"mainAgent":"user"}');
+
+		assert.deepEqual(readRootAgentConfig(dir, configDir), {
+			projectName: "project",
+			userName: "user",
+			diagnostics: [],
+		});
+		assert.deepEqual(
+			resolveRootAgentSelection(undefined, "", {
+				projectValue: "project",
+				userValue: "user",
+			}),
+			{ name: "project", source: "project-config" },
+		);
+		assert.deepEqual(
+			resolveRootAgentSelection("cli", "env", {
+				projectValue: "project",
+				userValue: "user",
+			}),
+			{ name: "cli", source: "cli" },
+		);
+		assert.deepEqual(
+			resolveRootAgentSelection(undefined, undefined, {
+				projectValue: "project",
+				userValue: "user",
+			}),
+			{ name: "project", source: "project-config" },
+		);
+	});
+
+	it("reports malformed persistent config without throwing", () => {
+		const dir = createTestDir();
+		mkdirSync(join(dir, ".pi"), { recursive: true });
+		writeFileSync(join(dir, ".pi", "subagents.json"), '{"mainAgent":42}');
+		const result = readRootAgentConfig(dir, join(dir, "agent-root"));
+		assert.equal(result.projectName, undefined);
+		assert.match(result.diagnostics.join(" "), /mainAgent must be a non-empty string/);
+	});
+
+	it("submits one root initial prompt and queues an explicit startup prompt", async () => {
+		const dir = createTestDir();
+		const agentsDir = join(dir, ".pi", "agents");
+		mkdirSync(agentsDir, { recursive: true });
+		writeFileSync(
+			join(agentsDir, "root.md"),
+			"---\nname: root\ninitial-prompt: Boot the selected root\n---\n\nIdentity.",
+		);
+
+		const handlers = new Map<string, any>();
+		const sent: Array<{ text: string; options?: unknown }> = [];
+		const notifications: string[] = [];
+		const fakePi = {
+			getFlag: () => "root",
+			on(event: string, handler: any) { handlers.set(event, handler); },
+			registerFlag() {},
+			registerCommand() {},
+			registerMessageRenderer() {},
+			registerTool() {},
+			sendMessage() {},
+			sendUserMessage(text: string, options?: unknown) { sent.push({ text, options }); },
+			getAllTools: () => [{ name: "read" }],
+			getActiveTools: () => ["read"],
+			setActiveTools() {},
+		};
+		subagentsExtension(fakePi as any);
+		const sessionManager = {
+			getSessionId: () => "session-1",
+			getBranch: () => [],
+			getHeader: () => undefined,
+		};
+		await handlers.get("session_start")(
+			{ type: "session_start", reason: "startup" },
+			{
+				cwd: dir,
+				hasUI: false,
+				ui: { setWidget() {}, notify(message: string) { notifications.push(message); } },
+				sessionManager,
+				modelRegistry: { getAvailable: () => [] },
+				model: undefined,
+			},
+		);
+		assert.deepEqual(sent, [{ text: "Boot the selected root", options: undefined }]);
+
+		const inputResult = await handlers.get("input")({
+			type: "input",
+			text: "Explicit startup task",
+			source: "interactive",
+		});
+		assert.deepEqual(inputResult, { action: "handled" });
+		assert.deepEqual(sent, [
+			{ text: "Boot the selected root", options: undefined },
+			{ text: "Explicit startup task", options: { deliverAs: "followUp" } },
+		]);
+
+		await handlers.get("session_start")(
+			{ type: "session_start", reason: "reload" },
+			{
+				cwd: dir,
+				hasUI: false,
+				ui: { setWidget() {}, notify(message: string) { notifications.push(message); } },
+				sessionManager,
+				modelRegistry: { getAvailable: () => [] },
+				model: undefined,
+			},
+		);
+		assert.equal(sent.length, 2, "reload must not replay the initial prompt");
+		assert.deepEqual(notifications, []);
+	});
+
+	it("parses both initial-prompt frontmatter spellings", () => {
+		const dir = createTestDir();
+		const agentsDir = join(dir, ".pi", "agents");
+		mkdirSync(agentsDir, { recursive: true });
+		writeFileSync(join(agentsDir, "camel.md"), "---\nname: camel\ninitialPrompt: Start here\n---\nIdentity.");
+		assert.equal(loadAgentDefaults("camel", undefined, dir)?.initialPrompt, "Start here");
+	});
+
+	it("reports root fields that cannot safely be applied to the current Pi runtime", () => {
+		assert.deepEqual(
+			getRootAgentDeferredFields({ cwd: "../other", extensions: "none", skills: "review" }),
+			["cwd", "extensions", "skills"],
+		);
+	});
+
+	it("registers /agent as a safe next-session selector", async () => {
+		const dir = createTestDir();
+		const agentsDir = join(dir, ".pi", "agents");
+		mkdirSync(agentsDir, { recursive: true });
+		writeFileSync(join(agentsDir, "reviewer.md"), "---\nname: reviewer\n---\nReview.");
+		let command: any;
+		const notifications: string[] = [];
+		const fakePi = {
+			getFlag: () => undefined,
+			registerCommand(name: string, options: any) { if (name === "agent") command = options; },
+		};
+		registerRootAgentCommand(fakePi as any);
+		await command.handler("", {
+			cwd: dir,
+			ui: { notify(message: string) { notifications.push(message); } },
+		});
+		assert.match(notifications[0] ?? "", /Available: reviewer/);
+		assert.equal(getRootAgentCommandSelection(), undefined);
+		clearRootAgentCommandSelection();
 	});
 
 	it("applies an explicit root tool allowlist and deny-list deterministically", () => {

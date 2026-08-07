@@ -107,12 +107,39 @@ pi --agent reviewer
 PI_MAIN_AGENT=reviewer pi
 ```
 
-`--agent` takes precedence over `PI_MAIN_AGENT`. The selected definition is
-resolved from the normal native and external agent sources; project definitions
-retain their existing precedence. An unknown name emits a warning and safely
-falls back to Pi's normal session, without spawning a child process.
+`--agent` takes precedence over `PI_MAIN_AGENT`. When neither is set, the
+extension reads a persistent default without writing Pi core settings:
 
-Root-agent behavior in Phase 1:
+- Project: `.pi/subagents.json`
+- User: `$PI_CODING_AGENT_DIR/subagents.json` (normally `~/.pi/agent/subagents.json`)
+
+Each file is optional and has this shape:
+
+```json
+{"mainAgent": "reviewer"}
+```
+
+Precedence is `--agent` → `PI_MAIN_AGENT` → `/agent`'s transient selection →
+project config → user config. Invalid JSON or a non-string `mainAgent` produces
+an actionable warning. An unknown selected name also warns and safely falls
+back to Pi's normal session, without spawning a child process. Persistent root
+defaults are ignored in child Pi processes, so existing child launch
+configuration remains authoritative.
+
+Use `/agent` in an interactive session to inspect available profiles or select
+one for the next root session:
+
+```text
+/agent
+/agent reviewer
+```
+
+The command never fakes a live switch: the current session is unchanged because
+Pi cannot safely replace its model, tools, extension set, and cwd as one atomic
+operation. Start a new session or restart Pi after selecting a profile. An
+explicit `--agent` or `PI_MAIN_AGENT` selector cannot be overridden by `/agent`.
+
+Root-agent behavior in Phase 2:
 
 - `model` and `thinking` are applied through Pi's model and thinking APIs when
 the requested model is available; unavailable models leave the current model
@@ -126,14 +153,20 @@ when an explicit tool set contains them. `deny-tools` is applied last.
 `APPEND_SYSTEM.md` content. An omitted mode uses append behavior for the root
 body.
 - `inject-skills` loads and injects skill content into the root prompt using the
-same skill resolver as children. Root skill availability (`skills:`) is not
-rewired after startup in Phase 1 because Pi does not expose a public runtime
-skill-allowlist API.
+same skill resolver as children.
+- `initial-prompt` (or `initialPrompt`) submits one first user turn for an
+empty fresh selected root session. It runs before explicit CLI/stdin startup
+prompts; those prompts are queued as follow-ups and are not dropped or
+submitted twice. Reloads and resumed sessions do not replay it.
 - `spawning` controls whether the main session can launch subagents. Existing
 `PI_ORCHESTRATOR_MODE=1` behavior takes precedence over root-agent policy.
 
-Child launches are unchanged; `mode`, `async`, `blocking`, `session-mode`,
-`auto-exit`, `parent-close-policy`, and child cwd behavior remain child-only.
+Pi's extension lifecycle does not safely support replacing the current root
+session's extension set or cwd. Root definitions that specify child-only
+`extensions`, `cwd`, `skills`, `env`, `flags`, lifecycle, session, trust, or
+task-expansion fields emit a diagnostic and leave those fields unapplied. They
+remain supported for child launches. Root-specific extension loading and cwd
+switching are deferred until Pi exposes an atomic runtime API.
 
 ### Orchestrator mode
 
@@ -243,6 +276,7 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `trust-project` | `false` | Whether interactive child launches pass Pi's `--approve` flag and trust project-local files/settings. Background children always generate `--no-approve` for safety; use `flags` only as an explicit advanced override. |
 | `auto-exit` | `false` | Close the child after a normal completion |
 | `system-prompt` | task body | `append` adds the agent body to the child's own Pi system prompt (Pi's default unless the child has an applicable `SYSTEM.md`); `replace` replaces that base prompt with the agent body. The parent agent's system prompt is never inherited. |
+| `initial-prompt` / `initialPrompt` | unset | First user turn for an empty fresh named root session only; child launches ignore it. |
 | `session-mode` | `lineage-only` | `standalone`, `lineage-only`, or `fork` |
 | `flags` | unset | Extra CLI flags passed to the child pi process (e.g. `--verbose` or `--some-custom-flag`). Appended after all generated args — last-wins semantics against conflicting generated args, including `--approve` / `--no-approve`. Use only as an advanced escape hatch for extension-registered flags or pi built-in flags not covered by other frontmatter fields. |
 | `env` | unset | Line-based `KEY=VALUE` pairs passed as environment variables to the child process. Use YAML block syntax for values with commas or `=`. `PI_CODING_AGENT_DIR` is special: when set here, it is resolved before launch and becomes the child's Pi config/session root. `~/` is expanded. Internal PI vars such as PI\_SUBAGENT\_\* still take precedence if names conflict. |

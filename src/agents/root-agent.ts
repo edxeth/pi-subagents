@@ -1,4 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AgentDefaults } from "./definitions.ts";
+import { getAgentConfigDir } from "./definitions.ts";
 import {
 	resolveAvailableModelRef,
 	splitModelRefThinking,
@@ -8,6 +11,37 @@ import type { Model } from "@earendil-works/pi-ai";
 
 export const ROOT_AGENT_FLAG = "agent";
 export const ROOT_AGENT_ENV = "PI_MAIN_AGENT";
+export const ROOT_AGENT_CONFIG_FILE = "subagents.json";
+
+export type RootAgentSelectionSource =
+	| "cli"
+	| "env"
+	| "command"
+	| "project-config"
+	| "user-config";
+
+export interface RootAgentSelection {
+	name?: string;
+	source?: RootAgentSelectionSource;
+}
+
+export interface RootAgentConfigResult {
+	projectName?: string;
+	userName?: string;
+	diagnostics: string[];
+}
+
+export interface RootAgentSelectionOptions {
+	commandValue?: string;
+	projectValue?: string;
+	userValue?: string;
+}
+
+let commandSelectedRootAgent: string | undefined;
+
+function normalizeRootAgentName(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
 
 /**
  * Resolve the named root agent. An explicit CLI flag wins over the environment
@@ -17,10 +51,104 @@ export function resolveRootAgentName(
 	cliValue: string | boolean | undefined,
 	envValue = process.env[ROOT_AGENT_ENV],
 ): string | undefined {
-	const cli = typeof cliValue === "string" ? cliValue.trim() : "";
-	if (cli) return cli;
-	const env = envValue?.trim();
-	return env || undefined;
+	return resolveRootAgentSelection(cliValue, envValue).name;
+}
+
+/**
+ * Resolve root-agent selection without changing Pi's settings files.
+ *
+ * Precedence is explicit CLI flag, PI_MAIN_AGENT, an in-process `/agent`
+ * selection, project config, then user config. The command slot is deliberately
+ * transient: it applies only to a later root session in this Pi process.
+ */
+export function resolveRootAgentSelection(
+	cliValue: string | boolean | undefined,
+	envValue = process.env[ROOT_AGENT_ENV],
+	options: RootAgentSelectionOptions = {},
+): RootAgentSelection {
+	const cli = normalizeRootAgentName(cliValue);
+	if (cli) return { name: cli, source: "cli" };
+	const env = normalizeRootAgentName(envValue);
+	if (env) return { name: env, source: "env" };
+	const command = normalizeRootAgentName(options.commandValue);
+	if (command) return { name: command, source: "command" };
+	const project = normalizeRootAgentName(options.projectValue);
+	if (project) return { name: project, source: "project-config" };
+	const user = normalizeRootAgentName(options.userValue);
+	if (user) return { name: user, source: "user-config" };
+	return {};
+}
+
+export function getRootAgentConfigPaths(
+	baseCwd: string,
+	userConfigDir = getAgentConfigDir(),
+): { project: string; user: string } {
+	return {
+		project: join(baseCwd, ".pi", ROOT_AGENT_CONFIG_FILE),
+		user: join(userConfigDir, ROOT_AGENT_CONFIG_FILE),
+	};
+}
+
+function readConfiguredRootAgent(
+	path: string,
+	label: "project" | "user",
+	diagnostics: string[],
+): string | undefined {
+	if (!existsSync(path)) return undefined;
+	let value: unknown;
+	try {
+		value = JSON.parse(readFileSync(path, "utf8"));
+	} catch (error) {
+		diagnostics.push(
+			`Cannot read ${label} root-agent config ${path}: ${error instanceof Error ? error.message : String(error)}. Fix or remove the file.`,
+		);
+		return undefined;
+	}
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		diagnostics.push(
+			`Invalid ${label} root-agent config ${path}: expected a JSON object with a string mainAgent field.`,
+		);
+		return undefined;
+	}
+	const mainAgent = (value as { mainAgent?: unknown }).mainAgent;
+	if (mainAgent === undefined) return undefined;
+	const normalized = normalizeRootAgentName(mainAgent);
+	if (!normalized) {
+		diagnostics.push(
+			`Invalid ${label} root-agent config ${path}: mainAgent must be a non-empty string.`,
+		);
+		return undefined;
+	}
+	return normalized;
+}
+
+export function readRootAgentConfig(
+	baseCwd: string,
+	userConfigDir = getAgentConfigDir(),
+): RootAgentConfigResult {
+	const paths = getRootAgentConfigPaths(baseCwd, userConfigDir);
+	const diagnostics: string[] = [];
+	return {
+		projectName: readConfiguredRootAgent(paths.project, "project", diagnostics),
+		userName:
+			paths.user === paths.project
+				? undefined
+				: readConfiguredRootAgent(paths.user, "user", diagnostics),
+		diagnostics,
+	};
+}
+
+export function setRootAgentCommandSelection(name: string): void {
+	commandSelectedRootAgent = normalizeRootAgentName(name);
+}
+
+export function getRootAgentCommandSelection(): string | undefined {
+	return commandSelectedRootAgent;
+}
+
+/** Test/reset hook; it does not touch Pi settings or the environment. */
+export function clearRootAgentCommandSelection(): void {
+	commandSelectedRootAgent = undefined;
 }
 
 export function parseRootToolNames(raw: string | undefined): string[] {
@@ -133,6 +261,30 @@ export function resolveRootModel(
 	return model
 		? { model: model as Model<any>, thinking: resolved.thinking, modelRef: resolved.modelRef }
 		: null;
+}
+
+/** Fields which are meaningful for child processes but cannot safely mutate the current Pi runtime. */
+export function getRootAgentDeferredFields(
+	definition: AgentDefaults,
+): string[] {
+	const fields: Array<[string, unknown]> = [
+		["cwd", definition.cwd],
+		["extensions", definition.extensions],
+		["skills", definition.skills],
+		["env", definition.env],
+		["flags", definition.flags],
+		["mode", definition.mode],
+		["session-mode", definition.sessionMode],
+		["fork", definition.fork],
+		["async", definition.async],
+		["blocking", definition.blocking],
+		["auto-exit", definition.autoExit],
+		["parent-close-policy", definition.parentClosePolicy],
+		["no-session", definition.noSession],
+		["trust-project", definition.trustProject],
+		["task-expansion", definition.taskExpansion],
+	];
+	return fields.filter(([, value]) => value !== undefined).map(([name]) => name);
 }
 
 /**

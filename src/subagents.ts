@@ -80,8 +80,10 @@ import { ROOT_AGENT_FLAG } from "./agents/root-agent.ts";
 import {
 	applyRootAgentPolicy,
 	buildRootPrompt,
-	getRequestedRootAgentName,
+	getRequestedRootAgentSelection,
 	prepareRootAgent,
+	registerRootAgentCommand,
+	shouldSubmitRootInitialPrompt,
 	type RootAgentRuntime,
 } from "./agents/root-agent-runtime.ts";
 
@@ -93,13 +95,25 @@ export { classifyAssistantMessageForMixedBatch as classifyAssistantMessageForMix
 export {
 	ROOT_AGENT_ENV,
 	ROOT_AGENT_FLAG,
+	ROOT_AGENT_CONFIG_FILE,
 	buildRootSystemPrompt,
+	clearRootAgentCommandSelection,
+	getRootAgentCommandSelection,
+	getRootAgentConfigPaths,
+	getRootAgentDeferredFields,
 	getRootAgentDiagnostic,
 	parseRootToolNames,
+	readRootAgentConfig,
 	resolveRootAgentName,
+	resolveRootAgentSelection,
 	resolveRootModel,
 	resolveRootToolNames,
 } from "./agents/root-agent.ts";
+export {
+	getRequestedRootAgentSelection,
+	registerRootAgentCommand,
+	shouldSubmitRootInitialPrompt,
+} from "./agents/root-agent-runtime.ts";
 export * from "./testing/test-helpers.ts";
 
 export function loadAgentDefaults(
@@ -190,6 +204,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const ORCHESTRATOR_ALLOWED_TOOLS = ORCHESTRATOR_ALLOWED_TOOL_NAMES;
 	let latestContext: ExtensionContext | undefined;
 	let rootAgentRuntime: RootAgentRuntime | null = null;
+	let rootInitialPromptPending = false;
+	let rootInitialPromptSubmitted = false;
+	let rootInitialPromptSessionId: string | undefined;
 
 	// Capture the UI context early so the widget keeps a stable slot above tasks.
 	pi.on("session_start", (event, ctx) => {
@@ -238,11 +255,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 		};
 
-		const requestedRootAgent = getRequestedRootAgentName(pi);
+		const rootSelection = getRequestedRootAgentSelection(pi, ctx.cwd);
+		for (const diagnostic of rootSelection.diagnostics) {
+			if (typeof ctx.ui?.notify === "function") ctx.ui.notify(diagnostic, "warning");
+		}
+		const requestedRootAgent = rootSelection.name;
 		if (!requestedRootAgent) {
 			// Older/fake ExtensionAPI implementations and ordinary sessions retain
 			// the original synchronous startup path exactly.
 			rootAgentRuntime = null;
+			rootInitialPromptPending = false;
 			if (!pi.events) return continueSessionStart();
 			return discoverExternalAgentSources(
 				pi.events,
@@ -255,9 +277,45 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 
 		const finishSessionStart = async () => {
-			rootAgentRuntime = await prepareRootAgent(pi, ctx, requestedRootAgent);
+			rootAgentRuntime = await prepareRootAgent(pi, ctx, requestedRootAgent, rootSelection);
 			await applyRootAgentPolicy(pi, ctx, rootAgentRuntime, ORCHESTRATOR_MODE);
-			return continueSessionStart();
+			const result = continueSessionStart();
+			const sessionId = typeof ctx.sessionManager.getSessionId === "function"
+				? ctx.sessionManager.getSessionId()
+				: undefined;
+			const sameSession = rootInitialPromptSessionId === sessionId;
+			if (!sameSession && sessionId !== undefined) {
+				rootInitialPromptSubmitted = false;
+				rootInitialPromptSessionId = sessionId;
+				rootInitialPromptPending = false;
+			}
+			if (
+				!ORCHESTRATOR_MODE &&
+				shouldSubmitRootInitialPrompt(
+					rootAgentRuntime,
+					event.reason,
+					typeof ctx.sessionManager.getBranch === "function"
+						? ctx.sessionManager.getBranch()
+						: [],
+				) &&
+				!rootInitialPromptSubmitted &&
+				typeof pi.sendUserMessage === "function"
+			) {
+				rootInitialPromptSubmitted = true;
+				rootInitialPromptPending = true;
+				try {
+					pi.sendUserMessage(rootAgentRuntime!.definition.initialPrompt!.trim());
+				} catch (error) {
+					rootInitialPromptPending = false;
+					if (typeof ctx.ui?.notify === "function") {
+						ctx.ui.notify(
+							`Root agent ${JSON.stringify(requestedRootAgent)} initial prompt was not submitted: ${error instanceof Error ? error.message : String(error)}`,
+							"error",
+						);
+					}
+				}
+			}
+			return result;
 		};
 
 		// External definitions are discovered before root resolution so a named
@@ -379,7 +437,24 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 		};
 	});
 
-	pi.on("input", () => {
+	pi.on("input", (event) => {
+		// A root initial prompt starts before Pi processes explicit CLI/stdin
+		// startup input. Queue that explicit input as a follow-up so it is not
+		// dropped by AgentSession.prompt's streaming guard.
+		if (
+			rootInitialPromptPending &&
+			event.source !== "extension" &&
+			typeof pi.sendUserMessage === "function"
+		) {
+			try {
+				pi.sendUserMessage(event.text, { deliverAs: "followUp" });
+				return { action: "handled" as const };
+			} catch {
+				// If the host cannot queue while the initial turn starts, let Pi
+				// process the explicit prompt normally instead of dropping it.
+				rootInitialPromptPending = false;
+			}
+		}
 		resetSubagentBatchStopRequest();
 		return { action: "continue" as const };
 	});
@@ -437,6 +512,7 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 
 	pi.on("agent_end", () => {
 		resetSubagentBatchStopRequest();
+		rootInitialPromptPending = false;
 		markInitialPromptLaunchComplete();
 	});
 
@@ -508,6 +584,7 @@ Your most important job is synthesis: reading sub-agent outputs, understanding t
 	registerSubagentCommands(pi, {
 		stopRunningSubagent,
 	});
+	registerRootAgentCommand(pi);
 
 	registerSubagentMessageRenderers(pi, formatElapsed);
 

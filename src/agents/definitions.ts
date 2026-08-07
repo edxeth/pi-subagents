@@ -28,6 +28,7 @@ export interface AgentDefaults {
 	spawning?: boolean;
 	autoExit?: boolean;
 	systemPromptMode?: "append" | "replace";
+	initialPrompt?: string;
 	cwd?: string;
 	cwdBase?: string;
 	path?: string;
@@ -106,6 +107,7 @@ function parseAgentDefinition(
 	const taskExpansionRaw = get("task-expansion");
 
 	const systemPromptRaw = get("system-prompt");
+	const initialPrompt = getBlock("initial-prompt") ?? getBlock("initialPrompt");
 	const extensionsRaw = get("extensions");
 	const injectSkillsRaw = get("inject-skills");
 	const flagsRaw = get("flags");
@@ -135,6 +137,7 @@ function parseAgentDefinition(
 			systemPromptRaw === "append" || systemPromptRaw === "replace"
 				? systemPromptRaw
 				: undefined,
+		initialPrompt: initialPrompt?.trim() || undefined,
 		cwd: get("cwd"),
 		cwdBase,
 		body: body || undefined,
