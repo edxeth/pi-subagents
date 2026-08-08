@@ -371,6 +371,22 @@ export default function (pi: ExtensionAPI) {
 		let toolExecutionsThisTurn = 0;
 		let terminatingToolExecutionsThisTurn = 0;
 
+		const AUTO_EXIT_DISABLED_MSG = "Auto-exit disabled — close manually or /auto-exit to re-enable";
+		// Single owner of the disabled latch and the operator-facing status/toast.
+		// Called from the `input` handler (every qualifying operator input except the
+		// one-shot /auto-exit re-arm) and the aborted `agent_end` branch (Escape fires
+		// no input event). Notifying at the disable moment — not from an agent_end
+		// branch gated on operatorInputQueuedThisRun, which a follow-up/idle prompt's
+		// new agent_start clears — keeps follow-ups and idle prompts from going silent.
+		const disableAutoExitByOperator = (
+			ctx: { ui: { setStatus(key: string, message?: string): void; notify(message: string, tone?: string): void } },
+		) => {
+			autoExitDisabledByOperator = true;
+			if (!isInteractive) return;
+			ctx.ui.setStatus(AUTO_EXIT_STATUS_KEY, AUTO_EXIT_DISABLED_MSG);
+			ctx.ui.notify(AUTO_EXIT_DISABLED_MSG, "warning");
+		};
+
 		pi.on("agent_start", () => {
 			agentStarted = true;
 			operatorInputQueuedThisRun = false;
@@ -387,7 +403,7 @@ export default function (pi: ExtensionAPI) {
 			if (result?.terminate === true) terminatingToolExecutionsThisTurn += 1;
 		});
 
-		pi.on("input", (event) => {
+		pi.on("input", (event, ctx) => {
 			// The recovery controller sends `source: "extension"` nudges. Those
 			// must never read as operator takeover — treating them as manual input
 			// would reset the consecutive-failure chain and loop forever.
@@ -400,7 +416,7 @@ export default function (pi: ExtensionAPI) {
 			if (autoExitReArmed) {
 				autoExitReArmed = false;
 			} else {
-				autoExitDisabledByOperator = true;
+				disableAutoExitByOperator(ctx);
 			}
 			providerErrorRecovery.cancelPendingRecovery(true);
 			cancelPendingPiRecovery();
@@ -412,20 +428,11 @@ export default function (pi: ExtensionAPI) {
 			if (!shouldExit || operatorInputQueuedThisRun) {
 				// Agent turn was aborted (Escape), or the operator sent a queued
 				// steering message. Leave the session open and cancel any pending
-				// autonomous recovery action.
+				// autonomous recovery action. Escape fires no `input` event, so this
+				// aborted branch is the only place it can disable + notify; operator
+				// steers/follow-ups already notified from the `input` handler.
 				if (!shouldExit && isInteractive) {
-					autoExitDisabledByOperator = true;
-					ctx.ui.setStatus(AUTO_EXIT_STATUS_KEY, "Auto-exit disabled — close manually or /auto-exit to re-enable");
-					ctx.ui.notify("Auto-exit disabled \u2014 close manually or /auto-exit to re-enable", "warning");
-				}
-				if (operatorInputQueuedThisRun && autoExitDisabledByOperator && isInteractive) {
-					ctx.ui.setStatus(AUTO_EXIT_STATUS_KEY, "Auto-exit disabled — close manually or /auto-exit to re-enable");
-					// The turn still ended normally (operator steered or followed up
-					// rather than aborting), so the `!shouldExit` branch above did not
-					// fire its toast. Notify here too so the operator learns auto-exit
-					// is now off and how to re-arm it — a quiet status line is easy to
-					// miss during an active session.
-					ctx.ui.notify("Auto-exit disabled — close manually or /auto-exit to re-enable", "warning");
+					disableAutoExitByOperator(ctx);
 				}
 				providerErrorRecovery.cancelPendingRecovery(operatorInputQueuedThisRun);
 				cancelPendingPiRecovery();

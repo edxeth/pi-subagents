@@ -803,7 +803,7 @@ describe("subagent-done.ts", () => {
 				// Simulate user interaction that disables auto-exit
 				let shutdowns = 0;
 				handlers.get("agent_start")?.({});
-				handlers.get("input")?.({ streamingBehavior: "steer" });
+				handlers.get("input")?.({ streamingBehavior: "steer" }, { ui: { setStatus: (k: string, m?: string) => { statusKey = k; statusMessage = m; }, notify: (m: string) => { notifyMsg = m; } } });
 
 				// Verify /auto-exit command was registered
 				const autoExitCmd = commands.get("auto-exit");
