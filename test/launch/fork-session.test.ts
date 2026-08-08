@@ -118,6 +118,136 @@ describe("fork session launch behavior", () => {
 		assert.equal(getTerminalAssistantSummaryForTest(seededEntries.slice(0, 2)), oldSummary);
 	});
 
+	it("keeps the inherited fork branch fully walkable when entries are dropped", () => {
+		const dir = createTestDir();
+		const parent = join(dir, "parent.jsonl");
+		const child = join(dir, "child.jsonl");
+		const header = {
+			...SESSION_HEADER,
+			cwd: dir,
+			timestamp: "2026-08-07T20:00:00.000Z",
+		};
+		const entries = [
+			header,
+			{
+				type: "message",
+				id: "user-001",
+				parentId: null,
+				timestamp: "2026-08-07T20:00:01.000Z",
+				message: { role: "user", content: [{ type: "text", text: "root" }] },
+			},
+			{
+				type: "message",
+				id: "asst-001",
+				parentId: "user-001",
+				timestamp: "2026-08-07T20:00:02.000Z",
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "subagent_131", name: "subagent", arguments: { agent: "x" } }],
+				},
+			},
+			{
+				type: "message",
+				id: "asst-002",
+				parentId: "asst-001",
+				timestamp: "2026-08-07T20:00:03.000Z",
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "subagent_kill_70", name: "subagent_kill", arguments: { id: "x" } }],
+				},
+			},
+			{
+				type: "message",
+				id: "tool-001",
+				parentId: "asst-002",
+				timestamp: "2026-08-07T20:00:04.000Z",
+				message: { role: "toolResult", toolCallId: "subagent_kill_70", content: [{ type: "text", text: "ok" }] },
+			},
+			{
+				type: "message",
+				id: "asst-003",
+				parentId: "tool-001",
+				timestamp: "2026-08-07T20:00:05.000Z",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "spawning the reviewer now" }],
+				},
+			},
+			{
+				type: "message",
+				id: "asst-004",
+				parentId: "asst-003",
+				timestamp: "2026-08-07T20:00:06.000Z",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "text", text: "final answer" },
+						{ type: "toolCall", id: "subagent_137", name: "subagent", arguments: { agent: "reviewer" } },
+					],
+				},
+			},
+			{
+				type: "message",
+				id: "asst-005",
+				parentId: "asst-004",
+				timestamp: "2026-08-07T20:00:07.000Z",
+				message: {
+					role: "user",
+					content: [{ type: "text", text: "delegated child task" }],
+				},
+			},
+			{
+				type: "custom_message",
+				id: "roster-001",
+				parentId: "asst-005",
+				timestamp: "2026-08-07T20:00:08.000Z",
+				customType: "subagent_roster",
+				content: "Sub-agents: bob, alice",
+			},
+			{
+				type: "message",
+				id: "asst-006",
+				parentId: "roster-001",
+				timestamp: "2026-08-07T20:00:09.000Z",
+				message: { role: "assistant", content: [{ type: "text", text: "spawning opus" }] },
+			},
+		];
+		writeFileSync(parent, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+		seedSubagentSessionFileForTest("fork", parent, child, dir, {
+			activeLeafId: "asst-006",
+		});
+
+		const seeded = getEntries(child) as any[];
+		const messages = seeded.filter((entry) => entry.type === "message");
+		assert.deepEqual(
+			messages.map((entry) => entry.id),
+			["user-001", "asst-001", "asst-002", "tool-001", "asst-003", "asst-004", "asst-005", "asst-006"],
+		);
+		// Roster entries are dropped from the inherited context, and orphaned
+		// tool calls are preserved verbatim: pi-ai's transformMessages synthesizes
+		// a "No result provided" toolResult for them at the provider boundary.
+		assert.equal(JSON.stringify(seeded).includes("subagent_131"), true);
+		assert.equal(JSON.stringify(seeded).includes("subagent_137"), true);
+		assert.equal(JSON.stringify(seeded).includes("subagent_kill_70"), true);
+		assert.equal(JSON.stringify(seeded).includes("roster-001"), false);
+
+		// The full parentId chain must be walkable from the last seeded entry:
+		// dropping an entry must re-link its successor, or the child's inherited
+		// context silently truncates at the stale link.
+		const byId = new Map(messages.map((entry: any) => [entry.id, entry]));
+		const visited: string[] = [];
+		let cursor: any = messages[messages.length - 1];
+		while (cursor) {
+			visited.push(cursor.id);
+			cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+		}
+		assert.deepEqual(
+			visited,
+			["asst-006", "asst-005", "asst-004", "asst-003", "tool-001", "asst-002", "asst-001", "user-001"],
+		);
+	});
+
 	it("creates forked child session files directly", () => {
 		const dir = createTestDir();
 		const parent = join(dir, "parent.jsonl");
