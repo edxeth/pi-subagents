@@ -1,6 +1,7 @@
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { endedUnderContextPressure } from "../session/completion-reason.ts";
 import { type ResumeServiceRuntime, resumeSubagentSession } from "../runtime/resume-service.ts";
 import { shouldAwaitSubagentLaunch } from "../runtime/running-registry.ts";
 import { getSubagentBatchStopMetadata, requestSubagentBatchStop } from "../runtime/state.ts";
@@ -116,6 +117,15 @@ export function registerSubagentResumeTool(
 		},
 		async execute(_toolCallId, params, signal) {
 			if (!params.sessionFile) throw new Error("Session file is required.");
+			// The child ended on instruction from its context-warning policy, so its
+			// window is spent. Resuming buys no room and only repeats the wrap-up.
+			// Operators can still resume it deliberately from the /subagents overlay.
+			if (endedUnderContextPressure(params.sessionFile)) {
+				throw new Error(
+					"This sub-agent stopped early as instructed by its context-warning policy, and its context window is spent. " +
+						"Resuming gives it no room to work. Launch a fresh sub-agent with the remaining work instead.",
+				);
+			}
 
 			const running = await resumeSubagentSession(
 				{

@@ -4,6 +4,22 @@ import { assert, describe, it } from "../support/index.ts";
 describe("interpretExitSidecar", () => {
 	const { interpretExitSidecar } = __pollForExitTest__;
 
+	it("carries the context-pressure completion reason to the parent", () => {
+		// This is the only channel a --no-session child has; dropping it here
+		// silently removes the parent's explanation and the resume block.
+		assert.deepEqual(interpretExitSidecar({ type: "done", completionReason: "context-pressure" }), {
+			reason: "done",
+			exitCode: 0,
+			completionReason: "context-pressure",
+		});
+	});
+
+	it("does not invent a completion reason", () => {
+		const decoded = interpretExitSidecar({ type: "done", outputTokens: 4 });
+		assert.equal("completionReason" in decoded, false);
+		assert.equal(interpretExitSidecar({ type: "done", completionReason: "bogus" }).completionReason, undefined);
+	});
+
 	it("decodes ping payloads", () => {
 		assert.deepEqual(
 			interpretExitSidecar({

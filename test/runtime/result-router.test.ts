@@ -42,6 +42,149 @@ function makeResult(overrides: Partial<SubagentResult> = {}): SubagentResult {
 describe("result router", () => {
 	afterEach(() => resetSubagentStateForTest());
 
+	it("tells the parent an early stop was instructed and not to resume it", () => {
+		const sent: Array<{ message: any; options: any }> = [];
+		const running = makeRunning();
+		setRunningSubagentForTest(running);
+
+		routeSubagentOutcome({
+			pi: {
+				sendMessage(message: any, options: any) {
+					sent.push({ message, options });
+				},
+			},
+			running,
+			result: makeResult({
+				summary: "Partial findings so far.",
+				contextTokens: 182_000,
+				contextWindow: 200_000,
+				contextWarned: true,
+			}),
+			formatElapsed: (seconds) => `${seconds}s`,
+			updateWidget: () => {},
+		});
+
+		const content = sent[0]?.message?.content ?? "";
+		assert.match(content, /182K\/200K tokens \(91%\) used at finish/);
+		assert.match(content, /stopped early as instructed by its context-warning policy/);
+		assert.match(content, /not a failure/);
+		assert.match(content, /Do not resume this session/);
+		assert.match(content, /launch a fresh sub-agent/i);
+	});
+
+	it("keeps the plain context line when no warning was delivered", () => {
+		const sent: Array<{ message: any; options: any }> = [];
+		const running = makeRunning();
+		setRunningSubagentForTest(running);
+
+		routeSubagentOutcome({
+			pi: {
+				sendMessage(message: any, options: any) {
+					sent.push({ message, options });
+				},
+			},
+			running,
+			result: makeResult({ contextTokens: 40_000, contextWindow: 200_000 }),
+			formatElapsed: (seconds) => `${seconds}s`,
+			updateWidget: () => {},
+		});
+
+		const content = sent[0]?.message?.content ?? "";
+		assert.match(content, /40K\/200K tokens \(20%\) used at finish/);
+		assert.doesNotMatch(content, /Do not resume this session/);
+	});
+
+	it("still explains an instructed stop when usage reporting is off", () => {
+		const sent: Array<{ message: any; options: any }> = [];
+		const running = makeRunning({ reportContextUsage: false });
+		setRunningSubagentForTest(running);
+
+		routeSubagentOutcome({
+			pi: {
+				sendMessage(message: any, options: any) {
+					sent.push({ message, options });
+				},
+			},
+			running,
+			result: makeResult({
+				summary: "Partial findings so far.",
+				contextTokens: 182_000,
+				contextWindow: 200_000,
+				contextWarned: true,
+			}),
+			formatElapsed: (seconds) => `${seconds}s`,
+			updateWidget: () => {},
+		});
+
+		const content = sent[0]?.message?.content ?? "";
+		assert.match(content, /stopped early as instructed by its context-warning policy/);
+		assert.match(content, /Do not resume this session/);
+		// report-context-usage: false still hides the token counts.
+		assert.doesNotMatch(content, /182K/);
+		assert.doesNotMatch(content, /used at finish/);
+	});
+
+	it("warns that context is spent when a failure follows the final warning", () => {
+		const sent: Array<{ message: any; options: any }> = [];
+		const running = makeRunning();
+		setRunningSubagentForTest(running);
+
+		routeSubagentOutcome({
+			pi: {
+				sendMessage(message: any, options: any) {
+					sent.push({ message, options });
+				},
+			},
+			running,
+			result: makeResult({
+				summary: "Background agent exited with code 1",
+				summarySource: "runtime",
+				errorMessage: "provider overloaded",
+				exitCode: 1,
+				contextTokens: 182_000,
+				contextWindow: 200_000,
+				contextExhausted: true,
+			}),
+			formatElapsed: (seconds) => `${seconds}s`,
+			updateWidget: () => {},
+		});
+
+		const content = sent[0]?.message?.content ?? "";
+		// A provider error is a real failure, so the reassurance must not appear.
+		assert.doesNotMatch(content, /not a failure/);
+		assert.match(content, /context window is spent/);
+		// A provider error is often transient, so the cheap retry stays available.
+		assert.match(content, /Resume: pi --session/);
+	});
+
+	it("explains an instructed stop even without a usable token snapshot", () => {
+		const sent: Array<{ message: any; options: any }> = [];
+		const running = makeRunning();
+		setRunningSubagentForTest(running);
+
+		routeSubagentOutcome({
+			pi: {
+				sendMessage(message: any, options: any) {
+					sent.push({ message, options });
+				},
+			},
+			running,
+			// resolveFinalContextUsage yields contextWarned with no counts when the
+			// model ref does not match the snapshot or the window size is unknown.
+			result: makeResult({
+				summary: "Partial findings so far.",
+				contextWarned: true,
+			}),
+			formatElapsed: (seconds) => `${seconds}s`,
+			updateWidget: () => {},
+		});
+
+		const content = sent[0]?.message?.content ?? "";
+		assert.match(content, /stopped early as instructed by its context-warning policy/);
+		assert.match(content, /Do not resume this session/);
+		assert.doesNotMatch(content, /used at finish/);
+	});
+
 	it("routes detached completion through one parent-visible result", () => {
 		const sent: Array<{ message: any; options: any }> = [];
 		let widgetUpdates = 0;

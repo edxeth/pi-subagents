@@ -3,6 +3,15 @@ export const PI_SUBAGENT_CONTEXT_WARN_STEP = "PI_SUBAGENT_CONTEXT_WARN_STEP";
 
 export const SUBAGENT_CONTEXT_REMINDER_ENTRY = "pi-subagent-context-reminders";
 
+/** Session entry recording how a child's run ended. */
+export const SUBAGENT_COMPLETION_ENTRY = "pi-subagent-completion";
+
+/** The child stopped because its context-warning policy told it to. */
+export const SUBAGENT_CONTEXT_PRESSURE_REASON = "context-pressure";
+
+/** The child failed while it was already holding the final warning. */
+export const SUBAGENT_CONTEXT_PRESSURE_FAILURE_REASON = "context-pressure-failure";
+
 const DEFAULT_CONTEXT_WARN_STEP = 5;
 
 export interface SubagentContextUsage {
@@ -55,6 +64,18 @@ export function getContextReminderThresholds(startingThreshold: number, step: nu
 		if (!unique.includes(threshold)) unique.push(threshold);
 	}
 	return unique;
+}
+
+/**
+ * A warning is held only while usage stays at or above its threshold. Once
+ * usage falls below one — after compaction, or after any other drop — that
+ * warning becomes available again, so a child that keeps running is never left
+ * without warnings. Returns the remaining held thresholds, or `null` when
+ * nothing was rearmed.
+ */
+export function rearmContextThresholds(percent: number, sentThresholds: ReadonlySet<number>): number[] | null {
+	const held = [...sentThresholds].filter((threshold) => percent >= threshold).sort((a, b) => a - b);
+	return held.length === sentThresholds.size ? null : held;
 }
 
 function formatCompactTokens(tokens: number): string {
@@ -123,8 +144,17 @@ export function selectContextReminder(
 	};
 }
 
+export interface SubagentContextReminderState {
+	/**
+	 * True while the child is holding the last warning, the only one that tells
+	 * it to stop taking new actions. Earlier stages ask it to wind down and do
+	 * not end a run, so they must not be read as the cause of an exit.
+	 */
+	hasDeliveredFinalWarning(): boolean;
+}
+
 /** Install the context monitor inside the child Pi process. */
-export function installSubagentContextReminders(pi: ExtensionAPI): void {
+export function installSubagentContextReminders(pi: ExtensionAPI): SubagentContextReminderState {
 	const startingThreshold = parseContextWarnThreshold(process.env[PI_SUBAGENT_CONTEXT_WARN_THRESHOLD]);
 	const step = parseContextWarnStep(process.env[PI_SUBAGENT_CONTEXT_WARN_STEP]);
 	const sentThresholds = new Set<number>();
@@ -171,6 +201,16 @@ export function installSubagentContextReminders(pi: ExtensionAPI): void {
 			contextWindow <= 0
 		) {
 			return;
+		}
+
+		// Usage can fall back down — compaction, or a resumed session that was
+		// trimmed. Release the warnings the child is no longer above, so it is
+		// never left running with every warning spent.
+		const rearmed = rearmContextThresholds(percent, sentThresholds);
+		if (rearmed) {
+			sentThresholds.clear();
+			for (const threshold of rearmed) sentThresholds.add(threshold);
+			pi.appendEntry(SUBAGENT_CONTEXT_REMINDER_ENTRY, { sentThresholds: rearmed });
 		}
 
 		const reminder = selectContextReminder(
@@ -231,6 +271,17 @@ export function installSubagentContextReminders(pi: ExtensionAPI): void {
 		if (assistant?.stopReason === "toolUse") return;
 		queueReminder(ctx);
 	});
+
+	// The parent cannot read persisted entries from a `--no-session` child, so
+	// this state is published through the exit sidecar instead.
+	// Only a three-stage schedule reaches the "stop taking new actions" message.
+	// Clamping at 99% can collapse the schedule, and a mild warning must never
+	// be mistaken for an instruction to stop.
+	const scheduled = startingThreshold === null ? [] : getContextReminderThresholds(startingThreshold, step);
+	const finalThreshold = scheduled.length === 3 ? scheduled[2] : null;
+	return {
+		hasDeliveredFinalWarning: () => finalThreshold !== null && sentThresholds.has(finalThreshold),
+	};
 }
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";

@@ -330,4 +330,61 @@ describe("subagent wait behavior", () => {
 		assert.equal(sent[0].options.deliverAs, "steer");
 		assert.equal(getCompletedSubagentResultForTest(running.id)?.deliveredTo, "steer");
 	});
+
+	it("explains a context-driven stop and withholds the resume command", async () => {
+		const waited = await waitForResult({
+			name: "Warned child",
+			task: "Finish work",
+			summary: "Partial findings.",
+			summarySource: "subagent",
+			sessionFile: "/tmp/warned-child.jsonl",
+			exitCode: 0,
+			elapsed: 2,
+			contextTokens: 182_000,
+			contextWindow: 200_000,
+			contextWarned: true,
+		});
+		const text = (waited.content[0] as { text: string }).text;
+		assert.match(text, /stopped early as instructed by its context-warning policy/);
+		// Neither the command nor the path: both let a model route around the
+		// guard with bash. The operator still gets the path from details.
+		assert.doesNotMatch(text, /Session: \/tmp\/warned-child\.jsonl/);
+		assert.doesNotMatch(text, /Resume: pi --session/);
+	});
+
+	it("does not call a provider failure an expected wrap-up", async () => {
+		const waited = await waitForResult({
+			name: "Warned failed child",
+			task: "Finish work",
+			summary: "Background agent exited with code 1",
+			summarySource: "runtime",
+			sessionFile: "/tmp/warned-failed-child.jsonl",
+			exitCode: 1,
+			elapsed: 2,
+			errorMessage: "Provider unavailable",
+			contextExhausted: true,
+		});
+		const text = (waited.content[0] as { text: string }).text;
+		assert.doesNotMatch(text, /not a failure/);
+		// The context is spent, but a provider error is often transient, so the
+		// parent keeps the cheap retry and is told which option is usually better.
+		assert.match(text, /context window is spent/);
+		assert.match(text, /fresh subagent is usually better/);
+		assert.match(text, /Resume: pi --session/);
+	});
+
+	it("still offers resume for an unwarned child that failed without output", async () => {
+		const waited = await waitForResult({
+			name: "Failed child",
+			task: "Finish work",
+			summary: "Background agent exited with code 1",
+			summarySource: "runtime",
+			sessionFile: "/tmp/plain-failed-child.jsonl",
+			exitCode: 1,
+			elapsed: 2,
+			errorMessage: "Provider unavailable",
+		});
+		const text = (waited.content[0] as { text: string }).text;
+		assert.match(text, /resume the session with subagent_resume/);
+	});
 });

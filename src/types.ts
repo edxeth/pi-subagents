@@ -49,6 +49,10 @@ export interface SubagentResult {
 	contextTokens?: number;
 	/** Context-window size for the child's final usage snapshot. */
 	contextWindow?: number;
+	/** True when the child's exit was owned by its context-warning policy. */
+	contextWarned?: boolean;
+	/** True when the child failed while its context was already spent. */
+	contextExhausted?: boolean;
 	error?: string;
 	errorMessage?: string;
 	ping?: SubagentPing;

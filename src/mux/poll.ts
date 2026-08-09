@@ -8,6 +8,8 @@ export interface PollResult {
 	outputTokens?: number;
 	contextTokens?: number;
 	contextWindow?: number;
+	/** Set when the child's exit was owned by its context-warning policy. */
+	completionReason?: "context-pressure" | "context-pressure-failure";
 	ping?: { name: string; message: string };
 	errorMessage?: string;
 }
@@ -35,6 +37,16 @@ function withDefinedContextUsage(
 	return obj;
 }
 
+function withDefinedCompletionReason(obj: PollResult, reason: unknown): PollResult {
+	if (reason === "context-pressure") {
+		obj.completionReason = "context-pressure";
+	}
+	if (reason === "context-pressure-failure") {
+		obj.completionReason = "context-pressure-failure";
+	}
+	return obj;
+}
+
 /**
  * Interpret an `.exit` sidecar payload. Centralized so both
  * consumeSubagentExitSignal and pollForExit decode the same way.
@@ -44,7 +56,10 @@ function interpretExitSidecar(data: any): PollResult {
 	const contextTokens = typeof data?.contextTokens === "number" ? data.contextTokens : undefined;
 	const contextWindow = typeof data?.contextWindow === "number" ? data.contextWindow : undefined;
 	const withUsage = (result: PollResult) =>
-		withDefinedContextUsage(withDefinedTokens(result, tokens), contextTokens, contextWindow);
+		withDefinedCompletionReason(
+			withDefinedContextUsage(withDefinedTokens(result, tokens), contextTokens, contextWindow),
+			data?.completionReason,
+		);
 	if (data?.type === "ping") {
 		return withUsage({
 			reason: "ping" as const,

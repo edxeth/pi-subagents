@@ -6,6 +6,7 @@ import {
 	installSubagentContextReminders,
 	parseContextWarnStep,
 	parseContextWarnThreshold,
+	rearmContextThresholds,
 	SUBAGENT_CONTEXT_REMINDER_ENTRY,
 	selectContextReminder,
 } from "../../src/tools/context-reminders.ts";
@@ -73,6 +74,254 @@ describe("subagent context reminders", () => {
 		assert.equal(reminder?.threshold, 90);
 		assert.deepEqual(reminder?.sentThresholds, [80, 85, 90]);
 		assert.match(reminder?.message ?? "", /compaction is imminent/);
+	});
+
+	it("holds a warning only while usage stays at or above its threshold", () => {
+		// Compaction frees most of the window, so every warning becomes available again.
+		assert.deepEqual(rearmContextThresholds(30, new Set([80, 85, 90])), []);
+		// Only the levels the child dropped below come back.
+		assert.deepEqual(rearmContextThresholds(86, new Set([80, 85, 90])), [80, 85]);
+		// A reload at the same usage must not repeat warnings the child already got.
+		assert.equal(rearmContextThresholds(91, new Set([80, 85, 90])), null);
+		assert.equal(rearmContextThresholds(30, new Set()), null);
+	});
+
+	it("warns the child again after compaction frees the context window", () => {
+		const originalThreshold = process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+		const originalStep = process.env.PI_SUBAGENT_CONTEXT_WARN_STEP;
+		process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = "80%";
+		// Pin the step: an ambient value would move the thresholds asserted below.
+		process.env.PI_SUBAGENT_CONTEXT_WARN_STEP = "5%";
+		try {
+			const handlers = new Map<string, any[]>();
+			const sent: string[] = [];
+			const persisted: number[][] = [];
+			const pi = {
+				on(event: string, handler: any) {
+					handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+				},
+				sendUserMessage(message: string) {
+					sent.push(message);
+				},
+				appendEntry(_type: string, data: { sentThresholds: number[] }) {
+					persisted.push(data.sentThresholds);
+				},
+			} as any;
+			installSubagentContextReminders(pi);
+
+			let percent = 91;
+			const ctx = {
+				getContextUsage: () => ({
+					tokens: Math.round(200_000 * (percent / 100)),
+					contextWindow: 200_000,
+					percent,
+				}),
+			};
+			const toolResult = () => {
+				for (const handler of handlers.get("tool_result") ?? []) handler({}, ctx);
+			};
+			// Mark the queued warning as delivered, the way the real child does.
+			const deliver = () => {
+				const text = sent.at(-1);
+				for (const handler of handlers.get("message_end") ?? []) {
+					handler({ message: { role: "user", content: [{ type: "text", text }] } });
+				}
+			};
+
+			toolResult();
+			deliver();
+			assert.equal(sent.length, 1);
+			assert.deepEqual(persisted.at(-1), [80, 85, 90]);
+
+			// Compaction frees the window; nothing is due at 30%.
+			percent = 30;
+			toolResult();
+			assert.equal(sent.length, 1);
+			assert.deepEqual(persisted.at(-1), []);
+
+			// The child fills the window again and must be warned again.
+			percent = 80;
+			toolResult();
+			deliver();
+			assert.equal(sent.length, 2);
+			assert.match(sent[1], /160K\/200K tokens \(80\.0%\)/);
+		} finally {
+			if (originalThreshold == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = originalThreshold;
+			if (originalStep == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_STEP;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_STEP = originalStep;
+		}
+	});
+
+	it("never treats a collapsed schedule's mild warning as terminal", () => {
+		const originalThreshold = process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+		const originalStep = process.env.PI_SUBAGENT_CONTEXT_WARN_STEP;
+		// Clamping at 99% collapses this schedule to a single mild warning.
+		process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = "99%";
+		process.env.PI_SUBAGENT_CONTEXT_WARN_STEP = "5%";
+		try {
+			const handlers = new Map<string, any[]>();
+			const sent: string[] = [];
+			const state = installSubagentContextReminders({
+				on(event: string, handler: any) {
+					handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+				},
+				sendUserMessage(message: string) {
+					sent.push(message);
+				},
+				appendEntry() {},
+			} as any);
+			const ctx = {
+				getContextUsage: () => ({ tokens: 199_000, contextWindow: 200_000, percent: 99.5 }),
+			};
+			for (const handler of handlers.get("tool_result") ?? []) handler({}, ctx);
+			for (const handler of handlers.get("message_end") ?? []) {
+				handler({ message: { role: "user", content: [{ type: "text", text: sent.at(-1) }] } });
+			}
+
+			// The child was only asked to wind down, never told to stop.
+			assert.match(sent[0], /start bringing the current work to a close/);
+			assert.equal(state.hasDeliveredFinalWarning(), false);
+		} finally {
+			if (originalThreshold == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = originalThreshold;
+			if (originalStep == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_STEP;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_STEP = originalStep;
+		}
+	});
+
+	it("reports only the final warning, since earlier stages do not end a run", () => {
+		const originalThreshold = process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+		const originalStep = process.env.PI_SUBAGENT_CONTEXT_WARN_STEP;
+		process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = "80%";
+		process.env.PI_SUBAGENT_CONTEXT_WARN_STEP = "5%";
+		try {
+			const handlers = new Map<string, any[]>();
+			const sent: string[] = [];
+			const pi = {
+				on(event: string, handler: any) {
+					handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+				},
+				sendUserMessage(message: string) {
+					sent.push(message);
+				},
+				appendEntry() {},
+			} as any;
+			const state = installSubagentContextReminders(pi);
+			assert.equal(state.hasDeliveredFinalWarning(), false);
+
+			let percent = 80;
+			const ctx = {
+				getContextUsage: () => ({
+					tokens: Math.round(200_000 * (percent / 100)),
+					contextWindow: 200_000,
+					percent,
+				}),
+			};
+			const deliver = () => {
+				for (const handler of handlers.get("tool_result") ?? []) handler({}, ctx);
+				for (const handler of handlers.get("message_end") ?? []) {
+					handler({ message: { role: "user", content: [{ type: "text", text: sent.at(-1) }] } });
+				}
+			};
+
+			// Stage 0 only says "start bringing the current work to a close", so a
+			// child that finishes afterwards did not stop because of the policy.
+			deliver();
+			assert.match(sent[0], /start bringing the current work to a close/);
+			assert.equal(state.hasDeliveredFinalWarning(), false);
+
+			percent = 91;
+			deliver();
+			assert.match(sent[1], /Stop taking new actions/);
+			assert.equal(state.hasDeliveredFinalWarning(), true);
+
+			percent = 30;
+			for (const handler of handlers.get("tool_result") ?? []) handler({}, ctx);
+			assert.equal(state.hasDeliveredFinalWarning(), false);
+		} finally {
+			if (originalThreshold == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = originalThreshold;
+			if (originalStep == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_STEP;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_STEP = originalStep;
+		}
+	});
+
+	it("records context pressure end to end when the child obeys the final warning", () => {
+		const originalThreshold = process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+		const originalStep = process.env.PI_SUBAGENT_CONTEXT_WARN_STEP;
+		const originalAutoExit = process.env.PI_SUBAGENT_AUTO_EXIT;
+		const originalSession = process.env.PI_SUBAGENT_SESSION;
+		const dir = createTestDir();
+		const sessionFile = join(dir, "final-stage-child.jsonl");
+		writeFileSync(sessionFile, "");
+		process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = "80%";
+		process.env.PI_SUBAGENT_CONTEXT_WARN_STEP = "5%";
+		process.env.PI_SUBAGENT_AUTO_EXIT = "1";
+		process.env.PI_SUBAGENT_SESSION = sessionFile;
+		try {
+			const handlers = new Map<string, any[]>();
+			const emit = (event: string, ...args: unknown[]) => {
+				for (const handler of handlers.get(event) ?? []) handler(...args);
+			};
+			const sent: Array<{ message: string; options: any }> = [];
+			const entries: Array<Record<string, unknown>> = [];
+			let hasPendingMessages = false;
+
+			subagentDoneExtension({
+				getAllTools: () => [],
+				getActiveTools: () => [],
+				setActiveTools() {},
+				registerTool: (definition: unknown) => definition,
+				on(event: string, handler: any) {
+					handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+				},
+				sendUserMessage(message: string, options: unknown) {
+					hasPendingMessages = true;
+					sent.push({ message, options });
+				},
+				appendEntry(customType: string, data: unknown) {
+					entries.push({ type: "custom", customType, data });
+				},
+				registerShortcut() {},
+			} as any);
+
+			const ctx = {
+				sessionManager: { getEntries: () => entries },
+				getContextUsage: () => ({ tokens: 182_000, contextWindow: 200_000, percent: 91 }),
+				hasPendingMessages: () => hasPendingMessages,
+				ui: { setWidget() {}, setStatus() {} },
+				shutdown() {},
+			};
+
+			emit("session_start", {}, ctx);
+			emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
+			assert.match(sent[0].message, /Stop taking new actions/);
+			hasPendingMessages = false;
+			emit("message_end", {
+				message: { role: "user", content: [{ type: "text", text: sent[0].message }] },
+			});
+			emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
+
+			// This is the whole point of the feature: the child that obeyed the
+			// final warning must say so on both channels the parent can read.
+			assert.equal(JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")).completionReason, "context-pressure");
+			assert.deepEqual(entries.at(-1), {
+				type: "custom",
+				customType: "pi-subagent-completion",
+				data: { reason: "context-pressure" },
+			});
+		} finally {
+			if (originalThreshold == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = originalThreshold;
+			if (originalStep == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_STEP;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_STEP = originalStep;
+			if (originalAutoExit == null) delete process.env.PI_SUBAGENT_AUTO_EXIT;
+			else process.env.PI_SUBAGENT_AUTO_EXIT = originalAutoExit;
+			if (originalSession == null) delete process.env.PI_SUBAGENT_SESSION;
+			else process.env.PI_SUBAGENT_SESSION = originalSession;
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("queues one reminder from tool results while a long agent run is active", () => {
@@ -240,7 +489,17 @@ describe("subagent context reminders", () => {
 			emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
 			await sleep(0);
 			assert.equal(shutdowns, 1);
-			assert.deepEqual(JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")), { type: "done", outputTokens: 0 });
+			// This child only ever saw the mild first warning and then finished its
+			// work, so its exit was NOT owned by the context policy.
+			assert.deepEqual(JSON.parse(readFileSync(`${sessionFile}.exit`, "utf8")), {
+				type: "done",
+				outputTokens: 0,
+			});
+			assert.deepEqual(entries.at(-1), {
+				type: "custom",
+				customType: "pi-subagent-completion",
+				data: { reason: "normal" },
+			});
 		} finally {
 			if (originalThreshold == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
 			else process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = originalThreshold;

@@ -12,8 +12,8 @@ import {
 	shouldMarkUserTookOver,
 } from "../auto-exit.ts";
 import { PI_SUBAGENT_APPEND_SYSTEM_PROMPT } from "../launch/append-system.ts";
-import { writeSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import { installSubagentContextReminders } from "./context-reminders.ts";
+import { createExitSignalWriter } from "./exit-signal.ts";
 import { type FinalContextSnapshot, getFinalContextSnapshot } from "./final-context-snapshot.ts";
 import { ProviderErrorRecoveryController, resolveProviderRecoveryDelaysMs } from "./provider-error-recovery.ts";
 import { registerSetTabTitleTool, shouldRegisterSetTabTitleTool } from "./set-tab-title.ts";
@@ -157,7 +157,7 @@ export default function (pi: ExtensionAPI) {
 	const denied: string[] = getDeniedToolNames(autoExit);
 	let outputTokens = 0;
 	let finalContextUsage: FinalContextSnapshot | undefined;
-	installSubagentContextReminders(pi);
+	const contextReminders = installSubagentContextReminders(pi);
 
 	function requestShutdown(ctx: { shutdown: () => void }) {
 		setTimeout(() => {
@@ -169,11 +169,11 @@ export default function (pi: ExtensionAPI) {
 		}, 0);
 	}
 
-	function writeExitSignal(payload: object, opts?: { supersede?: boolean }) {
-		const sessionFile = process.env.PI_SUBAGENT_SESSION;
-		if (!sessionFile) return;
-		writeSubagentExitSidecar(sessionFile, { ...payload, ...finalContextUsage }, opts);
-	}
+	const writeExitSignal = createExitSignalWriter({
+		pi,
+		getFinalContextUsage: () => finalContextUsage,
+		hasDeliveredFinalWarning: () => contextReminders.hasDeliveredFinalWarning(),
+	});
 
 	const subagentName = process.env.PI_SUBAGENT_NAME ?? "";
 	const subagentAgent = process.env.PI_SUBAGENT_AGENT ?? "";
@@ -338,7 +338,8 @@ export default function (pi: ExtensionAPI) {
 			});
 			return;
 		}
-		writeExitSignal({ type: "done", outputTokens });
+		// A shutdown is a lifecycle event, not the child deciding to stop.
+		writeExitSignal({ type: "done", outputTokens }, { autonomous: false });
 	});
 
 	pi.on("session_before_compact", (event) => {

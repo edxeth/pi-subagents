@@ -8,19 +8,29 @@ export function clearSubagentExitSidecar(sessionFile: string): void {
 	rmSync(getSubagentExitSidecarPath(sessionFile), { force: true });
 }
 
-export function writeSubagentExitSidecar(sessionFile: string, payload: object, opts?: { supersede?: boolean }): void {
+/**
+ * Write the child's exit outcome. Returns false when an outcome already owns
+ * this child and the write was refused, so callers never record a verdict the
+ * parent will not see.
+ */
+export function writeSubagentExitSidecar(
+	sessionFile: string,
+	payload: object,
+	opts?: { supersede?: boolean },
+): boolean {
 	const exitFile = getSubagentExitSidecarPath(sessionFile);
 	if (existsSync(exitFile)) {
-		if (!opts?.supersede) return;
+		if (!opts?.supersede) return false;
 		try {
 			const existing = JSON.parse(readFileSync(exitFile, "utf8")) as {
 				type?: unknown;
 			};
-			if (existing.type !== "error") return;
+			if (existing.type !== "error") return false;
 		} catch {
 			// A consumed or unreadable sidecar carries no verdict worth protecting.
 			// Let a genuine completion replace it.
 		}
 	}
 	writeFileSync(exitFile, JSON.stringify(payload), "utf8");
+	return true;
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { CompletedSubagentResult, DeliveryState, RunningSubagent, SubagentResult, WaitParams } from "../types.ts";
-import { formatFinalContextUsage } from "./final-context-usage.ts";
+import { formatContextExitNotice, formatFinalContextUsage, formatSessionRef } from "./final-context-usage.ts";
 import { hasRealSubagentOutput } from "./state.ts";
 import type { WaitRuntime } from "./wait.ts";
 import { formatElapsed } from "./wiring.ts";
@@ -32,16 +32,18 @@ function getSubagentWaitPingResult(running: RunningSubagent, result: SubagentRes
 }
 
 function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
-	const sessionRef = cached.sessionFile
-		? `\n\nSession: ${cached.sessionFile}\nResume: pi --session ${cached.sessionFile}`
-		: "";
-	const contextRef = cached.reportContextUsage === false ? "" : formatFinalContextUsage(cached);
+	const sessionRef = formatSessionRef(cached);
+	const contextRef =
+		cached.reportContextUsage === false ? formatContextExitNotice(cached) : formatFinalContextUsage(cached);
 	let text: string;
 	if (cached.errorMessage) {
 		const resultBody = hasRealSubagentOutput(cached)
 			? `Last output before the failure (may be incomplete — verify before trusting):\n\n${cached.summary}`
-			: `The subagent did not produce a result. You can retry by spawning a new ` +
-				`subagent or resume the session with subagent_resume.`;
+			: cached.contextExhausted
+				? `The subagent did not produce a result, and its context window is spent. ` +
+					`A fresh subagent is usually better than resuming this session.`
+				: `The subagent did not produce a result. You can retry by spawning a new ` +
+					`subagent or resume the session with subagent_resume.`;
 		text =
 			`Sub-agent "${cached.name}" failed after ${formatElapsed(cached.elapsed)} ` +
 			`(provider/agent error — auto-retry exhausted).\n\n` +

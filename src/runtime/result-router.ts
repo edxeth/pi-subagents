@@ -1,5 +1,5 @@
 import type { CompletedSubagentResult, RunningSubagent, SubagentPingMessageDetails, SubagentResult } from "../types.ts";
-import { formatFinalContextUsage } from "./final-context-usage.ts";
+import { formatContextExitNotice, formatFinalContextUsage, formatSessionRef } from "./final-context-usage.ts";
 import { releaseSpawnWidthSlot } from "./spawn-width.ts";
 import {
 	buildCompletedSubagentResult,
@@ -73,10 +73,9 @@ export function deliverCompletedSubagentResult(
 
 	const deliverAs = stopAfterCurrentSubagentBatch ? "nextTurn" : "steer";
 	completed.deliveredTo = "steer";
-	const sessionRef = completed.sessionFile
-		? `\n\nSession: ${completed.sessionFile}\nResume: pi --session ${completed.sessionFile}`
-		: "";
-	const contextRef = completed.reportContextUsage === false ? "" : formatFinalContextUsage(completed);
+	const sessionRef = formatSessionRef(completed);
+	const contextRef =
+		completed.reportContextUsage === false ? formatContextExitNotice(completed) : formatFinalContextUsage(completed);
 	pi.sendMessage(
 		{
 			customType: "subagent_result",
@@ -152,8 +151,11 @@ function getCompletedSubagentContent(
 	if (completed.errorMessage) {
 		const resultBody = hasRealSubagentOutput(completed)
 			? `Last output before the failure (may be incomplete — verify before trusting):\n\n${completed.summary}`
-			: `The subagent did not produce a result. You can retry by spawning a new ` +
-				`subagent or resume the session with subagent_resume.`;
+			: completed.contextExhausted
+				? `The subagent did not produce a result, and its context window is spent. ` +
+					`A fresh subagent is usually better than resuming this session.`
+				: `The subagent did not produce a result. You can retry by spawning a new ` +
+					`subagent or resume the session with subagent_resume.`;
 		return (
 			`Sub-agent "${completed.name}" failed after ${formatElapsed(completed.elapsed)} ` +
 			`(provider/agent error — auto-retry exhausted).\n\n` +

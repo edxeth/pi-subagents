@@ -25,7 +25,7 @@ import {
 	writeResumeTaskArtifactForTest,
 	writeSubagentLaunchMetadataEntryForTest,
 } from "../support/index.ts";
-
+import "../support/ambient-spawn-grant.ts";
 async function readNonEmptyFileEventually(path: string): Promise<string> {
 	let lastText = "";
 	for (let attempt = 0; attempt < 50; attempt++) {

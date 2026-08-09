@@ -12,6 +12,18 @@ export interface InteractiveWatchRuntime {
 	closeRunningSurface(running: RunningSubagent): Promise<void>;
 }
 
+/**
+ * Choose which signal describes the finished child. The poll result is the
+ * authoritative exit record, so it must never be dropped just because it
+ * carries no context counts.
+ */
+export function pickFinalUsageSource(
+	pollResult: PollResult,
+	exitSignal: PollResult | null | undefined,
+): PollResult | null | undefined {
+	return pollResult.contextTokens === undefined ? (exitSignal ?? pollResult) : pollResult;
+}
+
 export async function watchSubagent(
 	running: RunningSubagent,
 	runtime: InteractiveWatchRuntime,
@@ -58,10 +70,7 @@ export async function watchSubagent(
 		const { summary, summarySource } = getSummary(running, pollResult);
 		const errorMessage = pollResult.reason === "error" ? pollResult.errorMessage : undefined;
 		const exitSignal = pollResult.outputTokens === undefined ? consumeSubagentExitSignal(sessionFile) : undefined;
-		const finalContextUsage = resolveFinalContextUsage(
-			running,
-			pollResult.contextTokens === undefined ? exitSignal : pollResult,
-		);
+		const finalContextUsage = resolveFinalContextUsage(running, pickFinalUsageSource(pollResult, exitSignal));
 		cleanupDoneSentinel(running);
 		try {
 			await runtime.closeRunningSurface(running);
