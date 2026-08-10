@@ -208,7 +208,9 @@ Follow these conventions:
 
 Pi expands those placeholders into command output before writing the child task artifact. Ordinary Markdown code fences are treated as literal examples, so inline placeholders inside language-tagged code fences such as `sh` or `text` do not execute. Plain standalone lines like `!git status` are not expanded; use inline ``!`git status` `` or a fenced shell command block. Because project-local agent files can opt into this behavior, only use `task-expansion: shell` in agents whose launch tasks you trust to become shell input.
 
-`context-warn-threshold` turns on context warnings for a child agent. The child process checks how full its context window is after each tool call, and again when the agent finishes. If the total crosses a threshold, the child sends itself a warning before the next model call.
+`context-warn-threshold` turns on context warnings for a child agent. The child process checks how full its context window is after each completed model turn, once the full tool-result batch is visible, and again when the agent finishes. If the total crosses a threshold, the child sends itself a warning for the next model turn.
+
+Warnings are advisory: the model needs another successful turn to act on one. A single unbounded tool batch can jump from below the first threshold directly into Pi's native compaction or context-overflow recovery before the child can wrap up. Keep tool output bounded; the warning policy does not replace output truncation or Pi's compaction safeguards.
 
 Each warning shows the token count and the percentage, for example `160K/200K tokens (80.0%)`. The three warnings get more urgent, so the child stops new work and returns its best result before the context compacts.
 

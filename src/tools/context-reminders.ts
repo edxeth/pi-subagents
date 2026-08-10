@@ -255,7 +255,11 @@ export function installSubagentContextReminders(pi: ExtensionAPI): SubagentConte
 		});
 	});
 
-	pi.on("tool_result", (_event, ctx) => {
+	pi.on("turn_end", (event, ctx) => {
+		const stopReason = (event.message as { stopReason?: unknown }).stopReason;
+		if (stopReason === "error" || stopReason === "aborted") return;
+		// Tool-result hooks run before Pi commits their messages. Turn end is the
+		// first boundary where the complete tool batch is visible to context usage.
 		queueReminder(ctx);
 	});
 

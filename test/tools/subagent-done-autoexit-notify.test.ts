@@ -219,4 +219,108 @@ describe("auto-exit operator-takeover notification", () => {
 			h.restore();
 		}
 	});
+
+	it("auto-exits after /auto-exit re-arm is consumed by an already-queued steer", async () => {
+		// Reproduces the exact frame: operator steers during a run (auto-exit
+		// disabled), re-arms /auto-exit mid-stream, the queued steer drains as the
+		// next user input, and the following normal completion must auto-exit.
+		const h = buildAutoExitHarness({ interactive: true });
+		try {
+			h.handlers.get("agent_start")?.({});
+			h.handlers.get("turn_start")?.({});
+			// Operator steer disables auto-exit and notifies.
+			h.handlers.get("input")?.({ streamingBehavior: "steer" }, h.ctx());
+			await sleep(0);
+			assert.equal(h.disabledNotifies().length, 1);
+			// Operator re-arms /auto-exit mid-stream.
+			await h.commands.get("auto-exit").handler({}, h.ctx());
+			// The queued steer drains as the next input, consuming the one-shot
+			// re-arm. Pi fires agent_start for the new run before the input, and the
+			// model turn then begins with turn_start.
+			h.handlers.get("agent_start")?.({});
+			h.handlers.get("input")?.({ streamingBehavior: "steer" }, h.ctx());
+			h.handlers.get("turn_start")?.({});
+			// The new turn completes normally: the re-arm must now actually fire.
+			h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "stop" }] }, h.ctx());
+			await sleep(0);
+			assert.equal(h.sidecarExists(), true, "re-armed auto-exit must engage after the consumed-steer completion");
+			assert.equal(h.shutdowns(), 1, "re-armed auto-exit must shut the child down");
+		} finally {
+			h.restore();
+		}
+	});
+
+	it("auto-exits after /auto-exit re-arm when the queued input never starts a tool turn", async () => {
+		// The answer to a steer can complete with no tool calls, so no turn_start
+		// fires for it. The in-flight steer was sent before the re-arm, so it must
+		// not hold; the first clean completion after the re-arm auto-exits.
+		const h = buildAutoExitHarness({ interactive: true });
+		try {
+			h.handlers.get("agent_start")?.({});
+			h.handlers.get("turn_start")?.({});
+			h.handlers.get("input")?.({ streamingBehavior: "steer" }, h.ctx());
+			await h.commands.get("auto-exit").handler({}, h.ctx());
+			h.handlers.get("agent_start")?.({});
+			h.handlers.get("input")?.({ streamingBehavior: "steer" }, h.ctx());
+			// No turn_start: the answer completes without tools.
+			h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "stop" }] }, h.ctx());
+			await sleep(0);
+			assert.equal(h.sidecarExists(), true, "re-armed auto-exit engages on the first clean completion");
+		} finally {
+			h.restore();
+		}
+	});
+
+	it("auto-exit re-arm works for every input path", async () => {
+		// Matrix: steer, follow-up, idle prompt, and mixed sequences. Each path
+		// must disable auto-exit on the input, then re-arm must restore it.
+		const cases = [
+			{ name: "steer then re-arm", inputs: [{ streamingBehavior: "steer" }] },
+			{ name: "follow-up then re-arm", inputs: [{ streamingBehavior: "followUp" }] },
+			{ name: "idle prompt then re-arm", inputs: [{ source: "interactive" }] },
+			{ name: "steer then follow-up then re-arm", inputs: [{ streamingBehavior: "steer" }, { streamingBehavior: "followUp" }] },
+		];
+
+		for (const c of cases) {
+			const h = buildAutoExitHarness({ interactive: true });
+			try {
+				h.handlers.get("agent_start")?.({});
+				for (const input of c.inputs) {
+					h.handlers.get("input")?.(input, h.ctx());
+				}
+				await sleep(0);
+				assert.equal(h.disabledNotifies().length, 1, `${c.name}: input must disable auto-exit`);
+				await h.commands.get("auto-exit").handler({}, h.ctx());
+				h.handlers.get("agent_start")?.({});
+				h.handlers.get("turn_start")?.({});
+				h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "stop" }] }, h.ctx());
+				await sleep(0);
+				assert.equal(h.sidecarExists(), true, `${c.name}: re-arm must auto-exit`);
+			} finally {
+				h.restore();
+			}
+		}
+	});
+
+	it("auto-exit re-arm survives multiple queued inputs before completion", async () => {
+		// Two steers queued before re-arm: both must be ignored once, re-arm survives.
+		const h = buildAutoExitHarness({ interactive: true });
+		try {
+			h.handlers.get("agent_start")?.({});
+			h.handlers.get("input")?.({ streamingBehavior: "steer" }, h.ctx());
+			h.handlers.get("input")?.({ streamingBehavior: "steer" }, h.ctx());
+			await sleep(0);
+			assert.equal(h.disabledNotifies().length, 1);
+			await h.commands.get("auto-exit").handler({}, h.ctx());
+			h.handlers.get("agent_start")?.({});
+			h.handlers.get("input")?.({ streamingBehavior: "steer" }, h.ctx());
+			h.handlers.get("input")?.({ streamingBehavior: "steer" }, h.ctx());
+			h.handlers.get("turn_start")?.({});
+			h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "stop" }] }, h.ctx());
+			await sleep(0);
+			assert.equal(h.sidecarExists(), true, "re-arm must survive multiple queued inputs");
+		} finally {
+			h.restore();
+		}
+	});
 });

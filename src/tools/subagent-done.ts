@@ -350,7 +350,7 @@ export default function (pi: ExtensionAPI) {
 	// Enabled via `auto-exit: true` in agent frontmatter.
 	const AUTO_EXIT_STATUS_KEY = "pi-subagent-auto-exit";
 	if (autoExit) {
-		let operatorInputQueuedThisRun = false;
+		let operatorInputHoldCount = 0;
 		let autoExitDisabledByOperator = false;
 		let autoExitReArmed = false;
 		let agentStarted = false;
@@ -379,10 +379,13 @@ export default function (pi: ExtensionAPI) {
 
 		pi.on("agent_start", () => {
 			agentStarted = true;
-			operatorInputQueuedThisRun = false;
+			operatorInputHoldCount = 0;
 		});
 
 		pi.on("turn_start", () => {
+			// Each queued input holds auto-exit once. Release one at the first
+			// turn_start that sees it; a queued steer lands after agent_start.
+			if (operatorInputHoldCount > 0) operatorInputHoldCount -= 1;
 			toolExecutionsThisTurn = 0;
 			terminatingToolExecutionsThisTurn = 0;
 			terminatingSubagentLaunchesThisTurn = 0;
@@ -406,10 +409,17 @@ export default function (pi: ExtensionAPI) {
 			// the operator is steering and the child should stay open for that turn.
 			if (!shouldMarkUserTookOver(agentStarted, event.streamingBehavior)) return;
 			if (autoExitReArmed) {
-				operatorInputQueuedThisRun = true;
-				autoExitReArmed = false;
+				if (event.streamingBehavior === "steer" || event.streamingBehavior === "followUp") {
+					// A queued steer/follow-up sent before the re-arm drains into this
+					// run: hold auto-exit once so the child stays open to answer it.
+					// The re-arm survives until a fresh interactive prompt arrives.
+					operatorInputHoldCount += 1;
+				} else {
+					// A fresh interactive prompt consumes the re-arm.
+					autoExitReArmed = false;
+				}
 			} else if (!autoExitDisabledByOperator) {
-				operatorInputQueuedThisRun = true;
+				operatorInputHoldCount += 1;
 				disableAutoExitByOperator(ctx);
 			}
 			providerErrorRecovery.cancelPendingRecovery(true);
@@ -417,9 +427,12 @@ export default function (pi: ExtensionAPI) {
 		});
 
 		pi.on("agent_end", (event, ctx) => {
+			// A turn with no tool calls fires no turn_start. Release one hold at
+			// agent_end only when no turn started since the last input.
+			if (operatorInputHoldCount > 0) operatorInputHoldCount -= 1;
 			const messages = event.messages as Parameters<typeof shouldAutoExitOnAgentEnd>[0];
 			const shouldExit = shouldAutoExitOnAgentEnd(messages);
-			if (!shouldExit || operatorInputQueuedThisRun) {
+			if (!shouldExit || operatorInputHoldCount > 0) {
 				// Agent turn was aborted (Escape), or the operator sent a queued
 				// steering message. Leave the session open and cancel any pending
 				// autonomous recovery action. Escape fires no `input` event, so this
@@ -428,7 +441,7 @@ export default function (pi: ExtensionAPI) {
 				if (!shouldExit && isInteractive) {
 					disableAutoExitByOperator(ctx);
 				}
-				providerErrorRecovery.cancelPendingRecovery(operatorInputQueuedThisRun);
+				providerErrorRecovery.cancelPendingRecovery(operatorInputHoldCount > 0);
 				cancelPendingPiRecovery();
 				return;
 			}

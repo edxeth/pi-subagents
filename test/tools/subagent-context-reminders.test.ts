@@ -76,6 +76,88 @@ describe("subagent context reminders", () => {
 		assert.match(reminder?.message ?? "", /compaction is imminent/);
 	});
 
+	it("warns after a completed tool batch commits a context jump", () => {
+		const originalThreshold = process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+		const originalStep = process.env.PI_SUBAGENT_CONTEXT_WARN_STEP;
+		process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = "80%";
+		process.env.PI_SUBAGENT_CONTEXT_WARN_STEP = "5%";
+		try {
+			const handlers = new Map<string, any[]>();
+			const sent: string[] = [];
+			installSubagentContextReminders({
+				on(event: string, handler: any) {
+					handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+				},
+				sendUserMessage(message: string) {
+					sent.push(message);
+				},
+				appendEntry() {},
+			} as any);
+
+			let percent = 70;
+			const ctx = {
+				getContextUsage: () => ({
+					tokens: Math.round(200_000 * (percent / 100)),
+					contextWindow: 200_000,
+					percent,
+				}),
+			};
+
+			for (const handler of handlers.get("tool_result") ?? []) {
+				handler({}, ctx);
+				handler({}, ctx);
+				handler({}, ctx);
+			}
+			assert.equal(sent.length, 0, "per-result state is still below the warning threshold");
+
+			percent = 91;
+			for (const handler of handlers.get("turn_end") ?? []) {
+				handler({ message: { role: "assistant", stopReason: "toolUse" } }, ctx);
+			}
+
+			assert.equal(sent.length, 1);
+			assert.match(sent[0], /182K\/200K tokens \(91\.0%\)/);
+			assert.match(sent[0], /Stop taking new actions/);
+		} finally {
+			if (originalThreshold == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = originalThreshold;
+			if (originalStep == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_STEP;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_STEP = originalStep;
+		}
+	});
+
+	it("does not queue turn-end warnings for failed or aborted turns", () => {
+		const originalThreshold = process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+		process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = "80%";
+		try {
+			const handlers = new Map<string, any[]>();
+			const sent: string[] = [];
+			installSubagentContextReminders({
+				on(event: string, handler: any) {
+					handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+				},
+				sendUserMessage(message: string) {
+					sent.push(message);
+				},
+				appendEntry() {},
+			} as any);
+			const ctx = {
+				getContextUsage: () => ({ tokens: 182_000, contextWindow: 200_000, percent: 91 }),
+			};
+
+			for (const stopReason of ["error", "aborted"]) {
+				for (const handler of handlers.get("turn_end") ?? []) {
+					handler({ message: { role: "assistant", stopReason } }, ctx);
+				}
+			}
+
+			assert.deepEqual(sent, []);
+		} finally {
+			if (originalThreshold == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
+			else process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = originalThreshold;
+		}
+	});
+
 	it("holds a warning only while usage stays at or above its threshold", () => {
 		// Compaction frees most of the window, so every warning becomes available again.
 		assert.deepEqual(rearmContextThresholds(30, new Set([80, 85, 90])), []);
@@ -117,8 +199,10 @@ describe("subagent context reminders", () => {
 					percent,
 				}),
 			};
-			const toolResult = () => {
-				for (const handler of handlers.get("tool_result") ?? []) handler({}, ctx);
+			const endToolTurn = () => {
+				for (const handler of handlers.get("turn_end") ?? []) {
+					handler({ message: { role: "assistant", stopReason: "toolUse" } }, ctx);
+				}
 			};
 			// Mark the queued warning as delivered, the way the real child does.
 			const deliver = () => {
@@ -128,20 +212,20 @@ describe("subagent context reminders", () => {
 				}
 			};
 
-			toolResult();
+			endToolTurn();
 			deliver();
 			assert.equal(sent.length, 1);
 			assert.deepEqual(persisted.at(-1), [80, 85, 90]);
 
 			// Compaction frees the window; nothing is due at 30%.
 			percent = 30;
-			toolResult();
+			endToolTurn();
 			assert.equal(sent.length, 1);
 			assert.deepEqual(persisted.at(-1), []);
 
 			// The child fills the window again and must be warned again.
 			percent = 80;
-			toolResult();
+			endToolTurn();
 			deliver();
 			assert.equal(sent.length, 2);
 			assert.match(sent[1], /160K\/200K tokens \(80\.0%\)/);
@@ -174,7 +258,9 @@ describe("subagent context reminders", () => {
 			const ctx = {
 				getContextUsage: () => ({ tokens: 199_000, contextWindow: 200_000, percent: 99.5 }),
 			};
-			for (const handler of handlers.get("tool_result") ?? []) handler({}, ctx);
+			for (const handler of handlers.get("turn_end") ?? []) {
+				handler({ message: { role: "assistant", stopReason: "toolUse" } }, ctx);
+			}
 			for (const handler of handlers.get("message_end") ?? []) {
 				handler({ message: { role: "user", content: [{ type: "text", text: sent.at(-1) }] } });
 			}
@@ -219,7 +305,9 @@ describe("subagent context reminders", () => {
 				}),
 			};
 			const deliver = () => {
-				for (const handler of handlers.get("tool_result") ?? []) handler({}, ctx);
+				for (const handler of handlers.get("turn_end") ?? []) {
+					handler({ message: { role: "assistant", stopReason: "toolUse" } }, ctx);
+				}
 				for (const handler of handlers.get("message_end") ?? []) {
 					handler({ message: { role: "user", content: [{ type: "text", text: sent.at(-1) }] } });
 				}
@@ -237,7 +325,9 @@ describe("subagent context reminders", () => {
 			assert.equal(state.hasDeliveredFinalWarning(), true);
 
 			percent = 30;
-			for (const handler of handlers.get("tool_result") ?? []) handler({}, ctx);
+			for (const handler of handlers.get("turn_end") ?? []) {
+				handler({ message: { role: "assistant", stopReason: "toolUse" } }, ctx);
+			}
 			assert.equal(state.hasDeliveredFinalWarning(), false);
 		} finally {
 			if (originalThreshold == null) delete process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
@@ -324,7 +414,7 @@ describe("subagent context reminders", () => {
 		}
 	});
 
-	it("queues one reminder from tool results while a long agent run is active", () => {
+	it("queues one reminder at the completed tool-turn boundary", () => {
 		const originalThreshold = process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD;
 		process.env.PI_SUBAGENT_CONTEXT_WARN_THRESHOLD = "80%";
 		try {
@@ -347,9 +437,9 @@ describe("subagent context reminders", () => {
 				}),
 			};
 
-			for (const handler of handlers.get("tool_result") ?? []) {
-				handler({}, ctx);
-				handler({}, ctx);
+			for (const handler of handlers.get("turn_end") ?? []) {
+				handler({ message: { role: "assistant", stopReason: "toolUse" } }, ctx);
+				handler({ message: { role: "assistant", stopReason: "toolUse" } }, ctx);
 			}
 
 			assert.equal(sent.length, 1);
