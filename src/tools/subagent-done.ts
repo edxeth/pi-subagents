@@ -1,38 +1,24 @@
-/**
- * Extension loaded into sub-agents.
- * - Provides a `subagent_done` tool for autonomous agents to self-terminate
- */
-
 import { createRequire } from "node:module";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+	endedAtToolUseBoundary,
 	findLatestAssistantError,
 	isOperatorInput,
 	shouldAutoExitOnAgentEnd,
 	shouldMarkUserTookOver,
 } from "../auto-exit.ts";
 import { PI_SUBAGENT_APPEND_SYSTEM_PROMPT } from "../launch/append-system.ts";
+import { getPublishedRunningSubagentCount } from "../runtime/nested-lifecycle.ts";
 import { installSubagentContextReminders } from "./context-reminders.ts";
 import { createExitSignalWriter } from "./exit-signal.ts";
 import { type FinalContextSnapshot, getFinalContextSnapshot } from "./final-context-snapshot.ts";
 import { ProviderErrorRecoveryController, resolveProviderRecoveryDelaysMs } from "./provider-error-recovery.ts";
 import { registerSetTabTitleTool, shouldRegisterSetTabTitleTool } from "./set-tab-title.ts";
-import { CALLER_PING_TOOL_NAME, SUBAGENT_DONE_TOOL_NAME } from "./tool-names.ts";
+import { CALLER_PING_TOOL_NAME, SUBAGENT_DONE_TOOL_NAME, SUBAGENT_LAUNCH_TOOL_NAMES } from "./tool-names.ts";
 
 const require = createRequire(import.meta.url);
 const TOOL_BOUNDARY_RECOVERY_NUDGE = "continue";
 const MAX_CONSECUTIVE_TOOL_BOUNDARY_ENDS = 3;
-
-function endedAtToolUseBoundary(messages: unknown[] | undefined): boolean {
-	if (!messages) return false;
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i] as { role?: unknown; stopReason?: unknown } | undefined;
-		if (message?.role !== "assistant") continue;
-		if (typeof message.stopReason !== "string") return false;
-		return message.stopReason.replace(/[-_]/g, "").toLowerCase() === "tooluse";
-	}
-	return false;
-}
 
 function isMissingOptionalDependency(error: unknown, id: string): boolean {
 	const maybeError = error as { code?: unknown; message?: unknown } | null;
@@ -371,6 +357,7 @@ export default function (pi: ExtensionAPI) {
 		let consecutiveToolBoundaryEnds = 0;
 		let toolExecutionsThisTurn = 0;
 		let terminatingToolExecutionsThisTurn = 0;
+		let terminatingSubagentLaunchesThisTurn = 0;
 
 		const AUTO_EXIT_DISABLED_MSG = "Auto-exit disabled — close manually or /auto-exit to re-enable";
 		// Single owner of the disabled latch and the operator-facing status/toast.
@@ -382,7 +369,9 @@ export default function (pi: ExtensionAPI) {
 		const disableAutoExitByOperator = (
 			ctx: { ui: { setStatus(key: string, message?: string): void; notify(message: string, tone?: string): void } },
 		) => {
+			const alreadyDisabled = autoExitDisabledByOperator;
 			autoExitDisabledByOperator = true;
+			if (alreadyDisabled) return;
 			if (!isInteractive) return;
 			ctx.ui.setStatus(AUTO_EXIT_STATUS_KEY, AUTO_EXIT_DISABLED_MSG);
 			ctx.ui.notify(AUTO_EXIT_DISABLED_MSG, "warning");
@@ -396,12 +385,15 @@ export default function (pi: ExtensionAPI) {
 		pi.on("turn_start", () => {
 			toolExecutionsThisTurn = 0;
 			terminatingToolExecutionsThisTurn = 0;
+			terminatingSubagentLaunchesThisTurn = 0;
 		});
 
 		pi.on("tool_execution_end", (event) => {
 			toolExecutionsThisTurn += 1;
 			const result = event.result as { terminate?: unknown } | undefined;
-			if (result?.terminate === true) terminatingToolExecutionsThisTurn += 1;
+			if (result?.terminate !== true) return;
+			terminatingToolExecutionsThisTurn += 1;
+			if (SUBAGENT_LAUNCH_TOOL_NAMES.has(event.toolName)) terminatingSubagentLaunchesThisTurn += 1;
 		});
 
 		pi.on("input", (event, ctx) => {
@@ -413,10 +405,11 @@ export default function (pi: ExtensionAPI) {
 			// Inputs while streaming, queued follow-ups, or later manual prompts mean
 			// the operator is steering and the child should stay open for that turn.
 			if (!shouldMarkUserTookOver(agentStarted, event.streamingBehavior)) return;
-			operatorInputQueuedThisRun = true;
 			if (autoExitReArmed) {
+				operatorInputQueuedThisRun = true;
 				autoExitReArmed = false;
-			} else {
+			} else if (!autoExitDisabledByOperator) {
+				operatorInputQueuedThisRun = true;
 				disableAutoExitByOperator(ctx);
 			}
 			providerErrorRecovery.cancelPendingRecovery(true);
@@ -446,6 +439,15 @@ export default function (pi: ExtensionAPI) {
 			// bound the retries so a persistently broken provider cannot loop forever.
 			const intentionallyTerminatedToolBatch =
 				toolExecutionsThisTurn > 0 && toolExecutionsThisTurn === terminatingToolExecutionsThisTurn;
+			const coordinatorOnlyTurnStop =
+				intentionallyTerminatedToolBatch && terminatingSubagentLaunchesThisTurn > 0;
+			if (endedAtToolUseBoundary(messages) && coordinatorOnlyTurnStop) {
+				pendingProviderError = null;
+				providerErrorRecovery.cancelPendingRecovery();
+				cancelPendingPiRecovery();
+				consecutiveToolBoundaryEnds = 0;
+				return;
+			}
 			if (endedAtToolUseBoundary(messages) && !intentionallyTerminatedToolBatch) {
 				pendingProviderError = null;
 				providerErrorRecovery.cancelPendingRecovery();
@@ -503,6 +505,8 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			if (ctx.hasPendingMessages?.()) return;
+			// Keep the coordinator alive until every live child has reported back.
+			if (getPublishedRunningSubagentCount() > 0) return;
 			pendingProviderError = null;
 			consecutiveToolBoundaryEnds = 0;
 			providerErrorRecovery.cancelPendingRecovery(true);

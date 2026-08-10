@@ -116,26 +116,27 @@ function buildAutoExitHarness(opts: { interactive?: boolean } = {}): Harness {
 }
 
 describe("auto-exit operator-takeover notification", () => {
-	it("notifies on an idle operator input that starts a new run (the silent-disable fix)", async () => {
+	it("notifies once on an idle operator input that starts a new run", async () => {
 		const h = buildAutoExitHarness({ interactive: true });
 		try {
 			// Escape disables auto-exit first (notifies once, session stays open).
 			h.handlers.get("agent_start")?.({});
 			h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "aborted" }] }, h.ctx());
 			// Idle operator input (no streamingBehavior) starts a fresh run via
-			// runAgentLoopContinue, whose new agent_start clears the per-run flag.
+			// runAgentLoopContinue. The takeover episode was already announced, so
+			// this input must not emit the same warning again.
 			h.handlers.get("input")?.({ source: "interactive" }, h.ctx());
 			h.handlers.get("agent_start")?.({});
 			h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "stop" }] }, h.ctx());
 			await sleep(0);
-			assert.equal(h.disabledNotifies().length, 2, "idle input after disable must also notify");
+			assert.equal(h.disabledNotifies().length, 1, "idle input after disable must not spam");
 			assert.equal(h.sidecarExists(), false, "session stays open");
 		} finally {
 			h.restore();
 		}
 	});
 
-	it("notifies on every repeated operator input, not only the first transition", async () => {
+	it("notifies once per disabled episode, not for every repeated operator input", async () => {
 		const h = buildAutoExitHarness({ interactive: true });
 		try {
 			h.handlers.get("agent_start")?.({});
@@ -143,7 +144,8 @@ describe("auto-exit operator-takeover notification", () => {
 			h.handlers.get("input")?.({ streamingBehavior: "steer" }, h.ctx());
 			h.handlers.get("input")?.({ streamingBehavior: "steer" }, h.ctx());
 			await sleep(0);
-			assert.equal(h.disabledNotifies().length, 3, "each qualifying operator input notifies");
+			assert.equal(h.disabledNotifies().length, 1, "repeat input while already disabled must not spam");
+			assert.equal(h.statusSets.filter((s) => s.msg === "Auto-exit disabled — close manually or /auto-exit to re-enable").length, 1);
 		} finally {
 			h.restore();
 		}

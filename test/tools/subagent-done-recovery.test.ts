@@ -1,12 +1,15 @@
 import { mock } from "node:test";
 import {
 	assert,
+	clearPublishedRunningSubagentCountForTest,
 	createTestDir,
 	describe,
 	it,
 	join,
 	readFileSync,
+	resetSubagentStateForTest,
 	rmSync,
+	publishRunningSubagentCountForTest,
 	sleep,
 	subagentDoneExtension,
 	writeFileSync,
@@ -20,6 +23,7 @@ describe("subagent-done.ts", () => {
 		// so controller-only tests could not catch it. These can.
 		function loadRecoveryChild(options: { interactive?: boolean } = {}) {
 			const handlers = new Map<string, any>();
+			const commands = new Map<string, any>();
 			const sentMessages: string[] = [];
 			const sentMessageOptions: unknown[] = [];
 			const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
@@ -42,6 +46,9 @@ describe("subagent-done.ts", () => {
 				registerTool(definition: { name: string }) {
 					return definition;
 				},
+				registerCommand(name: string, definition: unknown) {
+					commands.set(name, definition);
+				},
 				on(event: string, handler: any) {
 					handlers.set(event, handler);
 				},
@@ -62,6 +69,7 @@ describe("subagent-done.ts", () => {
 						if (stale) throw new Error("stale context");
 						statusUpdates.push({ key, text });
 					},
+					notify() {},
 				},
 				shutdown() {
 					shutdowns += 1;
@@ -72,6 +80,7 @@ describe("subagent-done.ts", () => {
 				sentMessages,
 				sentMessageOptions,
 				statusUpdates,
+				commands,
 				sessionFile,
 				ctx,
 				dir,
@@ -85,6 +94,8 @@ describe("subagent-done.ts", () => {
 		}
 
 		function cleanup(dir: string) {
+			clearPublishedRunningSubagentCountForTest();
+			resetSubagentStateForTest();
 			delete process.env.PI_SUBAGENT_SESSION;
 			delete process.env.PI_SUBAGENT_AUTO_EXIT;
 			delete process.env.PI_SUBAGENT_SURFACE;
@@ -324,6 +335,208 @@ describe("subagent-done.ts", () => {
 				assert.deepEqual(h.sentMessages, []);
 				assert.equal(readExit(h).type, "done");
 				assert.equal(h.shutdowns, 1);
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("keeps an auto-exit coordinator alive after an async nested launch stops its turn", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 0 });
+				h.handlers.get("tool_execution_end")?.({
+					type: "tool_execution_end",
+					toolCallId: "nested-launch",
+					toolName: "subagent",
+					result: {
+						content: [{ type: "text", text: "started" }],
+						terminate: true,
+					},
+					isError: false,
+				});
+				h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "toolUse" }] }, h.ctx);
+				mock.timers.tick(0);
+
+				assert.deepEqual(h.sentMessages, []);
+				assert.equal(h.shutdowns, 0);
+				assertNoExit(h);
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("keeps an auto-exit coordinator alive after an async nested resume stops its turn", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 0 });
+				h.handlers.get("tool_execution_end")?.({
+					type: "tool_execution_end",
+					toolCallId: "nested-resume",
+					toolName: "subagent_resume",
+					result: { content: [{ type: "text", text: "resumed" }], terminate: true },
+					isError: false,
+				});
+				h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "toolUse" }] }, h.ctx);
+				mock.timers.tick(0);
+
+				assert.equal(h.shutdowns, 0);
+				assertNoExit(h);
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("auto-exits normally after the nested child result produces a final response", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 0 });
+				h.handlers.get("tool_execution_end")?.({
+					type: "tool_execution_end",
+					toolCallId: "nested-launch",
+					toolName: "subagent",
+					result: { content: [{ type: "text", text: "started" }], terminate: true },
+					isError: false,
+				});
+				h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "toolUse" }] }, h.ctx);
+
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 1 });
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "final" }] }] },
+					h.ctx,
+				);
+				mock.timers.tick(0);
+
+				assert.equal(h.shutdowns, 1);
+				assert.equal(readExit(h).type, "done");
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("does not carry a nested launch stop into the next turn", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 0 });
+				h.handlers.get("tool_execution_end")?.({
+					type: "tool_execution_end",
+					toolCallId: "nested-launch",
+					toolName: "subagent",
+					result: { content: [{ type: "text", text: "started" }], terminate: true },
+					isError: false,
+				});
+				h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "toolUse" }] }, h.ctx);
+
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 1 });
+				h.handlers.get("tool_execution_end")?.({
+					type: "tool_execution_end",
+					toolCallId: "ordinary-stop",
+					toolName: "detached_launch",
+					result: { content: [{ type: "text", text: "done" }], terminate: true },
+					isError: false,
+				});
+				h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "toolUse" }] }, h.ctx);
+				mock.timers.tick(0);
+
+				assert.equal(h.shutdowns, 1);
+				assert.equal(readExit(h).type, "done");
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("uses tool-boundary recovery when a nested launch did not stop the whole batch", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 0 });
+				h.handlers.get("tool_execution_end")?.({
+					type: "tool_execution_end",
+					toolCallId: "nested-launch",
+					toolName: "subagent",
+					result: { content: [{ type: "text", text: "started" }], terminate: true },
+					isError: false,
+				});
+				h.handlers.get("tool_execution_end")?.({
+					type: "tool_execution_end",
+					toolCallId: "sibling-work",
+					toolName: "exec_command",
+					result: { content: [{ type: "text", text: "done" }] },
+					isError: false,
+				});
+				h.handlers.get("agent_end")?.({ messages: [{ role: "assistant", stopReason: "toolUse" }] }, h.ctx);
+
+				assert.deepEqual(h.sentMessages, ["continue"]);
+				assert.equal(h.shutdowns, 0);
+				assertNoExit(h);
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("stays alive after an intermediate child result while a sibling is still running", () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				publishRunningSubagentCountForTest(() => 1);
+
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 1 });
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "first result" }] }] },
+					h.ctx,
+				);
+				mock.timers.tick(0);
+
+				assert.equal(h.shutdowns, 0);
+				assertNoExit(h);
+			} finally {
+				cleanup(h.dir);
+				mock.timers.reset();
+			}
+		});
+
+		it("honors /auto-exit re-arm across multiple extension-delivered child results", async () => {
+			mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+			const h = loadRecoveryChild();
+			try {
+				publishRunningSubagentCountForTest(() => 1);
+
+				h.handlers.get("agent_start")?.({ type: "agent_start" });
+				h.handlers.get("input")?.({ source: "interactive", streamingBehavior: "steer" }, h.ctx);
+				await h.commands.get("auto-exit")?.handler({}, h.ctx);
+
+				h.handlers.get("input")?.({ source: "extension", streamingBehavior: "steer" }, h.ctx);
+				h.handlers.get("agent_start")?.({ type: "agent_start" });
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 1 });
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "first child" }] }] },
+					h.ctx,
+				);
+				mock.timers.tick(0);
+				assert.equal(h.shutdowns, 0);
+				assertNoExit(h);
+
+				publishRunningSubagentCountForTest(() => 0);
+				h.handlers.get("input")?.({ source: "extension", streamingBehavior: "steer" }, h.ctx);
+				h.handlers.get("agent_start")?.({ type: "agent_start" });
+				h.handlers.get("turn_start")?.({ type: "turn_start", turnIndex: 2 });
+				h.handlers.get("agent_end")?.(
+					{ messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "last child" }] }] },
+					h.ctx,
+				);
+				mock.timers.tick(0);
+
+				assert.equal(h.shutdowns, 1);
+				assert.equal(readExit(h).type, "done");
 			} finally {
 				cleanup(h.dir);
 				mock.timers.reset();

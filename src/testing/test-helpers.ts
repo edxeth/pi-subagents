@@ -59,6 +59,10 @@ import {
 } from "../launch/resume.ts";
 import { resolveSubagentRuntimePaths } from "../launch/runtime-paths.ts";
 import { getNoSessionSeedMode } from "../launch/seed-child-session.ts";
+import {
+	clearPublishedRunningSubagentCountForTest,
+	publishRunningSubagentCount,
+} from "../runtime/nested-lifecycle.ts";
 import { resolveResumeLaunchMetadataForInvocation } from "../runtime/resume-service.ts";
 import { ChildSessionStorage } from "../session/child-session-storage.ts";
 import {
@@ -152,6 +156,12 @@ export function getTerminalAssistantSummaryAfterLaunchForTest(entries: SessionEn
 export function shouldReapStableTerminalSummaryForTest(running: Pick<RunningSubagent, "autoExit">) {
 	return shouldReapStableTerminalSummary(running);
 }
+
+export function publishRunningSubagentCountForTest(getCount: () => number): void {
+	publishRunningSubagentCount(getCount);
+}
+
+export { clearPublishedRunningSubagentCountForTest };
 
 export function getPiInvocationForTest(args: string[]) {
 	return getPiInvocation(args);

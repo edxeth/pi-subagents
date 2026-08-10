@@ -94,6 +94,17 @@ type AgentMessageLike = {
 	stopReason?: string;
 };
 
+export function endedAtToolUseBoundary(messages: unknown[] | undefined): boolean {
+	if (!messages) return false;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i] as { role?: unknown; stopReason?: unknown } | undefined;
+		if (message?.role !== "assistant") continue;
+		if (typeof message.stopReason !== "string") return false;
+		return message.stopReason.replace(/[-_]/g, "").toLowerCase() === "tooluse";
+	}
+	return false;
+}
+
 /**
  * Decide whether an auto-exit subagent reached a terminal agent turn.
  *

@@ -19,6 +19,7 @@ import {
 import { resolveSubagentCwd } from "./launch/runtime-paths.ts";
 import { getNoSessionSeedMode } from "./launch/seed-child-session.ts";
 import { initializeSpawnWidthForSession } from "./runtime/spawn-width.ts";
+import { publishRunningSubagentCount } from "./runtime/nested-lifecycle.ts";
 import { parseSpawnEnv } from "./spawn/policy.ts";
 
 export { resolveSubagentConfigDir } from "./launch/runtime-paths.ts";
@@ -135,6 +136,8 @@ function muxUnavailableResult(kind: "subagents" | "tab-title" = "subagents") {
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
+	publishRunningSubagentCount(() => runningSubagents.size);
+
 	function attachWidgetContext(ctx: ExtensionContext) {
 		widgetManager.attachContext(ctx);
 	}

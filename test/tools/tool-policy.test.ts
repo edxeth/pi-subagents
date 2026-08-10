@@ -329,9 +329,9 @@ describe("tool policy", () => {
 				"-e",
 				"/tmp/subagent-done.ts",
 				"-e",
-				getSubagentsExtensionPathForTest(),
-				"-e",
 				"npm:pi-fancy-footer",
+				"-e",
+				getSubagentsExtensionPathForTest(),
 			]);
 		});
 

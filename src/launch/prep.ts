@@ -221,14 +221,15 @@ export function getExtensionLaunchArgs(
 	const args: string[] = [];
 	if (extensionSpecs !== undefined) args.push("--no-extensions");
 	args.push("-e", mandatoryExtensionPath);
+	for (const extension of extensionSpecs ?? []) args.push("-e", extension);
 	// `extensions:` replaces the inherited extension set, which would otherwise
 	// drop pi-subagents itself and leave a granted child without the tools that
-	// `spawning` promised. The bundled protocol extension above is force-loaded
-	// for the same reason, so a spawn grant force-loads this one too.
+	// `spawning` promised. Load it after the child's selected extensions so a
+	// later extension cannot replace the active tool set and silently drop the
+	// spawning tools that this extension registers.
 	if (spawningAllowed && extensionSpecs !== undefined && !includesSubagentsExtension(extensionSpecs)) {
 		args.push("-e", getSubagentsExtensionPath());
 	}
-	for (const extension of extensionSpecs ?? []) args.push("-e", extension);
 	return args;
 }
 
