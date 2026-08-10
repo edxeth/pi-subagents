@@ -4,6 +4,7 @@ import "./session/child-session-storage.test.ts";
 import "./session/exit-sidecar.test.ts";
 
 import "./tools/subagent-done.test.ts";
+import "./tools/tool-policy.test.ts";
 import "./tools/subagent-done-autoexit-notify.test.ts";
 import "./tools/subagent-context-reminders.test.ts";
 import "./tools/exit-signal.test.ts";

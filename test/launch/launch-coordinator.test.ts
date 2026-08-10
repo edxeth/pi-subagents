@@ -73,7 +73,12 @@ describe("launch coordinator", () => {
 		assert.equal(launch.launchMetadata.trustProject, true);
 		assert.equal(launch.envVars.PI_SUBAGENT_SESSION, launch.prepared.subagentSessionFile);
 		assert.equal(launch.envVars.PI_SUBAGENT_AUTO_EXIT, "1");
-		assert.deepEqual(launch.envVars.PI_DENY_TOOLS.split(",").sort(), ["bash", "subagent", "subagent_resume"]);
+		assert.deepEqual(launch.envVars.PI_DENY_TOOLS.split(",").sort(), [
+			"bash",
+			"subagent",
+			"subagent_kill",
+			"subagent_resume",
+		]);
 
 		const entries = getEntries(launch.prepared.subagentSessionFile) as Array<Record<string, unknown>>;
 		assert.equal(entries[0].type, "session");

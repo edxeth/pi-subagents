@@ -72,6 +72,10 @@ describe("spawn-related agent fields", () => {
 	it("uses the parsed spawning shape for tool denial", () => {
 		assert.deepEqual(loadDefinition("spawning: agent-b")?.spawning, ["agent-b"]);
 		assert.deepEqual([...resolveDenyToolsForTest({ spawning: ["agent-b"] })], []);
-		assert.deepEqual([...resolveDenyToolsForTest({ spawning: false })].sort(), ["subagent", "subagent_resume"]);
+		assert.deepEqual([...resolveDenyToolsForTest({ spawning: false })].sort(), [
+			"subagent",
+			"subagent_kill",
+			"subagent_resume",
+		]);
 	});
 });

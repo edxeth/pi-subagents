@@ -57,7 +57,7 @@ describe("child launch plan", () => {
 		assert.equal(plan.capability.skills, "none");
 		assert.equal(plan.capability.injectSkills, undefined);
 		assert.deepEqual(plan.capability.extensions, []);
-		assert.deepEqual([...plan.capability.denySet].sort(), ["bash", "subagent", "subagent_resume"]);
+		assert.deepEqual([...plan.capability.denySet].sort(), ["bash", "subagent", "subagent_kill", "subagent_resume"]);
 		assert.deepEqual(plan.capability.skillLaunchPlan.launchArgs, ["--no-skills"]);
 	});
 

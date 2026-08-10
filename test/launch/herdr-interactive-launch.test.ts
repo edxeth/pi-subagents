@@ -531,7 +531,7 @@ describe("Herdr interactive launch parity", () => {
 		assert.equal(metadata?.skills, "review");
 		assert.equal(metadata?.injectSkills, "review");
 		assert.deepEqual(metadata?.extensions, []);
-		assert.deepEqual(metadata?.denyTools, ["subagent", "subagent_resume", "grep", "set_tab_title"]);
+		assert.deepEqual(metadata?.denyTools, ["subagent", "subagent_resume", "subagent_kill", "grep", "set_tab_title"]);
 		assert.equal(metadata?.noContextFiles, true);
 		assert.equal(metadata?.inheritAppendSystem, false);
 
@@ -543,14 +543,17 @@ describe("Herdr interactive launch parity", () => {
 		assert.doesNotMatch(log, /pane send-keys w1:p2 Enter/);
 		const launchScript = readHerdrRunScript(log);
 		assert.match(launchScript, /PI_SUBAGENT_AUTO_EXIT='1'/);
-		assert.match(launchScript, /PI_DENY_TOOLS='subagent,subagent_resume,grep,set_tab_title'/);
+		assert.match(launchScript, /PI_DENY_TOOLS='subagent,subagent_resume,subagent_kill,grep,set_tab_title'/);
 		assert.match(launchScript, /PI_SUBAGENT_EXTENSIONS=''/);
 		assert.match(launchScript, /--model 'zai-messages\/glm-5-turbo:off'/);
 		assert.match(launchScript, /--no-context-files/);
 		assert.match(launchScript, /--append-system-prompt ''/);
 		assert.match(launchScript, /'--no-extensions' '-e' '.*\/tools\/subagent-done\.ts'/);
 		assert.equal(launchScript.match(/'--tools' '([^']+)'/)?.[1], "read,grep,caller_ping,subagent_done");
-		assert.equal(launchScript.match(/'--exclude-tools' '([^']+)'/)?.[1], "subagent,subagent_resume,grep,set_tab_title");
+		assert.equal(
+			launchScript.match(/'--exclude-tools' '([^']+)'/)?.[1],
+			"subagent,subagent_resume,subagent_kill,grep,set_tab_title",
+		);
 		assert.match(launchScript, new RegExp(`'--skill' '${skillFile.replace(/'/g, "'\\''")}'`));
 
 		const taskArtifact = readFileSync(extractTaskArtifactPath(launchScript), "utf8");

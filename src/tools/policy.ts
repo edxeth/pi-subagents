@@ -144,7 +144,7 @@ function normalizeToolMode(tools?: string): "default" | "all" | "none" | "list" 
 	return "list";
 }
 
-function getChildProtocolToolNames(deniedTools: Set<string>): string[] {
+function getChildProtocolToolNames(deniedTools: Set<string>, spawningAllowed: boolean): string[] {
 	const protocolTools = [];
 	if (!deniedTools.has(CALLER_PING_TOOL_NAME)) {
 		protocolTools.push(CALLER_PING_TOOL_NAME);
@@ -155,15 +155,28 @@ function getChildProtocolToolNames(deniedTools: Set<string>): string[] {
 	if (isSetTabTitleToolEnabled() && !deniedTools.has(SET_TAB_TITLE_TOOL_NAME)) {
 		protocolTools.push(SET_TAB_TITLE_TOOL_NAME);
 	}
+	// `spawning:` is the switch that grants subagent tools; `tools:` narrows the
+	// child's work tools. A narrowed `tools:` list must not silently revoke a
+	// grant the agent file made, so the spawning tools ride along like the other
+	// pi-subagents tools and are removed only through `deny-tools`/spawn policy.
+	if (spawningAllowed) {
+		for (const spawningTool of SPAWNING_TOOL_NAMES) {
+			if (!deniedTools.has(spawningTool)) protocolTools.push(spawningTool);
+		}
+	}
 	return protocolTools;
 }
 
-export function getSubagentToolAllowlist(tools?: string, deniedTools = new Set<string>()): string[] {
+export function getSubagentToolAllowlist(
+	tools?: string,
+	deniedTools = new Set<string>(),
+	spawningAllowed = false,
+): string[] {
 	if (normalizeToolMode(tools) !== "list" || !tools) return [];
 	const allowlist = parseToolNames(tools).filter(
 		(tool) => tool !== SET_TAB_TITLE_TOOL_NAME || isSetTabTitleToolEnabled(),
 	);
-	allowlist.push(...getChildProtocolToolNames(deniedTools));
+	allowlist.push(...getChildProtocolToolNames(deniedTools, spawningAllowed));
 	return [...new Set(allowlist)];
 }
 
@@ -173,13 +186,17 @@ export function addToolModeDeniedNames(deniedTools: Set<string>, tools?: string)
 	return deniedTools;
 }
 
-export function getSubagentToolLaunchArgs(tools?: string, deniedTools = new Set<string>()): string[] {
+export function getSubagentToolLaunchArgs(
+	tools?: string,
+	deniedTools = new Set<string>(),
+	spawningAllowed = false,
+): string[] {
 	const args: string[] = [];
 	const toolMode = normalizeToolMode(tools);
 	if (toolMode === "none") {
 		args.push("--no-builtin-tools");
 	} else if (toolMode === "list") {
-		const allowlist = getSubagentToolAllowlist(tools, deniedTools);
+		const allowlist = getSubagentToolAllowlist(tools, deniedTools, spawningAllowed);
 		if (allowlist.length > 0) args.push("--tools", allowlist.join(","));
 		else args.push("--no-tools");
 	}

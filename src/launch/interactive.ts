@@ -29,6 +29,7 @@ import {
 	getPreparedSkillInjection,
 	getPreparedSkillLaunchArgs,
 	getPreparedSkillList,
+	isPreparedChildSpawningAllowed,
 	type SubagentLaunchContext,
 } from "./prep.ts";
 import { writeSystemPromptArtifact, writeTaskArtifact } from "./prompt-artifacts.ts";
@@ -129,7 +130,11 @@ export async function launchInteractiveSubagent(
 	for (const arg of getApprovalLaunchArgs(prepared.agentDefs, "interactive")) {
 		parts.push(shellEscape(arg));
 	}
-	for (const arg of getSubagentToolLaunchArgs(prepared.effectiveTools, prepared.denySet)) {
+	for (const arg of getSubagentToolLaunchArgs(
+		prepared.effectiveTools,
+		prepared.denySet,
+		isPreparedChildSpawningAllowed(prepared),
+	)) {
 		parts.push(shellEscape(arg));
 	}
 	for (const arg of getPreparedSkillLaunchArgs(prepared)) {

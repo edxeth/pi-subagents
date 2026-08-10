@@ -343,8 +343,15 @@ export function readSubagentLaunchMetadataEntries(path: string): PersistedSubage
 }
 
 /**
- * Returns the first valid launch metadata entry. Later entries can be written
- * by the child session itself, so they are not authoritative for launch grants.
+ * Returns the first valid launch metadata entry, which the parent writes at
+ * launch. Later entries can be appended by the child session, so they never
+ * override the launch grants recorded here.
+ *
+ * This is an ordering guard, not a trust boundary. The child session runs as
+ * the same OS user as the parent, so a child that can write files can rewrite
+ * this entry in place — and can equally edit its own agent definition. Nothing
+ * read here is trustworthy against a hostile child; it only stops later
+ * appends from widening an earlier grant.
  */
 export function readSubagentLaunchMetadata(path: string): PersistedSubagentLaunchMetadata | undefined {
 	return readSubagentLaunchMetadataEntries(path)[0];

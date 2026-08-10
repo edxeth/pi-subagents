@@ -1,6 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentDefaults } from "../agents/definitions.ts";
 import { loadAgentDefaults as loadAgentDefaultsFromDefinitions } from "../agents/definitions.ts";
 import { getArtifactStorageRoot } from "../artifact-storage.ts";
@@ -172,6 +173,14 @@ export function getPreparedModel(prepared: PreparedSubagentLaunch): string | und
 		: prepared.effectiveModel;
 }
 
+/**
+ * Whether the child actually holds a spawn grant. Mirrors the rule the env
+ * builder uses for PI_DENY_TOOLS: a null child budget means no spawning tools.
+ */
+export function isPreparedChildSpawningAllowed(prepared: PreparedSubagentLaunch): boolean {
+	return (prepared.spawnPolicy?.childBudget ?? null) !== null;
+}
+
 export function getPreparedSkillList(_prepared: PreparedSubagentLaunch): string[] {
 	return [];
 }
@@ -188,10 +197,37 @@ export function getPreparedSkillLaunchArgs(prepared: PreparedSubagentLaunch): st
 	return prepared.skillLaunchPlan.launchArgs;
 }
 
-export function getExtensionLaunchArgs(extensionSpecs: string[] | undefined, mandatoryExtensionPath: string): string[] {
+/**
+ * Entry point of this extension, used to force-load pi-subagents into a child
+ * whose `extensions:` list replaced the inherited set.
+ */
+export function getSubagentsExtensionPath(): string {
+	return join(dirname(dirname(fileURLToPath(import.meta.url))), "index.ts");
+}
+
+/**
+ * Whether an `extensions:` list already brings in pi-subagents, in which case
+ * force-loading it again would register its tools twice.
+ */
+function includesSubagentsExtension(extensionSpecs: string[]): boolean {
+	return extensionSpecs.some((spec) => /(^|[/@:])pi-subagents(\b|[/@])/.test(spec.trim()));
+}
+
+export function getExtensionLaunchArgs(
+	extensionSpecs: string[] | undefined,
+	mandatoryExtensionPath: string,
+	spawningAllowed = false,
+): string[] {
 	const args: string[] = [];
 	if (extensionSpecs !== undefined) args.push("--no-extensions");
 	args.push("-e", mandatoryExtensionPath);
+	// `extensions:` replaces the inherited extension set, which would otherwise
+	// drop pi-subagents itself and leave a granted child without the tools that
+	// `spawning` promised. The bundled protocol extension above is force-loaded
+	// for the same reason, so a spawn grant force-loads this one too.
+	if (spawningAllowed && extensionSpecs !== undefined && !includesSubagentsExtension(extensionSpecs)) {
+		args.push("-e", getSubagentsExtensionPath());
+	}
 	for (const extension of extensionSpecs ?? []) args.push("-e", extension);
 	return args;
 }
@@ -221,7 +257,11 @@ export function getPreparedExtensionLaunchArgs(
 	prepared: PreparedSubagentLaunch,
 	mandatoryExtensionPath: string,
 ): string[] {
-	return getExtensionLaunchArgs(prepared.effectiveExtensions, mandatoryExtensionPath);
+	return getExtensionLaunchArgs(
+		prepared.effectiveExtensions,
+		mandatoryExtensionPath,
+		isPreparedChildSpawningAllowed(prepared),
+	);
 }
 
 export function getPreparedSessionLaunchArgs(
@@ -246,12 +286,13 @@ export function getPersistedPromptLaunchArgs(metadata: PersistedSubagentLaunchMe
 export async function getPersistedSessionParityArgs(
 	metadata: PersistedSubagentLaunchMetadata | undefined,
 	modeOverride?: ResumeMode,
+	spawningAllowed = false,
 ): Promise<string[]> {
 	const args: string[] = [];
 	if (!metadata) return args;
 	if (metadata.modelRef) args.push("--model", metadata.modelRef);
 	if (metadata.noContextFiles) args.push("--no-context-files");
-	args.push(...getSubagentToolLaunchArgs(metadata.tools, new Set(metadata.denyTools)));
+	args.push(...getSubagentToolLaunchArgs(metadata.tools, new Set(metadata.denyTools), spawningAllowed));
 	args.push(
 		...(
 			await buildSkillLaunchPlan(metadata.skills, undefined, metadata.cwd, metadata.agentConfigDir, metadata.extensions)

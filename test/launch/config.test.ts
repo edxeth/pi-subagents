@@ -282,6 +282,36 @@ describe("agent launch configuration", () => {
 		assert.deepEqual((await buildSkillLaunchPlanForTest(undefined, undefined, dir)).launchArgs, []);
 	});
 
+	it("keeps a resumed child's spawning tools in its narrowed tools allowlist", async () => {
+		const metadata = {
+			version: 1 as const,
+			timestamp: "2026-05-08T00:00:00.000Z",
+			name: "spawning-child",
+			mode: "background" as const,
+			sessionMode: "lineage-only" as const,
+			parentClosePolicy: "terminate" as const,
+			async: true,
+			trustProject: false,
+			tools: "exec_command",
+			denyTools: [],
+			noContextFiles: false,
+			noSession: false,
+			agentConfigDir: "/tmp",
+			cwd: "/tmp",
+			boundarySystemPrompt: true,
+		};
+		assert.deepEqual(await getPersistedSessionParityArgsForTest(metadata, "background", true), [
+			"--tools",
+			"exec_command,caller_ping,subagent_done,subagent,subagent_resume,subagent_kill",
+			"--no-approve",
+		]);
+		assert.deepEqual(await getPersistedSessionParityArgsForTest(metadata, "background", false), [
+			"--tools",
+			"exec_command,caller_ping,subagent_done",
+			"--no-approve",
+		]);
+	});
+
 	it("builds --no-skills when skills are none", async () => {
 		const dir = createTestDir();
 		assert.deepEqual((await buildSkillLaunchPlanForTest("none", undefined, dir)).launchArgs, ["--no-skills"]);

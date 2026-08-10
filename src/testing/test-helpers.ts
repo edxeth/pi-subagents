@@ -43,6 +43,8 @@ import {
 	getPersistedApprovalLaunchArgs,
 	getPersistedSessionParityArgs,
 	getPreparedSessionLaunchArgs,
+	getSubagentsExtensionPath,
+	isPreparedChildSpawningAllowed,
 	type PreparedSubagentLaunch,
 	resolveAvailableModelRef,
 	splitModelRefThinking,
@@ -212,8 +214,9 @@ export function buildPersistedSubagentLaunchMetadataForTest(
 export function getPersistedSessionParityArgsForTest(
 	metadata: PersistedSubagentLaunchMetadata | undefined,
 	modeOverride?: ResumeMode,
+	spawningAllowed = false,
 ) {
-	return getPersistedSessionParityArgs(metadata, modeOverride);
+	return getPersistedSessionParityArgs(metadata, modeOverride, spawningAllowed);
 }
 
 export function resolveResumeLaunchMetadataForInvocationForTest(
@@ -340,20 +343,36 @@ export function resolveSubagentExtensionsForTest(agentDefs: AgentDefaults | null
 	return resolveSubagentExtensions(agentDefs);
 }
 
-export function getSubagentToolAllowlistForTest(tools?: string, deniedTools: Iterable<string> = []) {
-	return getSubagentToolAllowlist(tools, new Set(deniedTools));
+export function getSubagentToolAllowlistForTest(
+	tools?: string,
+	deniedTools: Iterable<string> = [],
+	spawningAllowed = false,
+) {
+	return getSubagentToolAllowlist(tools, new Set(deniedTools), spawningAllowed);
 }
 
-export function getSubagentToolLaunchArgsForTest(tools?: string, deniedTools: Iterable<string> = []) {
-	return getSubagentToolLaunchArgs(tools, new Set(deniedTools));
+export function getSubagentToolLaunchArgsForTest(
+	tools?: string,
+	deniedTools: Iterable<string> = [],
+	spawningAllowed = false,
+) {
+	return getSubagentToolLaunchArgs(tools, new Set(deniedTools), spawningAllowed);
 }
 
 export function getSubagentToolDeniedNamesForTest(tools?: string, deniedTools: Iterable<string> = []) {
 	return [...addToolModeDeniedNames(new Set(deniedTools), tools)];
 }
 
-export function getExtensionLaunchArgsForTest(extensionSpecs: string[] | undefined, mandatoryExtensionPath: string) {
-	return getExtensionLaunchArgs(extensionSpecs, mandatoryExtensionPath);
+export function getSubagentsExtensionPathForTest() {
+	return getSubagentsExtensionPath();
+}
+
+export function getExtensionLaunchArgsForTest(
+	extensionSpecs: string[] | undefined,
+	mandatoryExtensionPath: string,
+	spawningAllowed = false,
+) {
+	return getExtensionLaunchArgs(extensionSpecs, mandatoryExtensionPath, spawningAllowed);
 }
 
 export function getFlagsLaunchArgs(flags: string | undefined) {
@@ -377,6 +396,12 @@ export function getPersistedApprovalLaunchArgsForTest(
 
 export function parseEnvStringForTest(env: string | undefined) {
 	return parseEnvString(env);
+}
+
+export function isPreparedChildSpawningAllowedForTest(childBudget: number | null | undefined) {
+	return isPreparedChildSpawningAllowed({
+		...(childBudget === undefined ? {} : { spawnPolicy: { allowed: true, childBudget, spawnableAgents: true, effectiveWidth: null } }),
+	} as PreparedSubagentLaunch);
 }
 
 export function getPreparedSessionLaunchArgsForTest(

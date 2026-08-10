@@ -303,11 +303,11 @@ async function resumeSubagentSessionWithoutWidth(
 	const savedExtensions = invocationMetadata ? invocationMetadata.extensions : readSubagentExtensionEntry(sessionFile);
 	const extensionArgs =
 		invocationMetadata !== undefined || savedExtensions !== undefined
-			? getExtensionLaunchArgs(savedExtensions, subagentDonePath)
+			? getExtensionLaunchArgs(savedExtensions, subagentDonePath, narrowedSpawnBudget > 0)
 			: ["--no-extensions", "-e", subagentDonePath];
 	const parityArgs = [
 		...getPersistedPromptLaunchArgs(invocationMetadata),
-		...(await getPersistedSessionParityArgs(invocationMetadata, metadata.mode)),
+		...(await getPersistedSessionParityArgs(invocationMetadata, metadata.mode, narrowedSpawnBudget > 0)),
 		...(invocationMetadata ? [] : ["--no-approve"]),
 	];
 	const resumeCwd = getResumeCwd(invocationMetadata);

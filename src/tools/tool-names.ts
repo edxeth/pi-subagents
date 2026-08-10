@@ -25,7 +25,11 @@ export const SUBAGENT_LAUNCH_TOOL_NAMES: ReadonlySet<string> = new Set([SUBAGENT
  * Tools the parent uses to manage subagents. Gated by the spawning policy in
  * agent frontmatter and the caller's inherited spawn budget.
  */
-export const SPAWNING_TOOL_NAMES: ReadonlySet<string> = new Set([SUBAGENT_TOOL_NAME, SUBAGENT_RESUME_TOOL_NAME]);
+export const SPAWNING_TOOL_NAMES: ReadonlySet<string> = new Set([
+	SUBAGENT_TOOL_NAME,
+	SUBAGENT_RESUME_TOOL_NAME,
+	SUBAGENT_KILL_TOOL_NAME,
+]);
 
 /**
  * pi-subagents-internal tools that should NOT count as a "non-subagent

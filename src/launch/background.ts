@@ -25,6 +25,7 @@ import {
 	getPreparedSkillInjection,
 	getPreparedSkillLaunchArgs,
 	getPreparedSkillList,
+	isPreparedChildSpawningAllowed,
 	type SubagentLaunchContext,
 } from "./prep.ts";
 import { writeTaskArtifact } from "./prompt-artifacts.ts";
@@ -78,7 +79,9 @@ export async function launchBackgroundSubagent(
 	});
 	args.push(...appendSystemPlan.promptArgs);
 	args.push(...getApprovalLaunchArgs(prepared.agentDefs, "background"));
-	args.push(...getSubagentToolLaunchArgs(prepared.effectiveTools, prepared.denySet));
+	args.push(
+		...getSubagentToolLaunchArgs(prepared.effectiveTools, prepared.denySet, isPreparedChildSpawningAllowed(prepared)),
+	);
 	args.push(...getPreparedSkillLaunchArgs(prepared));
 	args.push(...getFlagsLaunchArgs(prepared.agentDefs?.flags));
 

@@ -412,7 +412,11 @@ describe("agent definitions and catalog", () => {
 		const coordinator = defs.find((entry) => entry.name === "coordinator");
 		assert.equal(worker?.spawning, false);
 		assert.equal(coordinator?.spawning, true);
-		assert.deepEqual([...resolveDenyToolsForTest(worker ?? null)].sort(), ["subagent", "subagent_resume"]);
+		assert.deepEqual([...resolveDenyToolsForTest(worker ?? null)].sort(), [
+			"subagent",
+			"subagent_kill",
+			"subagent_resume",
+		]);
 		assert.deepEqual([...resolveDenyToolsForTest(coordinator ?? null)], []);
 	});
 

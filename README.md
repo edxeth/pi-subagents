@@ -610,7 +610,9 @@ deny-tools: bash,edit,write,ask_user
 ---
 ```
 
-By default a child cannot launch subagents: `spawning` is `false`, which removes its `subagent` and `subagent_resume` tools. Set `spawning` only on agents that coordinate others. The four fields above define what such a child may do; this section adds the rules the table cannot show.
+By default a child cannot launch subagents: `spawning` is `false`, which removes its `subagent`, `subagent_resume`, and `subagent_kill` tools. Set `spawning` only on agents that coordinate others. The four fields above define what such a child may do; this section adds the rules the table cannot show.
+
+`tools:` narrows the child's work tools; it does not revoke a spawn grant. When `spawning` is enabled, `subagent`, `subagent_resume`, and `subagent_kill` stay available alongside a narrowed `tools:` list, exactly like `caller_ping` and `subagent_done`. Use `deny-tools` (or leave `spawning` off) to take them away.
 
 `spawn-depth` is what stops two agents that launch each other from looping forever: the allowance drops by one at each level and never rises. `spawn-depth` and `spawn-width` bound a single burst of launches; they do not cap total token use over a long conversation. These fields are guardrails, not a security sandbox — a child that has `bash` or arbitrary extensions can still run `pi` itself.
 
