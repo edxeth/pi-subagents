@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import type { PersistedSubagentLaunchMetadata } from "./session/session-files.ts";
 
 export type DeliveryState = "detached" | "awaited";
 export type ParentClosePolicy = "terminate" | "continue";
@@ -74,6 +75,8 @@ export interface SubagentResult {
 	timeoutBlocksResume?: boolean;
 	/** True when the runtime could not confirm the child was terminated. */
 	timeoutKillFailed?: boolean;
+	/** The soft deadline that interrupted work and started a report-only continuation. */
+	timeoutWrapUp?: { kind: SubagentTimeoutKind; seconds: number; threshold: number };
 	error?: string;
 	errorMessage?: string;
 	ping?: SubagentPing;
@@ -113,6 +116,14 @@ export interface RunningSubagent {
 	timeoutBudget?: SubagentTimeoutBudget;
 	/** Mirrors the agent's `on-timeout` policy for the result the parent reads. */
 	timeoutBlocksResume?: boolean;
+	/** Percentage of a configured budget reserved for the report-only continuation. */
+	timeoutWarnThreshold?: number;
+	/** Set once the watcher has interrupted this run for its report-only continuation. */
+	timeoutWrapUp?: { kind: SubagentTimeoutKind; seconds: number; threshold: number };
+	/** True after the interrupted generation has been replaced by the continuation. */
+	timeoutWrapUpMode?: boolean;
+	/** Fixed hard deadline for the budget that triggered the wrap-up. */
+	timeoutWrapUpDeadlineAt?: number;
 	/** Last time the child's session file grew, for the idle budget. */
 	lastProgressAt?: number;
 	/** Set once the watcher has decided to kill this child on a budget. */
@@ -141,6 +152,8 @@ export interface RunningSubagent {
 	modelContextWindow?: number;
 	/** Resolved provider/model:thinking ref for this child, for display in the widget/overlay. */
 	modelRef?: string;
+	/** Exact launch contract reused by an internal timeout wrap-up restart. */
+	launchMetadata?: PersistedSubagentLaunchMetadata;
 	contextLabel?: string;
 	activity?: string;
 	taskPreview?: string;
@@ -213,6 +226,8 @@ export interface SubagentResultMessageDetails {
 	timedOutAfter?: number;
 	/** True when the agent's `on-timeout` policy refuses a resume. */
 	timeoutBlocksResume?: boolean;
+	/** The soft deadline that interrupted work and started a report-only continuation. */
+	timeoutWrapUp?: { kind: SubagentTimeoutKind; seconds: number; threshold: number };
 	error?: string;
 	errorMessage?: string;
 }

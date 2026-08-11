@@ -109,6 +109,25 @@ describe("timeout result delivery", () => {
 		assert.match(content, /completed \(12s\)/);
 		assert.doesNotMatch(content, /the system stopped it/);
 	});
+
+	it("explains that a completed report followed a forced warning-threshold interruption", () => {
+		const content = deliver(
+			makeRunning(),
+			makeResult({
+				summary: "Reported the committed findings; the final integration check remains unfinished.",
+				summarySource: "subagent",
+				exitCode: 0,
+				elapsed: 81,
+				timeoutWrapUp: { kind: "timeout", seconds: 100, threshold: 80 },
+			}),
+		);
+
+		assert.match(content, /interrupted its active operation at 80%/i);
+		assert.match(content, /remaining time.*report/i);
+		assert.match(content, /short or partial report.*expected/i);
+		assert.match(content, /Reported the committed findings/);
+		assert.doesNotMatch(content, /ran out of time/);
+	});
 });
 
 describe("session reference under a timeout", () => {

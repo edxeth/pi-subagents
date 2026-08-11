@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { appendFileSync } from "node:fs";
 import { watchBackgroundSubagent } from "../../src/runtime/background-watch.ts";
+import { stopRunningSubagent } from "../../src/runtime/running-registry.ts";
 import { hasSubagentExitSidecar, writeSubagentExitSidecar } from "../../src/session/exit-sidecar.ts";
 import { readSubagentTimeoutSidecar } from "../../src/session/timeout-sidecar.ts";
 import type { RunningSubagent, SubagentTimeoutBudget } from "../../src/types.ts";
@@ -32,6 +33,31 @@ function spawnDetachedGroup(): number {
 	proc.unref();
 	spawnedGroups.push(proc.pid!);
 	return proc.pid!;
+}
+
+function spawnLeaderWithStubbornDescendant(): ChildProcess {
+	const proc = spawn(
+		process.execPath,
+		[
+			"-e",
+			`const { spawn } = require("node:child_process");
+spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" });
+process.on("SIGTERM", () => process.exit(0));
+setInterval(() => {}, 1000);`,
+		],
+		{ detached: true, stdio: "ignore" },
+	);
+	spawnedGroups.push(proc.pid!);
+	return proc;
+}
+
+function isProcessGroupAlive(pid: number): boolean {
+	try {
+		process.kill(-pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 function killSpawnedGroups(): void {
@@ -119,10 +145,18 @@ function makeRuntime(
 	signals: Array<NodeJS.Signals>,
 	child: ChildProcess,
 	sessionFile: string,
-	options: { exitCode?: number; sidecar?: object | null } = {},
+	options: {
+		exitCode?: number;
+		sidecar?: object | null;
+		restartForTimeoutWrapUp?: (running: RunningSubagent) => Promise<void>;
+	} = {},
 ) {
 	return {
 		cleanupNoSessionSessionFile() {},
+		async restartForTimeoutWrapUp(running: RunningSubagent) {
+			if (!options.restartForTimeoutWrapUp) throw new Error("unexpected timeout wrap-up restart");
+			await options.restartForTimeoutWrapUp(running);
+		},
 		terminateBackgroundChildProcess(_running: RunningSubagent, signal: NodeJS.Signals) {
 			signals.push(signal);
 			if (signal !== "SIGTERM") return;
@@ -287,7 +321,7 @@ describe("background watcher timeout budgets", () => {
 		assert.equal(readSubagentTimeoutSidecar(sessionFile), null);
 	});
 
-	it("does not let a runtime steer restart the idle clock it is warning about", async () => {
+	it("does not let a runtime-written prompt restart the idle clock", async () => {
 		const sessionFile = makeSession();
 		const child = new EventEmitter() as ChildProcess;
 		const signals: Array<NodeJS.Signals> = [];
@@ -298,16 +332,225 @@ describe("background watcher timeout budgets", () => {
 			makeRuntime(signals, child, sessionFile),
 			new AbortController().signal,
 		);
-		// The timeout warning lands as a user-role steer partway through the
-		// budget. If that counted as progress the child would get a fresh full
-		// budget while its warning claims the deadline is close.
+		// Parent-written user messages, including a wrap-up prompt, are not child
+		// progress. Counting one would buy a silent child a fresh full interval.
 		await sleep(1200);
 		appendRuntimeSteer(sessionFile, "warn", "You have produced no output for 1s of your 2s idle budget.");
 		await sleep(1400);
 
-		assert.deepEqual(signals, ["SIGTERM"], "the warning must not buy the child a second budget");
+		assert.deepEqual(signals, ["SIGTERM"], "the parent prompt must not buy the child a second budget");
 		const result = await settleWithin(resultPromise, 5000, "warned idle child");
 		assert.equal(result.timedOut, "idle-timeout");
+	});
+
+	it("interrupts an uncooperative generation at the warning threshold and completes its wrap-up", async () => {
+		const sessionFile = makeSession();
+		const firstChild = new EventEmitter() as ChildProcess;
+		const wrapUpChild = new EventEmitter() as ChildProcess;
+		const signals: Array<NodeJS.Signals> = [];
+		let restarts = 0;
+		const running = makeRunning(
+			sessionFile,
+			firstChild,
+			{ timeoutSeconds: 2 },
+			{ timeoutWarnThreshold: 50 } as Partial<RunningSubagent>,
+		);
+
+		const result = await settleWithin(
+			watchBackgroundSubagent(
+				running,
+				makeRuntime(signals, firstChild, sessionFile, {
+					async restartForTimeoutWrapUp(current) {
+						restarts += 1;
+						current.childProcess = wrapUpChild;
+						appendAssistantEntry(sessionFile, "wrap-up", "Reported the committed work after interruption.");
+						writeSubagentExitSidecar(sessionFile, { type: "done" });
+						setTimeout(() => wrapUpChild.emit("exit", 0), 50);
+					},
+				}),
+				new AbortController().signal,
+			),
+			4000,
+			"timeout wrap-up restart",
+		);
+
+		assert.deepEqual(signals, ["SIGTERM"]);
+		assert.equal(restarts, 1);
+		assert.equal(result.timedOut, undefined);
+		assert.deepEqual(result.timeoutWrapUp, { kind: "timeout", seconds: 2, threshold: 50 });
+		assert.match(result.summary, /Reported the committed work after interruption/);
+		assert.ok(result.elapsed < 2, "the wrap-up must use the original deadline rather than receive a fresh budget");
+	});
+
+	it("honors a short soft deadline before the hard timeout", async () => {
+		const sessionFile = makeSession();
+		const firstChild = new EventEmitter() as ChildProcess;
+		const wrapUpChild = new EventEmitter() as ChildProcess;
+		const running = makeRunning(
+			sessionFile,
+			firstChild,
+			{ timeoutSeconds: 1 },
+			{ timeoutWarnThreshold: 50 } as Partial<RunningSubagent>,
+		);
+
+		const result = await settleWithin(
+			watchBackgroundSubagent(
+				running,
+				makeRuntime([], firstChild, sessionFile, {
+					async restartForTimeoutWrapUp(current) {
+						current.childProcess = wrapUpChild;
+						appendAssistantEntry(sessionFile, "short-wrap-up", "Short-budget report.");
+						writeSubagentExitSidecar(sessionFile, { type: "done" });
+						setTimeout(() => wrapUpChild.emit("exit", 0), 10);
+					},
+				}),
+				new AbortController().signal,
+			),
+			2500,
+			"short timeout wrap-up",
+		);
+
+		assert.equal(result.timedOut, undefined);
+		assert.deepEqual(result.timeoutWrapUp, { kind: "timeout", seconds: 1, threshold: 50 });
+	});
+
+	it("does not restart until the interrupted process group is fully gone", async () => {
+		const sessionFile = makeSession();
+		const firstChild = spawnLeaderWithStubbornDescendant();
+		const firstPid = firstChild.pid!;
+		const wrapUpChild = new EventEmitter() as ChildProcess;
+		const signals: Array<NodeJS.Signals> = [];
+		let groupAliveAtRestart = true;
+		const running = makeRunning(
+			sessionFile,
+			firstChild,
+			{ timeoutSeconds: 2 },
+			{ timeoutWarnThreshold: 50 } as Partial<RunningSubagent>,
+		);
+
+		const result = await settleWithin(
+			watchBackgroundSubagent(
+				running,
+				{
+					cleanupNoSessionSessionFile() {},
+					terminateBackgroundChildProcess(_current, signal) {
+						signals.push(signal);
+						try {
+							process.kill(-firstPid, signal);
+						} catch {}
+					},
+					async restartForTimeoutWrapUp(current) {
+						groupAliveAtRestart = isProcessGroupAlive(firstPid);
+						current.childProcess = wrapUpChild;
+						appendAssistantEntry(sessionFile, "reaped-wrap-up", "Old group reaped before report.");
+						writeSubagentExitSidecar(sessionFile, { type: "done" });
+						setTimeout(() => wrapUpChild.emit("exit", 0), 10);
+					},
+				},
+				new AbortController().signal,
+				{ timeoutKillEscalationMs: 200 },
+			),
+			4000,
+			"stubborn descendant wrap-up",
+		);
+
+		assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+		assert.equal(groupAliveAtRestart, false, "the replacement must not overlap a stubborn old descendant");
+		assert.equal(result.timedOut, undefined);
+	});
+
+	it("reports the original hard timeout when restart preparation spends the reserve", async () => {
+		const sessionFile = makeSession();
+		const firstChild = new EventEmitter() as ChildProcess;
+		const wrapUpChild = new EventEmitter() as ChildProcess;
+		const signals: Array<NodeJS.Signals> = [];
+		const running = makeRunning(
+			sessionFile,
+			firstChild,
+			{ timeoutSeconds: 2 },
+			{ timeoutWarnThreshold: 50 } as Partial<RunningSubagent>,
+		);
+
+		const result = await settleWithin(
+			watchBackgroundSubagent(
+				running,
+				{
+					cleanupNoSessionSessionFile() {},
+					terminateBackgroundChildProcess(current, signal) {
+						signals.push(signal);
+						if (current.childProcess === firstChild) {
+							writeSubagentExitSidecar(sessionFile, { type: "done" });
+							firstChild.emit("exit", 0);
+							return;
+						}
+						wrapUpChild.emit("exit", signal === "SIGKILL" ? 137 : 143);
+					},
+					async restartForTimeoutWrapUp(current) {
+						await sleep(1300);
+						current.childProcess = wrapUpChild;
+						appendAssistantEntry(sessionFile, "late-wrap-up", "This report started too late.");
+						setTimeout(() => wrapUpChild.emit("exit", 0), 20);
+					},
+				},
+				new AbortController().signal,
+			),
+			5000,
+			"late restart hard timeout",
+		);
+
+		assert.equal(result.timedOut, "timeout");
+		assert.equal(result.timedOutAfter, 2);
+		assert.ok(signals.length >= 2, "the late replacement must be terminated rather than reported as success");
+	});
+
+	it("cancels a replacement created after manual stop during restart", async () => {
+		const sessionFile = makeSession();
+		const firstChild = new EventEmitter() as ChildProcess;
+		const wrapUpChild = new EventEmitter() as ChildProcess;
+		const signals: Array<NodeJS.Signals> = [];
+		const controller = new AbortController();
+		let restartEntered!: () => void;
+		const entered = new Promise<void>((resolve) => {
+			restartEntered = resolve;
+		});
+		const running = makeRunning(
+			sessionFile,
+			firstChild,
+			{ timeoutSeconds: 4 },
+			{ timeoutWarnThreshold: 25, abortController: controller } as Partial<RunningSubagent>,
+		);
+
+		const resultPromise = watchBackgroundSubagent(
+			running,
+			{
+				cleanupNoSessionSessionFile() {},
+				terminateBackgroundChildProcess(current, signal) {
+					signals.push(signal);
+					if (current.childProcess === firstChild) {
+						writeSubagentExitSidecar(sessionFile, { type: "done" });
+						firstChild.emit("exit", 0);
+						return;
+					}
+					wrapUpChild.emit("exit", signal === "SIGKILL" ? 137 : 143);
+				},
+				async restartForTimeoutWrapUp(current) {
+					restartEntered();
+					await sleep(100);
+					current.childProcess = wrapUpChild;
+					appendAssistantEntry(sessionFile, "cancelled-wrap-up", "Must not be reported as complete.");
+					setTimeout(() => wrapUpChild.emit("exit", 0), 20);
+				},
+			},
+			controller.signal,
+		);
+
+		await settleWithin(entered, 2500, "restart entry");
+		await stopRunningSubagent(running, async () => {});
+		const result = await settleWithin(resultPromise, 3000, "manual stop during restart");
+
+		assert.equal(result.error, "cancelled");
+		assert.notEqual(result.exitCode, 0);
+		assert.ok(signals.length >= 2, "the replacement created after abort must be terminated");
 	});
 
 	it("never bounds a child whose agent set no budget", async () => {
@@ -370,6 +613,11 @@ describe("background watcher timeout budgets", () => {
 				// The child swallows SIGTERM and keeps running.
 				terminateBackgroundChildProcess(_running: RunningSubagent, signal: NodeJS.Signals) {
 					signals.push(signal);
+					if (signal === "SIGKILL") {
+						try {
+							process.kill(-child.pid!, signal);
+						} catch {}
+					}
 				},
 			},
 			new AbortController().signal,
@@ -400,6 +648,11 @@ describe("background watcher timeout budgets", () => {
 					// That is not evidence the process died, and a child that keeps
 					// running after publishing it must still be reaped.
 					if (signal === "SIGTERM") writeSubagentExitSidecar(sessionFile, { type: "done" });
+					if (signal === "SIGKILL") {
+						try {
+							process.kill(-child.pid!, signal);
+						} catch {}
+					}
 				},
 			},
 			new AbortController().signal,

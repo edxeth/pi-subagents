@@ -91,6 +91,28 @@ describe("subagent wait behavior", () => {
 		assert.equal((waited.details as any).contextWindow, 200_000);
 	});
 
+	it("classifies an awaited enforced timeout wrap-up", async () => {
+		const waited = await waitForResult({
+			name: "Wrap-up child",
+			task: "Finish work",
+			summary: "Reported the committed portion.",
+			summarySource: "subagent",
+			sessionFile: "/tmp/wrap-up-child.jsonl",
+			exitCode: 0,
+			elapsed: 36,
+			timeoutWrapUp: { kind: "timeout", seconds: 60, threshold: 50 },
+		});
+		const text = (waited.content[0] as { text: string }).text;
+		assert.match(text, /completed its time-limit wrap-up/);
+		assert.match(text, /interrupted its active operation at 50% of its whole-run limit/);
+		assert.match(text, /Reported the committed portion/);
+		assert.deepEqual((waited.details as any).timeoutWrapUp, {
+			kind: "timeout",
+			seconds: 60,
+			threshold: 50,
+		});
+	});
+
 	it("reports no result when a provider error has only watcher fallback output", async () => {
 		const waited = await waitForResult({
 			name: "Failed child",

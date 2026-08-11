@@ -589,6 +589,17 @@ describe("agent launch configuration", () => {
 		assert.deepEqual(getPreparedSessionLaunchArgsForTest(defaults), ["--session", "child.jsonl"]);
 	});
 
+	it("keeps an ephemeral timeout-warned child persisted only for its internal wrap-up", () => {
+		assert.deepEqual(
+			getPreparedSessionLaunchArgsForTest({
+				noSession: true,
+				timeout: 60,
+				timeoutWarnThreshold: "80%",
+			}),
+			["--session", "child.jsonl"],
+		);
+	});
+
 	it("adds native session names for prepared child launches", () => {
 		assert.deepEqual(
 			getPreparedSessionLaunchArgsForTest({

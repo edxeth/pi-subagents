@@ -9,7 +9,7 @@ import {
 	runningSubagents,
 	stopAfterCurrentSubagentBatch,
 } from "./state.ts";
-import { formatTimeoutOutcome, getTimeoutResultDetails } from "./timeout-budget.ts";
+import { formatTimeoutOutcome, formatTimeoutWrapUpOutcome, getTimeoutResultDetails } from "./timeout-budget.ts";
 
 interface ParentMessageSink {
 	sendMessage(message: unknown, options: unknown): void;
@@ -100,6 +100,7 @@ export function deliverCompletedSubagentResult(
 				contextWindow: completed.contextWindow,
 				sessionFile: completed.sessionFile,
 				...getTimeoutResultDetails(completed),
+				...(completed.timeoutWrapUp ? { timeoutWrapUp: completed.timeoutWrapUp } : {}),
 				...(completed.errorMessage ? { errorMessage: completed.errorMessage } : {}),
 			},
 		},
@@ -172,6 +173,12 @@ function getCompletedSubagentContent(
 			`(provider/agent error — auto-retry exhausted).\n\n` +
 			`Error: ${completed.errorMessage}\n\n${resultBody}${sessionRef}`
 		);
+	}
+	if (completed.exitCode === 0 && completed.timeoutWrapUp) {
+		return `${formatTimeoutWrapUpOutcome(
+			{ ...completed, timeoutWrapUp: completed.timeoutWrapUp },
+			formatElapsed,
+		)}${sessionRef}`;
 	}
 	return completed.exitCode !== 0
 		? `Sub-agent "${completed.name}" failed (exit ${completed.exitCode}).\n\n${completed.summary}${sessionRef}`

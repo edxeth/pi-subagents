@@ -35,7 +35,7 @@ export interface AgentDefaults {
 	timeout?: number;
 	/** Seconds a child may go without session growth before the parent kills it. */
 	idleTimeout?: number;
-	/** Raw `timeout-warn-threshold` value; the child resolves it. */
+	/** Raw `timeout-warn-threshold` value; launch policy validates it. */
 	timeoutWarnThreshold?: string;
 	/** What the parent allows after a timeout kill. Defaults to `report`. */
 	onTimeout?: "report" | "block-resume";

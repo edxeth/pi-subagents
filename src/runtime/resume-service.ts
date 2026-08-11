@@ -434,6 +434,7 @@ async function resumeSubagentSessionWithoutWidth(
 		...resolveSubagentTimeoutState({
 			timeout: resumedTimeout,
 			idleTimeout: resumedIdleTimeout,
+			timeoutWarnThreshold: invocationMetadata?.timeoutWarnThreshold,
 			onTimeout: invocationMetadata?.onTimeout ?? (previousTimeout?.blocksResume ? "block-resume" : undefined),
 		}),
 		startTime: resumeStartTime,
@@ -441,6 +442,7 @@ async function resumeSubagentSessionWithoutWidth(
 		launchEntryCount: entryCountBefore,
 		modelContextWindow: runtime.getContextWindow(invocationMetadata?.modelRef),
 		modelRef: invocationMetadata?.modelRef,
+		launchMetadata: invocationMetadata,
 	};
 
 	if (metadata.mode === "background") {

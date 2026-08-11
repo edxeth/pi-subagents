@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AgentDefaults } from "../agents/definitions.ts";
 import { getAgentConfigDir } from "../agents/definitions.ts";
+import { parseTimeoutWarnThreshold } from "../tools/timeout-reminders.ts";
 import type { ParentClosePolicy, RunningSubagent, SubagentParamsInput, SubagentTimeoutBudget } from "../types.ts";
 
 export function getSubagentAgentRequirementError(
@@ -84,7 +85,10 @@ function resolveSubagentTimeoutBudget(source: SubagentTimeoutSource | null | und
  * Anything carrying the timeout frontmatter: an agent definition at launch, or
  * persisted launch metadata when a session is resumed.
  */
-export type SubagentTimeoutSource = Pick<AgentDefaults, "timeout" | "idleTimeout" | "onTimeout">;
+export type SubagentTimeoutSource = Pick<
+	AgentDefaults,
+	"timeout" | "idleTimeout" | "timeoutWarnThreshold" | "onTimeout"
+>;
 
 /**
  * Timeout state a launched child carries. Empty for an unbounded child, so an
@@ -92,13 +96,24 @@ export type SubagentTimeoutSource = Pick<AgentDefaults, "timeout" | "idleTimeout
  */
 export function resolveSubagentTimeoutState(
 	source: SubagentTimeoutSource | null | undefined,
-): Pick<RunningSubagent, "timeoutBudget" | "timeoutBlocksResume"> {
+): Pick<RunningSubagent, "timeoutBudget" | "timeoutBlocksResume" | "timeoutWarnThreshold"> {
 	const timeoutBudget = resolveSubagentTimeoutBudget(source);
 	if (!timeoutBudget) return {};
+	const timeoutWarnThreshold = parseTimeoutWarnThreshold(source?.timeoutWarnThreshold);
 	return {
 		timeoutBudget,
+		...(timeoutWarnThreshold !== null ? { timeoutWarnThreshold } : {}),
 		...(source?.onTimeout === "block-resume" ? { timeoutBlocksResume: true } : {}),
 	};
+}
+
+/**
+ * A no-session child normally uses Pi's in-memory mode. A strict wrap-up needs
+ * the transcript after the parent kills the first process, so persist only to
+ * the existing temporary path and delete it when the run finally completes.
+ */
+export function shouldPersistNoSessionForTimeoutWrapUp(source: SubagentTimeoutSource | null | undefined): boolean {
+	return resolveSubagentTimeoutState(source).timeoutWarnThreshold !== undefined;
 }
 
 export function resolveSubagentParentClosePolicy(agentDefs: AgentDefaults | null): ParentClosePolicy {

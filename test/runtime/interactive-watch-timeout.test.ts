@@ -1,11 +1,33 @@
+import { appendFileSync } from "node:fs";
 import { watchSubagent } from "../../src/runtime/interactive-watch.ts";
+import { stopRunningSubagent } from "../../src/runtime/running-registry.ts";
 import { writeSubagentExitSidecar } from "../../src/session/exit-sidecar.ts";
 import { readSubagentTimeoutSidecar } from "../../src/session/timeout-sidecar.ts";
 import type { RunningSubagent } from "../../src/types.ts";
-import { afterEach, assert, beforeEach, createSessionFile, createTestDir, describe, it, rmSync } from "../support/index.ts";
+import {
+	afterEach,
+	assert,
+	beforeEach,
+	createSessionFile,
+	createTestDir,
+	describe,
+	it,
+	rmSync,
+	sleep,
+} from "../support/index.ts";
 
 const dirs: string[] = [];
 let savedMux: string | undefined;
+
+function settleWithin<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+	return Promise.race([
+		promise,
+		new Promise<never>((_resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error(`watcher did not settle within ${ms}ms: ${label}`)), ms);
+			timer.unref?.();
+		}),
+	]);
+}
 
 function makeSession(): string {
 	const dir = createTestDir();
@@ -172,5 +194,264 @@ describe("interactive watcher timeout outcome", () => {
 		assert.equal(result.timedOut, undefined);
 		assert.match(result.summary, /Subagent error/);
 		assert.equal(readSubagentTimeoutSidecar(sessionFile), null);
+	});
+
+	it("closes a blocked pane at the warning threshold and continues the same session for wrap-up", async () => {
+		const sessionFile = makeSession();
+		const running = makeRunning(sessionFile, {
+			startTime: Date.now(),
+			timeoutBudget: { timeoutSeconds: 2 },
+			timeoutWarnThreshold: 50,
+		});
+		let generation = 0;
+		let restarts = 0;
+		let releaseFirstPoll: (() => void) | undefined;
+		let firstSurfaceClosed = false;
+
+		const result = await watchSubagent(
+			running,
+			{
+				cleanupNoSessionSessionFile() {},
+				async closeRunningSurface() {
+					firstSurfaceClosed = true;
+					releaseFirstPoll?.();
+				},
+				async restartForTimeoutWrapUp(current: RunningSubagent) {
+					restarts += 1;
+					current.surface = "wrap-up-surface";
+					const entries = [
+						{
+							type: "message",
+							id: "wrap-up-final",
+							message: {
+								role: "assistant",
+								content: [{ type: "text", text: "Pane wrap-up report." }],
+							},
+						},
+					];
+					for (const entry of entries) appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
+				},
+				async pollForExit(
+					_surface: string,
+					_signal: AbortSignal,
+					options: { onTick?: () => void },
+				) {
+					generation += 1;
+					if (generation === 1) {
+						await sleep(1050);
+						if (!firstSurfaceClosed) {
+							const closed = new Promise<void>((resolve) => {
+								releaseFirstPoll = resolve;
+							});
+							options.onTick?.();
+							await closed;
+						}
+						return { reason: "sentinel", exitCode: 0 };
+					}
+					return { reason: "done", exitCode: 0 };
+				},
+			} as never,
+			new AbortController().signal,
+		);
+
+		assert.equal(restarts, 1);
+		assert.deepEqual(result.timeoutWrapUp, { kind: "timeout", seconds: 2, threshold: 50 });
+		assert.equal(result.timedOut, undefined);
+		assert.match(result.summary, /Pane wrap-up report/);
+		assert.ok(result.elapsed < 2, "the pane continuation must keep the original deadline");
+	});
+
+	it("honors a short pane soft deadline before the hard timeout", async () => {
+		const sessionFile = makeSession();
+		const running = makeRunning(sessionFile, {
+			startTime: Date.now(),
+			timeoutBudget: { timeoutSeconds: 1 },
+			timeoutWarnThreshold: 50,
+		});
+		let generation = 0;
+		let releaseFirstPoll: (() => void) | undefined;
+		let firstSurfaceClosed = false;
+
+		const result = await settleWithin(
+			watchSubagent(
+				running,
+				{
+					cleanupNoSessionSessionFile() {},
+					async closeRunningSurface() {
+						firstSurfaceClosed = true;
+						releaseFirstPoll?.();
+					},
+					async restartForTimeoutWrapUp(current: RunningSubagent) {
+						current.surface = "short-wrap-up-surface";
+						appendFileSync(
+							sessionFile,
+							`${JSON.stringify({
+								type: "message",
+								id: "short-pane-report",
+								message: { role: "assistant", content: [{ type: "text", text: "Short pane report." }] },
+							})}\n`,
+						);
+					},
+					async pollForExit() {
+						generation += 1;
+						if (generation === 1) {
+							if (!firstSurfaceClosed) {
+								await new Promise<void>((resolve) => {
+									releaseFirstPoll = resolve;
+								});
+							}
+							return { reason: "sentinel", exitCode: 0 };
+						}
+						return { reason: "done", exitCode: 0 };
+					},
+				} as never,
+				new AbortController().signal,
+			),
+			2500,
+			"short interactive timeout wrap-up",
+		);
+
+		assert.equal(result.timedOut, undefined);
+		assert.deepEqual(result.timeoutWrapUp, { kind: "timeout", seconds: 1, threshold: 50 });
+	});
+
+	it("does not let an old close retry target the replacement pane", async () => {
+		const sessionFile = makeSession();
+		const running = makeRunning(sessionFile, {
+			startTime: Date.now(),
+			timeoutBudget: { timeoutSeconds: 2 },
+			timeoutWarnThreshold: 50,
+			surface: "original-surface",
+		});
+		let generation = 0;
+		let originalCloseCalls = 0;
+		let releaseFirstPoll: (() => void) | undefined;
+		let replacementFinished = false;
+		let replacementClosedEarly = false;
+
+		const result = await settleWithin(
+			watchSubagent(
+				running,
+				{
+					cleanupNoSessionSessionFile() {},
+					async closeRunningSurface(current: RunningSubagent) {
+						if (current.surface === "original-surface") {
+							originalCloseCalls += 1;
+							releaseFirstPoll?.();
+							if (originalCloseCalls === 1) {
+								throw new Error("transient close failure");
+							}
+							return;
+						}
+						if (current.surface === "replacement-surface" && !replacementFinished) {
+							replacementClosedEarly = true;
+						}
+					},
+					async restartForTimeoutWrapUp(current: RunningSubagent) {
+						current.surface = "replacement-surface";
+						appendFileSync(
+							sessionFile,
+							`${JSON.stringify({
+								type: "message",
+								id: "replacement-report",
+								message: { role: "assistant", content: [{ type: "text", text: "Replacement report." }] },
+							})}\n`,
+						);
+					},
+					async pollForExit(_surface: string, _signal: AbortSignal, options: { onTick?: () => void }) {
+						generation += 1;
+						if (generation === 1) {
+							await sleep(1050);
+							const closed = new Promise<void>((resolve) => {
+								releaseFirstPoll = resolve;
+							});
+							options.onTick?.();
+							await closed;
+							return { reason: "sentinel", exitCode: 0 };
+						}
+						await sleep(400);
+						replacementFinished = true;
+						return { reason: "done", exitCode: 0 };
+					},
+				} as never,
+				new AbortController().signal,
+			),
+			4000,
+			"replacement close retry",
+		);
+
+		assert.equal(result.timedOut, undefined);
+		assert.equal(replacementClosedEarly, false, "an old retry must stay bound to the original pane");
+	});
+
+	it("cancels an interactive replacement created after manual stop during restart", async () => {
+		const sessionFile = makeSession();
+		const controller = new AbortController();
+		const running = makeRunning(sessionFile, {
+			startTime: Date.now(),
+			timeoutBudget: { timeoutSeconds: 4 },
+			timeoutWarnThreshold: 25,
+			surface: "original-surface",
+			abortController: controller,
+		});
+		let generation = 0;
+		let releaseFirstPoll: (() => void) | undefined;
+		let restartEntered!: () => void;
+		const entered = new Promise<void>((resolve) => {
+			restartEntered = resolve;
+		});
+		let replacementClosed = false;
+		let originalClosed = false;
+		const closeSurface = async (current: RunningSubagent) => {
+			if (current.surface === "original-surface") {
+				originalClosed = true;
+				releaseFirstPoll?.();
+			}
+			if (current.surface === "replacement-surface") replacementClosed = true;
+		};
+
+		const resultPromise = watchSubagent(
+			running,
+			{
+				cleanupNoSessionSessionFile() {},
+				closeRunningSurface: closeSurface,
+				async restartForTimeoutWrapUp(current: RunningSubagent) {
+					restartEntered();
+					await sleep(100);
+					current.surface = "replacement-surface";
+					appendFileSync(
+						sessionFile,
+						`${JSON.stringify({
+							type: "message",
+							id: "cancelled-pane-report",
+							message: { role: "assistant", content: [{ type: "text", text: "Must not complete." }] },
+						})}\n`,
+					);
+				},
+				async pollForExit(_surface: string, _signal: AbortSignal, options: { onTick?: () => void }) {
+					generation += 1;
+					if (generation === 1) {
+						await sleep(1050);
+						if (!originalClosed) {
+							const closed = new Promise<void>((resolve) => {
+								releaseFirstPoll = resolve;
+							});
+							options.onTick?.();
+							await closed;
+						}
+						return { reason: "sentinel", exitCode: 0 };
+					}
+					return { reason: "done", exitCode: 0 };
+				},
+			} as never,
+			controller.signal,
+		);
+
+		await settleWithin(entered, 2500, "interactive restart entry");
+		await stopRunningSubagent(running, closeSurface);
+		const result = await settleWithin(resultPromise, 3000, "interactive manual stop during restart");
+
+		assert.equal(result.error, "cancelled");
+		assert.equal(replacementClosed, true, "a pane created after abort must be closed");
 	});
 });

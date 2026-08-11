@@ -42,7 +42,6 @@ export async function launchBackgroundSubagent(
 	ctx: SubagentLaunchContext,
 	runtime: BackgroundLaunchRuntime,
 ): Promise<RunningSubagent> {
-	const startTime = Date.now();
 	const id = Math.random().toString(16).slice(2, 10);
 	const launch = await coordinateSubagentLaunch(params, ctx, {
 		mode: "background",
@@ -92,9 +91,10 @@ export async function launchBackgroundSubagent(
 		args.push(promptArg);
 	}
 
+	const startTime = Date.now();
 	const { envVars, launchEntryCount } = launch;
-	// The child warns against the parent's clock so its "seconds remaining"
-	// matches the deadline the parent will actually enforce.
+	// The child receives the parent's clock so its launch contract and any
+	// report-only continuation match the deadline the watcher enforces.
 	if (prepared.agentDefs?.timeout || prepared.agentDefs?.idleTimeout) {
 		envVars[PI_SUBAGENT_TIMEOUT_STARTED_AT] = String(startTime);
 	}
@@ -133,6 +133,7 @@ export async function launchBackgroundSubagent(
 		launchEntryCount,
 		modelContextWindow: runtime.getContextWindow(prepared.effectiveModelRef),
 		modelRef: prepared.effectiveModelRef,
+		launchMetadata: launch.launchMetadata,
 	};
 	const rememberTail = (current: string | undefined, chunk: Buffer | string) =>
 		`${current ?? ""}${chunk.toString()}`.slice(-4000);

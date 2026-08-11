@@ -47,6 +47,7 @@ import {
 	withSubagentBatchStop,
 } from "./state.ts";
 import { type WaitRuntime, waitForSubagentResult as waitForSubagentResultWithRuntime } from "./wait.ts";
+import { restartSubagentForTimeoutWrapUp } from "./timeout-wrap-up.ts";
 
 export {
 	getWatcherSignal,
@@ -110,9 +111,14 @@ async function closeRunningSurface(running: RunningSubagent): Promise<void> {
 	if (running.surfaceClosePromise) return running.surfaceClosePromise;
 	if (!running.surface) return;
 	const surface = running.surface;
-	running.surface = undefined;
-	running.surfaceClosePromise = closeSurfaceAsync(surface, running.zellijTarget);
-	return running.surfaceClosePromise;
+	const closePromise = closeSurfaceAsync(surface, running.zellijTarget);
+	running.surfaceClosePromise = closePromise;
+	try {
+		await closePromise;
+		if (running.surface === surface) running.surface = undefined;
+	} finally {
+		if (running.surfaceClosePromise === closePromise) running.surfaceClosePromise = undefined;
+	}
 }
 
 export async function stopRunningSubagent(running: RunningSubagent): Promise<void> {
@@ -210,7 +216,12 @@ export async function launchBackgroundSubagent(
 }
 
 function getBackgroundWatchRuntime(): BackgroundWatchRuntime {
-	return { cleanupNoSessionSessionFile, terminateBackgroundChildProcess };
+	return {
+		cleanupNoSessionSessionFile,
+		terminateBackgroundChildProcess,
+		restartForTimeoutWrapUp: (running, signal) =>
+			restartSubagentForTimeoutWrapUp(running, { getShellReadyDelayMs }, signal),
+	};
 }
 
 export async function watchBackgroundSubagent(running: RunningSubagent, signal?: AbortSignal) {
@@ -239,7 +250,12 @@ export async function launchSubagent(
 }
 
 function getInteractiveWatchRuntime(): InteractiveWatchRuntime {
-	return { cleanupNoSessionSessionFile, closeRunningSurface };
+	return {
+		cleanupNoSessionSessionFile,
+		closeRunningSurface,
+		restartForTimeoutWrapUp: (running, signal) =>
+			restartSubagentForTimeoutWrapUp(running, { getShellReadyDelayMs }, signal),
+	};
 }
 
 export async function watchSubagent(running: RunningSubagent, signal?: AbortSignal) {

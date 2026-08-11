@@ -1,5 +1,7 @@
 import {
 	checkSubagentTimeout,
+	checkSubagentTimeoutWrapUp,
+	findDueTimeoutWrapUp,
 	findExpiredTimeoutBudget,
 	formatTimeoutOutcome,
 	formatTimeoutSeconds,
@@ -49,6 +51,51 @@ describe("timeout budget math", () => {
 	it("reports the wall clock when both budgets expire in the same tick", () => {
 		const expired = findExpiredTimeoutBudget({ timeoutSeconds: 30, idleTimeoutSeconds: 10 }, 0, 0, 60_000);
 		assert.deepEqual(expired, { kind: "timeout", seconds: 30 });
+	});
+
+	it("reserves the configured remainder before either hard limit", () => {
+		assert.equal(findDueTimeoutWrapUp({ timeoutSeconds: 100 }, 80, 0, 0, 79_999), null);
+		assert.deepEqual(findDueTimeoutWrapUp({ timeoutSeconds: 100 }, 80, 0, 0, 80_000), {
+			kind: "timeout",
+			seconds: 100,
+			threshold: 80,
+		});
+		assert.deepEqual(findDueTimeoutWrapUp({ timeoutSeconds: 200, idleTimeoutSeconds: 20 }, 80, 0, 70_000, 86_000), {
+			kind: "idle-timeout",
+			seconds: 20,
+			threshold: 80,
+		});
+	});
+
+	it("does not let wrap-up output reset the idle hard deadline", () => {
+		const running = makeRunning({
+			timeoutBudget: { idleTimeoutSeconds: 10 },
+			timeoutWarnThreshold: 80,
+			lastProgressAt: 1_000_000,
+			timeoutWrapUp: { kind: "idle-timeout", seconds: 10, threshold: 80 },
+			timeoutWrapUpMode: true,
+			timeoutWrapUpDeadlineAt: 1_010_000,
+		});
+		observeSubagentProgress(running, 100, 1_000_000);
+		observeSubagentProgress(running, 200, 1_009_000);
+		assert.deepEqual(checkSubagentTimeout(running, 1_010_000), {
+			kind: "idle-timeout",
+			seconds: 10,
+		});
+	});
+
+	it("requests only one wrap-up phase for a run", () => {
+		const running = makeRunning({
+			timeoutBudget: { timeoutSeconds: 10 },
+			timeoutWarnThreshold: 80,
+		});
+		assert.deepEqual(checkSubagentTimeoutWrapUp(running, running.startTime + 8_000), {
+			kind: "timeout",
+			seconds: 10,
+			threshold: 80,
+		});
+		running.timeoutWrapUp = { kind: "timeout", seconds: 10, threshold: 80 };
+		assert.equal(checkSubagentTimeoutWrapUp(running, running.startTime + 9_000), null);
 	});
 
 	it("takes a baseline on the first observation instead of crediting the launch header", () => {
@@ -130,6 +177,17 @@ describe("timeout launch state", () => {
 		assert.deepEqual(resolveSubagentTimeoutState({ timeout: 60, onTimeout: "block-resume" }), {
 			timeoutBudget: { timeoutSeconds: 60 },
 			timeoutBlocksResume: true,
+		});
+	});
+
+	it("carries a valid wrap-up threshold only when a budget exists", () => {
+		assert.deepEqual(resolveSubagentTimeoutState({ timeoutWarnThreshold: "80%" }), {});
+		assert.deepEqual(resolveSubagentTimeoutState({ timeout: 60, timeoutWarnThreshold: "80.9%" }), {
+			timeoutBudget: { timeoutSeconds: 60 },
+			timeoutWarnThreshold: 80,
+		});
+		assert.deepEqual(resolveSubagentTimeoutState({ timeout: 60, timeoutWarnThreshold: "bogus" }), {
+			timeoutBudget: { timeoutSeconds: 60 },
 		});
 	});
 });

@@ -1,4 +1,3 @@
-import { createRequire } from "node:module";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	endedAtToolUseBoundary,
@@ -13,38 +12,16 @@ import { installSubagentContextReminders } from "./context-reminders.ts";
 import { createExitSignalWriter } from "./exit-signal.ts";
 import { installSubagentTimeoutReminders } from "./timeout-reminders.ts";
 import { type FinalContextSnapshot, getFinalContextSnapshot } from "./final-context-snapshot.ts";
+import { isMissingOptionalDependency, optionalRequire } from "./optional-dependency.ts";
 import { ProviderErrorRecoveryController, resolveProviderRecoveryDelaysMs } from "./provider-error-recovery.ts";
 import { registerSetTabTitleTool, shouldRegisterSetTabTitleTool } from "./set-tab-title.ts";
 import { CALLER_PING_TOOL_NAME, SUBAGENT_DONE_TOOL_NAME, SUBAGENT_LAUNCH_TOOL_NAMES } from "./tool-names.ts";
 
-const require = createRequire(import.meta.url);
 const TOOL_BOUNDARY_RECOVERY_NUDGE = "continue";
 const MAX_CONSECUTIVE_TOOL_BOUNDARY_ENDS = 3;
 
-function isMissingOptionalDependency(error: unknown, id: string): boolean {
-	const maybeError = error as { code?: unknown; message?: unknown } | null;
-	const message = typeof maybeError?.message === "string" ? maybeError.message : "";
-	const code = maybeError?.code;
-	return (
-		(code === "MODULE_NOT_FOUND" || code == null) &&
-		(message.includes("Cannot find module") || message.includes("Cannot find package")) &&
-		message.includes(id)
-	);
-}
-
 export function isMissingOptionalDependencyForTest(error: unknown, id: string): boolean {
 	return isMissingOptionalDependency(error, id);
-}
-
-function optionalRequire(id: string): unknown | null {
-	try {
-		return require(id);
-	} catch (error) {
-		if (isMissingOptionalDependency(error, id)) {
-			return null;
-		}
-		throw error;
-	}
 }
 
 export function getDeniedToolNames(autoExit: boolean, deniedEnv = process.env.PI_DENY_TOOLS ?? ""): string[] {

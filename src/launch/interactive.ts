@@ -49,7 +49,6 @@ export async function launchInteractiveSubagent(
 	runtime: InteractiveLaunchRuntime,
 	options?: { surface?: string },
 ): Promise<RunningSubagent> {
-	const startTime = Date.now();
 	const id = Math.random().toString(16).slice(2, 10);
 	const launch = await coordinateSubagentLaunch(params, ctx, {
 		mode: "interactive",
@@ -146,6 +145,7 @@ export async function launchInteractiveSubagent(
 		parts.push(shellEscape(flag));
 	}
 
+	const startTime = Date.now();
 	const zellijTarget = !surfacePreCreated && getMuxBackend() === "zellij" ? await resolveZellijTarget() : undefined;
 	const ordinarySurface = zellijTarget
 		? undefined
@@ -158,9 +158,8 @@ export async function launchInteractiveSubagent(
 		...launch.envVars,
 		...(zellijTarget ? { ZELLIJ_SESSION_NAME: zellijTarget.sessionName } : {}),
 		...(ordinarySurface ? { PI_SUBAGENT_SURFACE: ordinarySurface } : {}),
-		// The child warns against the parent's clock, not its own: a pane child
-		// starts after a shell-ready delay and would otherwise report time it
-		// has already lost as time it still has.
+		// The child receives the parent's clock, not its own: pane startup time
+		// belongs to the same deadline the watcher enforces.
 		...(prepared.agentDefs?.timeout || prepared.agentDefs?.idleTimeout
 			? { [PI_SUBAGENT_TIMEOUT_STARTED_AT]: String(startTime) }
 			: {}),
@@ -232,6 +231,7 @@ export async function launchInteractiveSubagent(
 		launchEntryCount,
 		modelContextWindow: runtime.getContextWindow(prepared.effectiveModelRef),
 		modelRef: prepared.effectiveModelRef,
+		launchMetadata: launch.launchMetadata,
 		doneSentinelFile,
 		zellijTarget,
 	};

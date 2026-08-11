@@ -26,7 +26,8 @@
 		"test:frontmatter-timeout-warn": "node scripts/test-frontmatter-timeout-warn.mjs",
 		"test:frontmatter-on-timeout": "node scripts/test-frontmatter-on-timeout.mjs",
 		"test:live-herdr-mux": "node scripts/test-live-herdr-mux.mjs",
-		"test:live-herdr-pi": "node scripts/test-live-herdr-pi.mjs"
+		"test:live-herdr-pi": "node scripts/test-live-herdr-pi.mjs",
+		"test:live-herdr-timeout-wrap-up": "node scripts/test-live-herdr-timeout-wrap-up.mjs"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-ai": ">=0.79.0",

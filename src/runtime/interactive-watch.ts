@@ -8,12 +8,24 @@ import { findLastSubagentOutputWithSource, getEntryCount, getNewEntries } from "
 import { writeSubagentTimeoutSidecar } from "../session/timeout-sidecar.ts";
 import type { RunningSubagent, SubagentResult, SubagentSummarySource } from "../types.ts";
 import { resolveFinalContextUsage } from "./final-context-usage.ts";
-import { checkSubagentTimeout, hasChildProgress, observeSubagentProgress } from "./timeout-budget.ts";
+import {
+	checkSubagentTimeout,
+	checkSubagentTimeoutWrapUp,
+	type ExpiredTimeoutBudget,
+	getSubagentNextDeadlineAt,
+	hasChildProgress,
+	observeSubagentProgress,
+} from "./timeout-budget.ts";
+import { startTimeoutWrapUpWithinDeadline } from "./timeout-restart.ts";
 
 export interface InteractiveWatchRuntime {
 	cleanupNoSessionSessionFile(running: RunningSubagent): void;
 	closeRunningSurface(running: RunningSubagent): Promise<void>;
+	restartForTimeoutWrapUp?(running: RunningSubagent, signal: AbortSignal): Promise<void>;
+	pollForExit?: typeof pollForExit;
 }
+
+type InteractiveGenerationOutcome = { kind: "restart" } | { kind: "result"; result: SubagentResult };
 
 /**
  * Kill a pane child by closing the surface that owns it.
@@ -23,18 +35,25 @@ export interface InteractiveWatchRuntime {
  * killed. Retrying and recording the failure is the closest equivalent to the
  * background path's SIGTERM/SIGKILL escalation.
  */
-async function closeTimedOutSurface(running: RunningSubagent, runtime: InteractiveWatchRuntime): Promise<void> {
+async function closeTimedOutSurface(
+	running: RunningSubagent,
+	runtime: InteractiveWatchRuntime,
+	abortOnFailure: boolean,
+): Promise<boolean> {
+	const targetSurface = running.surface;
+	if (!targetSurface) return true;
 	const backoffMs = [0, 250, 1000];
 	for (let attempt = 0; attempt < backoffMs.length; attempt++) {
 		if (backoffMs[attempt] > 0) await new Promise((resolve) => setTimeout(resolve, backoffMs[attempt]));
+		if (running.surface !== targetSurface) return true;
 		try {
 			await runtime.closeRunningSurface(running);
 			running.timeoutKillFailed = false;
-			return;
+			return true;
 		} catch (error) {
 			traceSubagentLaunch("interactive.timeout.closeFailed", {
 				name: running.name,
-				surface: running.surface,
+				surface: targetSurface,
 				attempt: attempt + 1,
 				errorMessage: error instanceof Error ? error.message : String(error),
 			});
@@ -44,7 +63,34 @@ async function closeTimedOutSurface(running: RunningSubagent, runtime: Interacti
 	// be handed a flat "was killed" for a child that might still be running, and
 	// the watcher must not keep polling a surface that will not die.
 	running.timeoutKillFailed = true;
-	running.abortController?.abort();
+	if (abortOnFailure) running.abortController?.abort();
+	return false;
+}
+
+function buildInteractiveRestartTimeoutResult(
+	running: RunningSubagent,
+	expiry: ExpiredTimeoutBudget,
+): SubagentResult {
+	const { summary, summarySource } = getSummary(running, { reason: "error", exitCode: 1 });
+	const timeoutFields = recordTimeoutOutcome(running);
+	return {
+		name: running.name,
+		task: running.task,
+		summary,
+		summarySource,
+		sessionFile: running.noSession ? undefined : running.sessionFile,
+		exitCode: 1,
+		elapsed: Math.floor((Date.now() - running.startTime) / 1000),
+		outputTokens: 0,
+		...timeoutFields,
+		...(timeoutFields.timedOut
+			? {}
+			: {
+					timedOut: expiry.kind,
+					timedOutAfter: expiry.seconds,
+				}),
+		...(running.timeoutWrapUp ? { timeoutWrapUp: running.timeoutWrapUp } : {}),
+	};
 }
 
 /**
@@ -94,8 +140,59 @@ export async function watchSubagent(
 	runtime: InteractiveWatchRuntime,
 	signal: AbortSignal,
 ): Promise<SubagentResult> {
-	const { name, task, surface, startTime, sessionFile } = running;
+	try {
+		while (true) {
+			const outcome = await watchInteractiveGeneration(running, runtime, signal);
+			if (outcome.kind === "result") return outcome.result;
+			if (signal.aborted) return buildInteractiveCancellationResult(running);
+			try {
+				if (!runtime.restartForTimeoutWrapUp) {
+					throw new Error("Timeout wrap-up restart is unavailable.");
+				}
+				const restart = await startTimeoutWrapUpWithinDeadline(running, signal, {
+					restart: runtime.restartForTimeoutWrapUp,
+					stopStarted: async (current) => {
+						try {
+							await runtime.closeRunningSurface(current);
+						} catch {
+							current.timeoutKillFailed = true;
+						}
+					},
+				});
+				if (restart.kind === "cancelled") return buildInteractiveCancellationResult(running);
+				if (restart.kind === "timedOut") {
+					return buildInteractiveRestartTimeoutResult(running, restart.expiry);
+				}
+				running.timeoutWrapUpMode = true;
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					name: running.name,
+					task: running.task,
+					summary: `The system interrupted this sub-agent for its time-limit wrap-up, but the wrap-up continuation failed to start: ${message}`,
+					summarySource: "runtime",
+					sessionFile: running.noSession ? undefined : running.sessionFile,
+					exitCode: 1,
+					elapsed: Math.floor((Date.now() - running.startTime) / 1000),
+					error: message,
+					...(running.timeoutWrapUp ? { timeoutWrapUp: running.timeoutWrapUp } : {}),
+				};
+			}
+		}
+	} finally {
+		runtime.cleanupNoSessionSessionFile(running);
+	}
+}
+
+async function watchInteractiveGeneration(
+	running: RunningSubagent,
+	runtime: InteractiveWatchRuntime,
+	signal: AbortSignal,
+): Promise<InteractiveGenerationOutcome> {
+	const { name, task, startTime, sessionFile } = running;
+	const surface = running.surface;
 	if (!surface) throw new Error("watchSubagent called on a background agent (no surface)");
+	let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const updateStats = () => {
 		const now = Date.now();
@@ -104,8 +201,8 @@ export async function watchSubagent(
 				const stat = statSync(sessionFile);
 				const previousEntries = running.entries ?? 0;
 				const entries = getEntryCount(sessionFile);
-				// Only the child's own output restarts the idle clock; a steer the
-				// runtime wrote into the session is not the child making progress.
+				// Only the child's own output restarts the idle clock; a prompt the
+				// runtime wrote into the session is not child progress.
 				const produced =
 					entries > previousEntries ? hasChildProgress(getNewEntries(sessionFile, previousEntries)) : false;
 				observeSubagentProgress(running, stat.size, now, produced);
@@ -113,13 +210,40 @@ export async function watchSubagent(
 			}
 		} catch {}
 		const expired = checkSubagentTimeout(running, now);
-		if (!expired) return;
-		// A child that already published its own outcome finished on its own
-		// terms; the deadline it crossed while exiting is not a runaway.
-		if (hasSubagentExitSidecar(running.sessionFile)) return;
-		running.timeoutExpiry = expired;
-		void closeTimedOutSurface(running, runtime);
+		if (expired) {
+			// A child that already published its own outcome finished on its own
+			// terms; the deadline it crossed while exiting is not a runaway.
+			if (hasSubagentExitSidecar(running.sessionFile)) return;
+			running.timeoutExpiry = expired;
+			void closeTimedOutSurface(running, runtime, true);
+			armDeadlineTimer();
+			return;
+		}
+		const wrapUp = checkSubagentTimeoutWrapUp(running, now);
+		if (wrapUp && !running.timeoutWrapUpMode && !hasSubagentExitSidecar(running.sessionFile)) {
+			running.timeoutWrapUp = wrapUp;
+			const baseline =
+				wrapUp.kind === "timeout" ? running.startTime : (running.lastProgressAt ?? running.startTime);
+			running.timeoutWrapUpDeadlineAt = baseline + wrapUp.seconds * 1000;
+			void closeTimedOutSurface(running, runtime, false);
+		}
+		armDeadlineTimer();
 	};
+
+	const armDeadlineTimer = () => {
+		if (deadlineTimer) clearTimeout(deadlineTimer);
+		const deadlineAt = getSubagentNextDeadlineAt(running);
+		if (deadlineAt === undefined) {
+			deadlineTimer = undefined;
+			return;
+		}
+		deadlineTimer = setTimeout(() => {
+			deadlineTimer = undefined;
+			updateStats();
+		}, Math.max(1, deadlineAt - Date.now()));
+		deadlineTimer.unref?.();
+	};
+	armDeadlineTimer();
 
 	try {
 		traceSubagentLaunch("interactive.watch.start", {
@@ -131,7 +255,7 @@ export async function watchSubagent(
 		const pollResult =
 			getMuxBackend() === "zellij"
 				? await pollForZellijFiles(running, signal, updateStats)
-				: await pollForExit(surface, signal, {
+				: await (runtime.pollForExit ?? pollForExit)(surface, signal, {
 						interval: 1000,
 						sessionFile,
 						doneSentinelFile: running.doneSentinelFile,
@@ -144,33 +268,49 @@ export async function watchSubagent(
 			sessionFile,
 			pollResult,
 		});
+		const exitSignal = pollResult.outputTokens === undefined ? consumeSubagentExitSignal(sessionFile) : undefined;
+		if (
+			running.timeoutWrapUp &&
+			!running.timeoutWrapUpMode &&
+			!running.timeoutExpiry &&
+			!signal.aborted &&
+			pollResult.reason !== "ping" &&
+			exitSignal?.reason !== "ping"
+		) {
+			cleanupDoneSentinel(running);
+			try {
+				await runtime.closeRunningSurface(running);
+			} catch {}
+			return { kind: "restart" };
+		}
 		const elapsed = Math.floor((Date.now() - startTime) / 1000);
 		const { summary, summarySource } = getSummary(running, pollResult);
 		const errorMessage = pollResult.reason === "error" ? pollResult.errorMessage : undefined;
-		const exitSignal = pollResult.outputTokens === undefined ? consumeSubagentExitSignal(sessionFile) : undefined;
 		const finalContextUsage = resolveFinalContextUsage(running, pickFinalUsageSource(pollResult, exitSignal));
 		const timeoutFields = recordTimeoutOutcome(running, pollResult);
 		cleanupDoneSentinel(running);
 		try {
 			await runtime.closeRunningSurface(running);
 		} catch {}
-		runtime.cleanupNoSessionSessionFile(running);
-
 		return {
-			name,
-			task,
-			summary,
-			summarySource,
-			sessionFile: running.noSession ? undefined : sessionFile,
-			// A pane closed by the runtime still reports a clean exit; a killed
-			// runaway must never be filed as a success.
-			exitCode: timeoutFields.timedOut ? pollResult.exitCode || 1 : pollResult.exitCode,
-			elapsed,
-			outputTokens: pollResult.outputTokens ?? exitSignal?.outputTokens,
-			...finalContextUsage,
-			...timeoutFields,
-			ping: pollResult.ping,
-			errorMessage,
+			kind: "result",
+			result: {
+				name,
+				task,
+				summary,
+				summarySource,
+				sessionFile: running.noSession ? undefined : sessionFile,
+				// A pane closed by the runtime still reports a clean exit; a killed
+				// runaway must never be filed as a success.
+				exitCode: timeoutFields.timedOut ? pollResult.exitCode || 1 : pollResult.exitCode,
+				elapsed,
+				outputTokens: pollResult.outputTokens ?? exitSignal?.outputTokens,
+				...finalContextUsage,
+				...timeoutFields,
+				...(running.timeoutWrapUp ? { timeoutWrapUp: running.timeoutWrapUp } : {}),
+				ping: pollResult.ping ?? exitSignal?.ping,
+				errorMessage,
+			},
 		};
 	} catch (err: unknown) {
 		const errorMessage = err instanceof Error ? err.message : String(err);
@@ -185,7 +325,9 @@ export async function watchSubagent(
 		try {
 			await runtime.closeRunningSurface(running);
 		} catch {}
-		runtime.cleanupNoSessionSessionFile(running);
+		if (running.timeoutWrapUp && !running.timeoutWrapUpMode && !running.timeoutExpiry && !signal.aborted) {
+			return { kind: "restart" };
+		}
 
 		// A spent budget explains the failed poll: the watcher closed the surface
 		// out from under it. Reporting "cancelled" or a raw surface error here
@@ -194,48 +336,64 @@ export async function watchSubagent(
 		if (timeoutFields.timedOut) {
 			const { summary, summarySource } = getSummary(running, { reason: "error", exitCode: 1 });
 			return {
-				name,
-				task,
-				summary,
-				summarySource,
-				sessionFile: running.noSession ? undefined : sessionFile,
-				exitCode: 1,
-				elapsed: Math.floor((Date.now() - startTime) / 1000),
-				outputTokens: 0,
-				...timeoutFields,
+				kind: "result",
+				result: {
+					name,
+					task,
+					summary,
+					summarySource,
+					sessionFile: running.noSession ? undefined : sessionFile,
+					exitCode: 1,
+					elapsed: Math.floor((Date.now() - startTime) / 1000),
+					outputTokens: 0,
+					...timeoutFields,
+					...(running.timeoutWrapUp ? { timeoutWrapUp: running.timeoutWrapUp } : {}),
+				},
 			};
 		}
 
 		if (signal.aborted) {
-			return {
+			return { kind: "result", result: buildInteractiveCancellationResult(running) };
+		}
+		return {
+			kind: "result",
+			result: {
 				name,
 				task,
-				summary: "Subagent cancelled.",
+				summary: `Subagent error: ${errorMessage}`,
 				summarySource: "runtime",
 				exitCode: 1,
 				elapsed: Math.floor((Date.now() - startTime) / 1000),
 				outputTokens: 0,
-				error: "cancelled",
-			};
-		}
-		return {
-			name,
-			task,
-			summary: `Subagent error: ${errorMessage}`,
-			summarySource: "runtime",
-			exitCode: 1,
-			elapsed: Math.floor((Date.now() - startTime) / 1000),
-			outputTokens: 0,
-			error: errorMessage,
+				error: errorMessage,
+				...(running.timeoutWrapUp ? { timeoutWrapUp: running.timeoutWrapUp } : {}),
+			},
 		};
+	} finally {
+		if (deadlineTimer) clearTimeout(deadlineTimer);
 	}
+}
+
+function buildInteractiveCancellationResult(running: RunningSubagent): SubagentResult {
+	return {
+		name: running.name,
+		task: running.task,
+		summary: "Subagent cancelled.",
+		summarySource: "runtime",
+		sessionFile: running.noSession ? undefined : running.sessionFile,
+		exitCode: 1,
+		elapsed: Math.floor((Date.now() - running.startTime) / 1000),
+		outputTokens: 0,
+		error: "cancelled",
+		...(running.timeoutWrapUp ? { timeoutWrapUp: running.timeoutWrapUp } : {}),
+	};
 }
 
 function getSummary(
 	running: RunningSubagent,
 	pollResult: PollResult,
 ): { summary: string; summarySource: SubagentSummarySource } {
-	if (!running.noSession && existsSync(running.sessionFile)) {
+	if ((!running.noSession || running.timeoutWarnThreshold !== undefined) && existsSync(running.sessionFile)) {
 		const output = findLastSubagentOutputWithSource(getNewEntries(running.sessionFile, running.launchEntryCount ?? 0));
 		if (output) return output;
 	}

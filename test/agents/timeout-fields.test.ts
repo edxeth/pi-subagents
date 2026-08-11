@@ -48,7 +48,7 @@ describe("timeout agent fields", () => {
 		}
 	});
 
-	it("keeps the warn threshold raw for the child to resolve", () => {
+	it("keeps the warn threshold raw for launch policy to resolve", () => {
 		assert.equal(loadDefinition("timeout-warn-threshold: 80%")?.timeoutWarnThreshold, "80%");
 		assert.equal(loadDefinition("timeout-warn-threshold: true")?.timeoutWarnThreshold, "true");
 		assert.equal(loadDefinition("model: provider/model")?.timeoutWarnThreshold, undefined);

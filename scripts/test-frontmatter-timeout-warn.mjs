@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 /**
- * Live test: frontmatter `timeout-warn-threshold`
+ * Live test: enforced frontmatter `timeout-warn-threshold` wrap-up.
  *
- * Verifies that an opted-in child warns itself before the parent kills it, and
- * that a child without the field is never warned.
+ * The opted-in child enters a synchronous custom tool that blocks its event
+ * loop. A child-side timer or steer cannot help it. The parent must interrupt
+ * the process at 50%, resume the same session in report-only mode, block any
+ * retried tool, and receive a report before the original 100% deadline.
  *
- * Strategy:
- *   - `fm-warn-child` has `timeout: 30` and `timeout-warn-threshold: 50%`, so
- *     the warning is due about 15s in. Its task keeps it busy in short steps so
- *     the steer can actually be delivered and committed to its session.
- *   - `fm-warn-silent-child` has the same budget without the threshold and must
- *     receive no warning at all.
+ * A control child has the same blocking tool and a hard timeout but no warning
+ * threshold. It must run to the hard timeout without a wrap-up continuation.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
 	findSubagentChild,
+	getAllSubagentText,
 	getUserText,
 	listJsonlFiles,
 	parseJsonl,
@@ -25,11 +25,41 @@ import {
 } from "./live-test-common.mjs";
 
 const ctx = setup("timeout-warn");
+const countsDir = ctx.snapshotsDir;
 
-const busyBody = [
-	"Run this bash command six times, one call at a time: `sleep 5 && echo tick`.",
-	"Do not batch them into one call.",
-	"After the sixth call returns, reply with exactly `FM_WARN_FINISHED`.",
+writeFileSync(
+	join(ctx.extensionsDir, "blocking-tool.ts"),
+	`import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { Type } from "typebox";
+
+export default function (pi) {
+  pi.registerTool({
+    name: "block_until_killed",
+    label: "Block Until Killed",
+    description: "Enter a synchronous native wait that only the parent runtime can interrupt.",
+    parameters: Type.Object({}),
+    async execute() {
+      const dir = ${JSON.stringify(countsDir)};
+      const agent = process.env.PI_SUBAGENT_AGENT || "unknown";
+      const file = join(dir, agent + ".count");
+      mkdirSync(dir, { recursive: true });
+      const count = existsSync(file) ? Number(readFileSync(file, "utf8")) || 0 : 0;
+      writeFileSync(file, String(count + 1), "utf8");
+      execFileSync(process.execPath, ["-e", "setTimeout(() => {}, 300000)"], { stdio: "ignore" });
+      return { content: [{ type: "text", text: "BLOCK_RETURNED" }], details: {} };
+    },
+  });
+}
+`,
+	"utf8",
+);
+
+const blockingBody = [
+	"Immediately call `block_until_killed` once. Do not write any assistant text before that call.",
+	"If the call is interrupted or fails, your standing task would normally be to retry it before reporting.",
+	"If a later system or user instruction explicitly puts you in report-only mode, obey that newer instruction instead and report what happened without tools.",
 ].join("\n");
 
 writeAgent(
@@ -37,38 +67,42 @@ writeAgent(
 	"fm-warn-child",
 	{
 		name: "fm-warn-child",
-		description: "Live timeout-warn-threshold smoke test agent.",
+		description: "Live enforced timeout wrap-up smoke agent.",
 		"auto-exit": "true",
 		mode: "background",
 		async: "false",
 		spawning: "false",
-		tools: "bash",
-		timeout: "30",
+		extensions: "all",
+		tools: "block_until_killed",
+		"no-session": "true",
+		"session-mode": "standalone",
+		timeout: "60",
 		"timeout-warn-threshold": "50%",
 	},
-	busyBody,
+	blockingBody,
 );
 
 writeAgent(
 	ctx.agentsDir,
-	"fm-warn-silent-child",
+	"fm-warn-control",
 	{
-		name: "fm-warn-silent-child",
-		description: "Live control agent with a budget but no warning.",
+		name: "fm-warn-control",
+		description: "Live hard-timeout control without a wrap-up threshold.",
 		"auto-exit": "true",
 		mode: "background",
 		async: "false",
 		spawning: "false",
-		tools: "bash",
-		timeout: "30",
+		extensions: "all",
+		tools: "block_until_killed",
+		timeout: "15",
 	},
-	busyBody,
+	blockingBody,
 );
 
 const prompt = [
 	"The subagent tool is available in this session.",
-	"First call subagent with name 'fm-warn-child', agent 'fm-warn-child', title 'Timeout warning verification', task 'Follow your exact built-in instructions.'.",
-	"Then call subagent with name 'fm-silent-child', agent 'fm-warn-silent-child', title 'No warning control verification', task 'Follow your exact built-in instructions.'.",
+	"First call subagent with name 'fm-warn-child', agent 'fm-warn-child', title 'Enforced wrap-up verification', task 'Follow your exact built-in instructions.'.",
+	"Then call subagent with name 'fm-warn-control', agent 'fm-warn-control', title 'Hard timeout control verification', task 'Follow your exact built-in instructions.'.",
 	"After both tools return, reply with exactly 'TEST_WARN_DONE' and nothing else.",
 	"Do not call any other tools.",
 ].join(" ");
@@ -79,47 +113,59 @@ try {
 
 	const parent = findSessionWithMarker(ctx.sessionDir, "TEST_WARN_DONE");
 	if (!parent) throw new Error("Could not find parent session.");
+
 	const warnedDetails = findSubagentChild(parent.events, "fm-warn-child");
-	if (!warnedDetails) throw new Error("Could not find the subagent result for fm-warn-child.");
-	if (!warnedDetails.sessionFile || !existsSync(warnedDetails.sessionFile)) {
-		throw new Error("Missing child sessionFile for the warned child.");
+	if (!warnedDetails) throw new Error("Could not find the result for fm-warn-child.");
+	if (warnedDetails.status !== "completed") {
+		throw new Error(`The wrap-up child should complete, got ${JSON.stringify(warnedDetails)}.`);
+	}
+	if (warnedDetails.timedOut !== undefined) {
+		throw new Error(`The wrap-up child reached the hard timeout: ${JSON.stringify(warnedDetails.timedOut)}.`);
+	}
+	if (
+		warnedDetails.timeoutWrapUp?.kind !== "timeout" ||
+		warnedDetails.timeoutWrapUp?.seconds !== 60 ||
+		warnedDetails.timeoutWrapUp?.threshold !== 50
+	) {
+		throw new Error(`Missing enforced wrap-up details: ${JSON.stringify(warnedDetails.timeoutWrapUp)}.`);
+	}
+	if (typeof warnedDetails.elapsed !== "number" || warnedDetails.elapsed < 29 || warnedDetails.elapsed >= 60) {
+		throw new Error(`Wrap-up elapsed ${warnedDetails.elapsed}s is outside the original 60s clock.`);
+	}
+	if (warnedDetails.sessionFile !== undefined) {
+		throw new Error("An ephemeral wrap-up child exposed a resumable session.");
+	}
+	if (typeof warnedDetails.summary !== "string" || warnedDetails.summary.trim() === "") {
+		throw new Error("The report-only continuation produced no assistant report.");
+	}
+	assertToolWasEnteredExactlyOnce("fm-warn-child");
+	if (findPersistedChildSession("fm-warn-child")) {
+		throw new Error("The ephemeral wrap-up session was not deleted after final delivery.");
 	}
 
-	const warnedText = getUserText(parseJsonl(warnedDetails.sessionFile));
-	const warnMatch = warnedText.match(
-		/Time limit: you have been running for (\d+)s, and your limit is 30s for this whole run\. About (\d+)s remain/,
-	);
-	if (!warnMatch) {
-		console.log(`Warned child user text: ${JSON.stringify(warnedText)}`);
-		throw new Error("The opted-in child never received its timeout warning.");
-	}
-	const spent = Number(warnMatch[1]);
-	const remaining = Number(warnMatch[2]);
-	if (spent < 14 || spent > 29) {
-		throw new Error(`Warning fired at ${spent}s, which is not near 50% of a 30s budget.`);
-	}
-	if (spent + remaining !== 30) {
-		throw new Error(`Warning arithmetic is wrong: ${spent}s spent + ${remaining}s remaining is not 30s.`);
-	}
-	if (!warnedText.includes("Report your result now")) {
-		throw new Error("The warning did not tell the child to report its result.");
-	}
-	// The child never saw the agent file, so the warning must explain itself.
-	if (!warnedText.includes("the system stops you")) {
-		throw new Error("The warning did not tell the child what happens at the limit.");
+	const parentText = getAllSubagentText(parent.events);
+	if (!parentText.includes('Sub-agent "fm-warn-child" completed its time-limit wrap-up')) {
+		throw new Error(`Parent-visible text did not classify the wrap-up:\n${parentText}`);
 	}
 
-	const silentDetails = findSubagentChild(parent.events, "fm-warn-silent-child");
-	if (!silentDetails) throw new Error("Could not find the subagent result for fm-warn-silent-child.");
-	const silentText = getUserText(parseJsonl(silentDetails.sessionFile));
-	if (/Time limit: you have been running/.test(silentText)) {
-		throw new Error("A child without timeout-warn-threshold must never be warned.");
+	const controlDetails = findSubagentChild(parent.events, "fm-warn-control");
+	if (!controlDetails) throw new Error("Could not find the result for fm-warn-control.");
+	if (controlDetails.timedOut !== "timeout" || controlDetails.timedOutAfter !== 15) {
+		throw new Error(`The no-threshold control did not reach its hard timeout: ${JSON.stringify(controlDetails)}.`);
+	}
+	if (controlDetails.timeoutWrapUp !== undefined) {
+		throw new Error("A child without timeout-warn-threshold must not enter wrap-up mode.");
+	}
+	assertToolWasEnteredExactlyOnce("fm-warn-control");
+	const controlText = getUserText(parseJsonl(controlDetails.sessionFile));
+	if (controlText.includes("interrupted your previous active operation")) {
+		throw new Error("The no-threshold control received a wrap-up prompt.");
 	}
 
 	verified = true;
 	console.log(
-		`frontmatter \`timeout-warn-threshold\` ok: warned at ${spent}s of 30s with ${remaining}s left, ` +
-			"control child silent",
+		`frontmatter \`timeout-warn-threshold\` ok: blocked child interrupted and reported in ${warnedDetails.elapsed}s ` +
+			"inside its original 60s clock; no-threshold control hit 15s hard timeout",
 	);
 } finally {
 	ctx.cleanup();
@@ -127,10 +173,29 @@ try {
 
 if (!verified) process.exit(1);
 
+function assertToolWasEnteredExactlyOnce(agent) {
+	const file = join(countsDir, `${agent}.count`);
+	const count = existsSync(file) ? Number(readFileSync(file, "utf8")) : 0;
+	if (count !== 1) {
+		throw new Error(`Expected ${agent} to enter the blocking tool exactly once, got ${count}.`);
+	}
+}
+
 function findSessionWithMarker(sessionDir, marker) {
 	for (const file of listJsonlFiles(sessionDir)) {
 		const events = parseJsonl(file);
 		if (getUserText(events).includes(marker)) return { file, events };
+	}
+	return null;
+}
+
+function findPersistedChildSession(name) {
+	for (const file of listJsonlFiles(ctx.sessionDir)) {
+		const events = parseJsonl(file);
+		const metadata = events.find(
+			(event) => event.type === "custom" && event.customType === "pi-subagents_launch_metadata",
+		)?.data;
+		if (metadata?.name === name) return file;
 	}
 	return null;
 }

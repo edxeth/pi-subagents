@@ -30,6 +30,7 @@ import {
 	resolveSubagentNoSession,
 	resolveSubagentParentClosePolicy,
 	resolveSubagentReportContextUsage,
+	shouldPersistNoSessionForTimeoutWrapUp,
 } from "./policy.ts";
 import type { ResumeMode } from "./resume.ts";
 import { type ResolvedSubagentRuntimePaths, resolveSubagentCwd } from "./runtime-paths.ts";
@@ -273,7 +274,9 @@ export function getPreparedExtensionLaunchArgs(
 export function getPreparedSessionLaunchArgs(
 	prepared: Pick<PreparedSubagentLaunch, "agentDefs" | "subagentSessionFile" | "sessionTitle">,
 ): string[] {
-	const args = resolveSubagentNoSession(prepared.agentDefs)
+	const useInMemorySession =
+		resolveSubagentNoSession(prepared.agentDefs) && !shouldPersistNoSessionForTimeoutWrapUp(prepared.agentDefs);
+	const args = useInMemorySession
 		? ["--session", prepared.subagentSessionFile, "--no-session"]
 		: ["--session", prepared.subagentSessionFile];
 	if (prepared.sessionTitle) args.push("--name", prepared.sessionTitle);

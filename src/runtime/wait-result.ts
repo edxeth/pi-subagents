@@ -3,7 +3,7 @@ import type { CompletedSubagentResult, DeliveryState, RunningSubagent, SubagentR
 import { formatContextExitNotice, formatFinalContextUsage, formatSessionRef } from "./final-context-usage.ts";
 import { hasRealSubagentOutput } from "./state.ts";
 import type { WaitRuntime } from "./wait.ts";
-import { formatTimeoutOutcome, getTimeoutResultDetails } from "./timeout-budget.ts";
+import { formatTimeoutOutcome, formatTimeoutWrapUpOutcome, getTimeoutResultDetails } from "./timeout-budget.ts";
 import { formatElapsed } from "./wiring.ts";
 
 function getSubagentWaitPingResult(running: RunningSubagent, result: SubagentResult, deliveryState: DeliveryState) {
@@ -57,6 +57,11 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 			`Sub-agent "${cached.name}" failed after ${formatElapsed(cached.elapsed)} ` +
 			`(provider/agent error — auto-retry exhausted).\n\n` +
 			`Error: ${cached.errorMessage}\n\n${resultBody}${sessionRef}${contextRef}`;
+	} else if (cached.exitCode === 0 && cached.timeoutWrapUp) {
+		text = `${formatTimeoutWrapUpOutcome(
+			{ ...cached, timeoutWrapUp: cached.timeoutWrapUp },
+			formatElapsed,
+		)}${sessionRef}${contextRef}`;
 	} else {
 		const verb =
 			cached.status === "completed" ? "completed" : cached.status === "cancelled" ? "was cancelled" : "failed";
@@ -85,6 +90,7 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 			summary: cached.summary,
 			sessionFile: cached.sessionFile,
 			...getTimeoutResultDetails(cached),
+			...(cached.timeoutWrapUp ? { timeoutWrapUp: cached.timeoutWrapUp } : {}),
 			...(cached.errorMessage ? { errorMessage: cached.errorMessage } : {}),
 		},
 	};
