@@ -10,6 +10,7 @@ import { getPiInvocation, getPiShellParts, getSubagentChildProcessEnv } from "..
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "../launch/context-boundary.ts";
 import { parseEnvString } from "../launch/env.ts";
 import { buildInteractiveSentinelShellCommands } from "../launch/interactive-sentinel.ts";
+import { resolveSubagentTimeoutState } from "../launch/policy.ts";
 import {
 	getExtensionLaunchArgs,
 	getPersistedPromptLaunchArgs,
@@ -38,6 +39,7 @@ import {
 	shellEscape,
 } from "../mux.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
+import { clearSubagentTimeoutSidecar, readSubagentTimeoutSidecar } from "../session/timeout-sidecar.ts";
 import { getEntryCount } from "../session/session.ts";
 import {
 	getDoneSentinelFile,
@@ -55,6 +57,12 @@ import {
 	resolveSpawnPolicy,
 } from "../spawn/policy.ts";
 import { PI_SUBAGENT_CONTEXT_WARN_STEP, PI_SUBAGENT_CONTEXT_WARN_THRESHOLD } from "../tools/context-reminders.ts";
+import {
+	PI_SUBAGENT_IDLE_TIMEOUT,
+	PI_SUBAGENT_TIMEOUT,
+	PI_SUBAGENT_TIMEOUT_STARTED_AT,
+	PI_SUBAGENT_TIMEOUT_WARN_THRESHOLD,
+} from "../tools/timeout-reminders.ts";
 import type { RunningSubagent, SubagentResult } from "../types.ts";
 import {
 	claimSpawnWidthSlot,
@@ -299,6 +307,14 @@ async function resumeSubagentSessionWithoutWidth(
 
 	const entryCountBefore = getEntryCount(sessionFile);
 	clearSubagentExitSidecar(sessionFile);
+	// Read the previous verdict before clearing it: it carries the budgets the
+	// killed run was under, which is the only record for a session mode that
+	// never persisted launch metadata.
+	const previousTimeout = readSubagentTimeoutSidecar(sessionFile);
+	// The previous run's verdict is spent. Clearing it here is what lets a
+	// resumed run that finishes cleanly release a session an earlier timeout
+	// had flagged, while a resumed run that times out again writes a fresh one.
+	clearSubagentTimeoutSidecar(sessionFile);
 	const subagentDonePath = join(dirname(fileURLToPath(import.meta.url)), "..", "tools", "subagent-done.ts");
 	const savedExtensions = invocationMetadata ? invocationMetadata.extensions : readSubagentExtensionEntry(sessionFile);
 	const extensionArgs =
@@ -377,6 +393,20 @@ async function resumeSubagentSessionWithoutWidth(
 	}
 	resumeEnvVars[PI_SUBAGENT_CONTEXT_WARN_THRESHOLD] = invocationMetadata?.contextWarnThreshold ?? "";
 	resumeEnvVars[PI_SUBAGENT_CONTEXT_WARN_STEP] = invocationMetadata?.contextWarnStep ?? "";
+	// Budget inheritance: a resumed run is bounded exactly like the launch that
+	// created the session, so resuming a child that ran away cannot run away
+	// unbounded.
+	const resumeStartTime = Date.now();
+	// Launch metadata is authoritative; the previous verdict is the fallback for
+	// sessions that never persisted any.
+	const resumedTimeout = invocationMetadata?.timeout ?? previousTimeout?.budget?.timeoutSeconds;
+	const resumedIdleTimeout = invocationMetadata?.idleTimeout ?? previousTimeout?.budget?.idleTimeoutSeconds;
+	resumeEnvVars[PI_SUBAGENT_TIMEOUT] = resumedTimeout ? String(resumedTimeout) : "";
+	resumeEnvVars[PI_SUBAGENT_IDLE_TIMEOUT] = resumedIdleTimeout ? String(resumedIdleTimeout) : "";
+	resumeEnvVars[PI_SUBAGENT_TIMEOUT_WARN_THRESHOLD] = invocationMetadata?.timeoutWarnThreshold ?? "";
+	if (resumedTimeout || resumedIdleTimeout) {
+		resumeEnvVars[PI_SUBAGENT_TIMEOUT_STARTED_AT] = String(resumeStartTime);
+	}
 	resumeEnvVars.PI_SUBAGENT_NAME = invocationMetadata?.name ?? name;
 	if (resumedAgent) resumeEnvVars.PI_SUBAGENT_AGENT = resumedAgent;
 	resumeEnvVars.PI_SUBAGENT_SESSION = sessionFile;
@@ -401,7 +431,12 @@ async function resumeSubagentSessionWithoutWidth(
 		blocking: resumedAsync === false,
 		autoExit: resumedAutoExit,
 		reportContextUsage: invocationMetadata?.reportContextUsage ?? true,
-		startTime: Date.now(),
+		...resolveSubagentTimeoutState({
+			timeout: resumedTimeout,
+			idleTimeout: resumedIdleTimeout,
+			onTimeout: invocationMetadata?.onTimeout ?? (previousTimeout?.blocksResume ? "block-resume" : undefined),
+		}),
+		startTime: resumeStartTime,
 		sessionFile,
 		launchEntryCount: entryCountBefore,
 		modelContextWindow: runtime.getContextWindow(invocationMetadata?.modelRef),

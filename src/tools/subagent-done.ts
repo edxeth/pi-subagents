@@ -11,6 +11,7 @@ import { PI_SUBAGENT_APPEND_SYSTEM_PROMPT } from "../launch/append-system.ts";
 import { getPublishedRunningSubagentCount } from "../runtime/nested-lifecycle.ts";
 import { installSubagentContextReminders } from "./context-reminders.ts";
 import { createExitSignalWriter } from "./exit-signal.ts";
+import { installSubagentTimeoutReminders } from "./timeout-reminders.ts";
 import { type FinalContextSnapshot, getFinalContextSnapshot } from "./final-context-snapshot.ts";
 import { ProviderErrorRecoveryController, resolveProviderRecoveryDelaysMs } from "./provider-error-recovery.ts";
 import { registerSetTabTitleTool, shouldRegisterSetTabTitleTool } from "./set-tab-title.ts";
@@ -144,6 +145,7 @@ export default function (pi: ExtensionAPI) {
 	let outputTokens = 0;
 	let finalContextUsage: FinalContextSnapshot | undefined;
 	const contextReminders = installSubagentContextReminders(pi);
+	installSubagentTimeoutReminders(pi);
 
 	function requestShutdown(ctx: { shutdown: () => void }) {
 		setTimeout(() => {

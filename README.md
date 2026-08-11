@@ -169,6 +169,10 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `context-warn-threshold` | `off` | Send the sub-agent a wrap-up warning when its context window reaches this percentage (`1%`–`99%`). Two more warnings follow at each `context-warn-step` above it. Example: `80%` warns at 80%, 85%, and 90%. |
 | `context-warn-step` | `5%` | The percentage gap between each warning (minimum `1%`). A warning above 99% moves down to 99% so it still arrives before compaction. Decimals round down. |
 | `report-context-usage` | `true` | Add the child's final context use to the result that the parent receives. |
+| `timeout` | unset | Whole seconds for the whole run. Pi stops the child at this limit. Omit for no limit. |
+| `idle-timeout` | unset | Whole seconds without output from the child. Pi stops the child at this limit. Omit for no limit. |
+| `timeout-warn-threshold` | `false` | Warn the child at this percentage (`1%`–`99%`) of each limit you set, so it can report partial work before it stops. `true` means `80%`. Decimals round down. Any other value turns the warning off. |
+| `on-timeout` | `report` | What the parent can do after a limit stops the child. `report` keeps `subagent_resume` available, and the new run gets the same limits. `block-resume` refuses the resume. Any other value fails to load. |
 | `spawning` | `false` | Let this child launch subagents of its own. `true` lets it launch any agent. A comma-separated list of agent names (for example `spawning: researcher, reviewer`) lets it launch only those agents. |
 | `spawn-depth` | `1` | How many levels of subagents may run below this child. Each subagent it launches gets one less. A subagent left with `0` has no launching tools, so the chain stops. Omit to use the default. |
 | `spawn-width` | omitted | The most subagents this child may run at the same time. Must be a positive whole number. Omit for no limit (a hard ceiling of 16 always applies). |
@@ -246,6 +250,86 @@ Warned results also omit the `Resume: pi --session …` line, so the parent is n
 `report-context-usage: false` hides the token counts but still reports the early stop, because a parent that does not know the reason resumes a child that cannot work.
 
 `subagent_resume` also refuses such a session, because resuming it gives the child no room to work. You can still resume it yourself from the `/subagents` overlay.
+
+### Stop a runaway child with time limits
+
+Every child runs with no time limit. `timeout` and `idle-timeout` are two separate limits. You can set one, both, or neither.
+
+```yaml
+---
+name: scout
+timeout: 900
+idle-timeout: 180
+timeout-warn-threshold: 80%
+---
+```
+
+`timeout` is a clock on the whole run. It starts when the parent launches the child. Use it for a child that can work forever without finishing.
+
+`idle-timeout` measures time without output. Use it for a child that stops working and never reports, for example one that waits inside a tool that never returns.
+
+Only the child's own work counts as output. Its messages and its tool results count. A message that Pi writes into the child's session does not count. Time inside one long tool call does not count either.
+
+That last rule is the purpose of the field. A child stuck inside a tool call is what `idle-timeout` catches. But a slow build looks the same to Pi. Set `idle-timeout` higher than the slowest tool call the child makes.
+
+The idle clock starts at launch, not at the child's first word. A child that hangs before it says anything must also be caught. Set the value high enough for the process start and the first model reply. A few tens of seconds is the smallest useful value.
+
+Both fields take whole seconds. If the value is not a positive whole number, the agent file fails to load. A typo must not become "no limit", because that is the problem the field prevents.
+
+Both limits work for a background child and for a child in a pane. For a background child, Pi sends `SIGTERM` to the process group. Five seconds later Pi sends `SIGKILL`, but only while the process group is still alive. For a child in a pane, Pi closes the pane, because there is no separate process to signal. If the close fails, Pi tries again. If every try fails, the result says so.
+
+#### Warn the child before it stops
+
+`timeout-warn-threshold` is off until you set it. It warns the child at that percentage of each limit you set. If you set both limits, the child gets two warnings, one for each.
+
+The warning for `timeout` comes one time in a run. The warning for `idle-timeout` comes again after each time the child produces output, because the idle limit also starts again then.
+
+The child reads this:
+
+```text
+Time limit: you have been running for 720s, and your limit is 900s for this
+whole run. About 180s remain. At the limit the system stops you, and work you
+did not report is lost. Stop taking on new work. Report your result now, even
+if it is incomplete.
+```
+
+The message explains itself, because the child never reads the agent file. It does not use the field names from this document.
+
+This warning is the difference between a stop that gives you partial work and a stop that gives you nothing. It cannot help a child that is already frozen inside a tool call. That child reads the message only after the call returns, so the hard stop covers this case.
+
+#### What the parent receives
+
+A stopped child cannot report its own result, so the parent reports it:
+
+```text
+Sub-agent "scout" ran out of time, so the system stopped it after 15m. Its
+agent file sets a limit of 15m for the whole run.
+
+Partial work from before it stopped. It is incomplete, so check it before you
+trust it:
+
+Mapped the auth flow. The session layer is untouched.
+
+A sub-agent that used its whole limit once usually does it again. A resume gets
+the same limit, so it can stop at the same point. It is usually better to
+finish the work yourself, or to start a new sub-agent with a smaller task.
+
+Session: /path/to/child.jsonl
+To continue this work, use the subagent_resume tool. It applies the same limit
+again. Do not open this file with a plain pi --session command, because that
+run has no limit.
+```
+
+#### Resume after a stop
+
+A resume is allowed by default. A time limit means that the child ran out of clock. It does not mean that the session is broken.
+
+A resumed run gets the same limits as the first run. A child that loops stops again at the same point instead of running forever. This is why a resume is safe to allow.
+
+Use the `subagent_resume` tool to continue the work. A plain `pi --session` run is not a tracked child, so that run has no limit.
+
+Set `on-timeout: block-resume` when a second partial run is not safe. An example is an agent that writes to something outside the repository. Then `subagent_resume` refuses the session, and the result hides the session line from the model. You can still resume the session yourself from the `/subagents` overlay.
+
 
 ### Report final context use to the parent
 

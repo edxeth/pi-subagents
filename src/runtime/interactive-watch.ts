@@ -3,13 +3,48 @@ import { traceSubagentLaunch } from "../launch/trace.ts";
 import type { PollResult } from "../mux/poll.ts";
 import { isZellijSurfaceLive } from "../mux/zellij-runtime.ts";
 import { consumeSubagentExitSignal, getMuxBackend, pollForExit } from "../mux.ts";
-import { findLastSubagentOutputWithSource, getNewEntries } from "../session/session.ts";
+import { hasSubagentExitSidecar } from "../session/exit-sidecar.ts";
+import { findLastSubagentOutputWithSource, getEntryCount, getNewEntries } from "../session/session.ts";
+import { writeSubagentTimeoutSidecar } from "../session/timeout-sidecar.ts";
 import type { RunningSubagent, SubagentResult, SubagentSummarySource } from "../types.ts";
 import { resolveFinalContextUsage } from "./final-context-usage.ts";
+import { checkSubagentTimeout, hasChildProgress, observeSubagentProgress } from "./timeout-budget.ts";
 
 export interface InteractiveWatchRuntime {
 	cleanupNoSessionSessionFile(running: RunningSubagent): void;
 	closeRunningSurface(running: RunningSubagent): Promise<void>;
+}
+
+/**
+ * Kill a pane child by closing the surface that owns it.
+ *
+ * A pane child has no pid here, so this is the only lever, and a close that
+ * fails silently would leave the runaway alive while the parent is told it was
+ * killed. Retrying and recording the failure is the closest equivalent to the
+ * background path's SIGTERM/SIGKILL escalation.
+ */
+async function closeTimedOutSurface(running: RunningSubagent, runtime: InteractiveWatchRuntime): Promise<void> {
+	const backoffMs = [0, 250, 1000];
+	for (let attempt = 0; attempt < backoffMs.length; attempt++) {
+		if (backoffMs[attempt] > 0) await new Promise((resolve) => setTimeout(resolve, backoffMs[attempt]));
+		try {
+			await runtime.closeRunningSurface(running);
+			running.timeoutKillFailed = false;
+			return;
+		} catch (error) {
+			traceSubagentLaunch("interactive.timeout.closeFailed", {
+				name: running.name,
+				surface: running.surface,
+				attempt: attempt + 1,
+				errorMessage: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+	// Every attempt failed, so the pane may still be alive. The parent must not
+	// be handed a flat "was killed" for a child that might still be running, and
+	// the watcher must not keep polling a surface that will not die.
+	running.timeoutKillFailed = true;
+	running.abortController?.abort();
 }
 
 /**
@@ -24,6 +59,36 @@ export function pickFinalUsageSource(
 	return pollResult.contextTokens === undefined ? (exitSignal ?? pollResult) : pollResult;
 }
 
+/**
+ * Record a timeout kill and return the fields the result carries, or nothing
+ * when no budget was spent.
+ *
+ * Only a ping outranks the kill here. Closing the pane makes the child's Pi
+ * process publish an ordinary `done` on its way out, so treating that as the
+ * child's own verdict would erase every timeout the runtime just enforced.
+ */
+function recordTimeoutOutcome(
+	running: RunningSubagent,
+	pollResult?: PollResult,
+): Pick<SubagentResult, "timedOut" | "timedOutAfter" | "timeoutBlocksResume" | "timeoutKillFailed"> {
+	const expiry = running.timeoutExpiry;
+	if (!expiry) return {};
+	if (pollResult?.reason === "ping") return {};
+	if (!running.noSession) {
+		writeSubagentTimeoutSidecar(running.sessionFile, {
+			kind: expiry.kind,
+			blocksResume: running.timeoutBlocksResume === true,
+			...(running.timeoutBudget ? { budget: running.timeoutBudget } : {}),
+		});
+	}
+	return {
+		timedOut: expiry.kind,
+		timedOutAfter: expiry.seconds,
+		...(running.timeoutBlocksResume === true ? { timeoutBlocksResume: true } : {}),
+		...(running.timeoutKillFailed === true ? { timeoutKillFailed: true } : {}),
+	};
+}
+
 export async function watchSubagent(
 	running: RunningSubagent,
 	runtime: InteractiveWatchRuntime,
@@ -33,14 +98,27 @@ export async function watchSubagent(
 	if (!surface) throw new Error("watchSubagent called on a background agent (no surface)");
 
 	const updateStats = () => {
+		const now = Date.now();
 		try {
-			if (!existsSync(sessionFile)) return;
-			const stat = statSync(sessionFile);
-			running.entries = readFileSync(sessionFile, "utf8")
-				.split("\n")
-				.filter((line) => line.trim()).length;
-			running.bytes = stat.size;
+			if (existsSync(sessionFile)) {
+				const stat = statSync(sessionFile);
+				const previousEntries = running.entries ?? 0;
+				const entries = getEntryCount(sessionFile);
+				// Only the child's own output restarts the idle clock; a steer the
+				// runtime wrote into the session is not the child making progress.
+				const produced =
+					entries > previousEntries ? hasChildProgress(getNewEntries(sessionFile, previousEntries)) : false;
+				observeSubagentProgress(running, stat.size, now, produced);
+				running.entries = entries;
+			}
 		} catch {}
+		const expired = checkSubagentTimeout(running, now);
+		if (!expired) return;
+		// A child that already published its own outcome finished on its own
+		// terms; the deadline it crossed while exiting is not a runaway.
+		if (hasSubagentExitSidecar(running.sessionFile)) return;
+		running.timeoutExpiry = expired;
+		void closeTimedOutSurface(running, runtime);
 	};
 
 	try {
@@ -71,6 +149,7 @@ export async function watchSubagent(
 		const errorMessage = pollResult.reason === "error" ? pollResult.errorMessage : undefined;
 		const exitSignal = pollResult.outputTokens === undefined ? consumeSubagentExitSignal(sessionFile) : undefined;
 		const finalContextUsage = resolveFinalContextUsage(running, pickFinalUsageSource(pollResult, exitSignal));
+		const timeoutFields = recordTimeoutOutcome(running, pollResult);
 		cleanupDoneSentinel(running);
 		try {
 			await runtime.closeRunningSurface(running);
@@ -83,10 +162,13 @@ export async function watchSubagent(
 			summary,
 			summarySource,
 			sessionFile: running.noSession ? undefined : sessionFile,
-			exitCode: pollResult.exitCode,
+			// A pane closed by the runtime still reports a clean exit; a killed
+			// runaway must never be filed as a success.
+			exitCode: timeoutFields.timedOut ? pollResult.exitCode || 1 : pollResult.exitCode,
 			elapsed,
 			outputTokens: pollResult.outputTokens ?? exitSignal?.outputTokens,
 			...finalContextUsage,
+			...timeoutFields,
 			ping: pollResult.ping,
 			errorMessage,
 		};
@@ -104,6 +186,25 @@ export async function watchSubagent(
 			await runtime.closeRunningSurface(running);
 		} catch {}
 		runtime.cleanupNoSessionSessionFile(running);
+
+		// A spent budget explains the failed poll: the watcher closed the surface
+		// out from under it. Reporting "cancelled" or a raw surface error here
+		// would hide the only fact the parent needs.
+		const timeoutFields = recordTimeoutOutcome(running);
+		if (timeoutFields.timedOut) {
+			const { summary, summarySource } = getSummary(running, { reason: "error", exitCode: 1 });
+			return {
+				name,
+				task,
+				summary,
+				summarySource,
+				sessionFile: running.noSession ? undefined : sessionFile,
+				exitCode: 1,
+				elapsed: Math.floor((Date.now() - startTime) / 1000),
+				outputTokens: 0,
+				...timeoutFields,
+			};
+		}
 
 		if (signal.aborted) {
 			return {

@@ -4,6 +4,15 @@ export function getSubagentExitSidecarPath(sessionFile: string): string {
 	return `${sessionFile}.exit`;
 }
 
+/**
+ * True once the child has published an outcome of its own. The parent checks
+ * this before starting a timeout kill: a child that already recorded a verdict
+ * finished on its own terms and must not be relabelled as a runaway.
+ */
+export function hasSubagentExitSidecar(sessionFile: string): boolean {
+	return existsSync(getSubagentExitSidecarPath(sessionFile));
+}
+
 export function clearSubagentExitSidecar(sessionFile: string): void {
 	rmSync(getSubagentExitSidecarPath(sessionFile), { force: true });
 }

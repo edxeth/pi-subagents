@@ -31,6 +31,14 @@ export interface AgentDefaults {
 	noSession?: boolean;
 	trustProject?: boolean;
 	taskExpansion?: "shell";
+	/** Wall-clock seconds a child may run before the parent kills it. */
+	timeout?: number;
+	/** Seconds a child may go without session growth before the parent kills it. */
+	idleTimeout?: number;
+	/** Raw `timeout-warn-threshold` value; the child resolves it. */
+	timeoutWarnThreshold?: string;
+	/** What the parent allows after a timeout kill. Defaults to `report`. */
+	onTimeout?: "report" | "block-resume";
 	contextWarnThreshold?: string;
 	contextWarnStep?: string;
 	reportContextUsage?: boolean;
@@ -92,6 +100,10 @@ function parseAgentDefinition(
 	const noSessionRaw = get("no-session");
 	const trustProjectRaw = get("trust-project");
 	const taskExpansionRaw = get("task-expansion");
+	const timeoutRaw = get("timeout");
+	const idleTimeoutRaw = get("idle-timeout");
+	const timeoutWarnThresholdRaw = get("timeout-warn-threshold");
+	const onTimeoutRaw = get("on-timeout");
 	const contextWarnThresholdRaw = get("context-warn-threshold");
 	const contextWarnStepRaw = get("context-warn-step");
 	const reportContextUsageRaw = get("report-context-usage");
@@ -107,6 +119,11 @@ function parseAgentDefinition(
 	const spawning = parseSpawning(spawningRaw);
 	const spawnDepth = parsePositiveInteger("spawn-depth", spawnDepthRaw, hasKey("spawn-depth"));
 	const spawnWidth = parsePositiveInteger("spawn-width", spawnWidthRaw, hasKey("spawn-width"));
+	// A malformed budget must never resolve to "unbounded": that turns a typo
+	// into the exact runaway the field exists to prevent.
+	const timeout = parsePositiveInteger("timeout", timeoutRaw, hasKey("timeout"));
+	const idleTimeout = parsePositiveInteger("idle-timeout", idleTimeoutRaw, hasKey("idle-timeout"));
+	const onTimeout = parseOnTimeout(onTimeoutRaw, hasKey("on-timeout"), path);
 	const visibleTo = parseVisibleTo(get("visible-to"));
 	return {
 		name: get("name") ?? basename(path, ".md"),
@@ -143,6 +160,10 @@ function parseAgentDefinition(
 		trustProject: trustProjectRaw != null ? trustProjectRaw === "true" : undefined,
 		mode: modeRaw === "background" || modeRaw === "interactive" ? modeRaw : undefined,
 		taskExpansion: taskExpansionRaw === "shell" ? "shell" : undefined,
+		...(timeout !== undefined ? { timeout } : {}),
+		...(idleTimeout !== undefined ? { idleTimeout } : {}),
+		timeoutWarnThreshold: timeoutWarnThresholdRaw,
+		onTimeout,
 		contextWarnThreshold: contextWarnThresholdRaw,
 		contextWarnStep: contextWarnStepRaw,
 		reportContextUsage: reportContextUsageRaw != null ? reportContextUsageRaw === "true" : undefined,
@@ -181,6 +202,23 @@ function parsePositiveInteger(key: string, raw: string | undefined, present: boo
 		throw new Error(`${key} must be a positive safe integer greater than 0.`);
 	}
 	return Number(raw);
+}
+
+/**
+ * Resolve the `on-timeout` policy, rejecting anything unrecognised.
+ *
+ * This one fails closed on purpose. Silently taking the permissive default
+ * would mean a typo like `block-resuem` re-enables resume for exactly the
+ * agent that asked to be protected from a second partial run.
+ */
+function parseOnTimeout(
+	raw: string | undefined,
+	present: boolean,
+	path: string,
+): "report" | "block-resume" | undefined {
+	if (!present) return undefined;
+	if (raw === "report" || raw === "block-resume") return raw;
+	throw new Error(`on-timeout must be "report" or "block-resume" (got ${JSON.stringify(raw ?? "")}) in ${path}.`);
 }
 
 function parseVisibleTo(raw: string | undefined): string[] {

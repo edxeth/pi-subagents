@@ -3,6 +3,7 @@ import type { CompletedSubagentResult, DeliveryState, RunningSubagent, SubagentR
 import { formatContextExitNotice, formatFinalContextUsage, formatSessionRef } from "./final-context-usage.ts";
 import { hasRealSubagentOutput } from "./state.ts";
 import type { WaitRuntime } from "./wait.ts";
+import { formatTimeoutOutcome, getTimeoutResultDetails } from "./timeout-budget.ts";
 import { formatElapsed } from "./wiring.ts";
 
 function getSubagentWaitPingResult(running: RunningSubagent, result: SubagentResult, deliveryState: DeliveryState) {
@@ -36,7 +37,15 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 	const contextRef =
 		cached.reportContextUsage === false ? formatContextExitNotice(cached) : formatFinalContextUsage(cached);
 	let text: string;
-	if (cached.errorMessage) {
+	if (cached.timedOut) {
+		// A budget kill is the dominant fact about this run: without it the parent
+		// reads an ordinary non-zero exit and retries the same runaway.
+		text = `${formatTimeoutOutcome(
+			{ ...cached, timedOut: cached.timedOut },
+			hasRealSubagentOutput(cached),
+			formatElapsed,
+		)}${sessionRef}${contextRef}`;
+	} else if (cached.errorMessage) {
 		const resultBody = hasRealSubagentOutput(cached)
 			? `Last output before the failure (may be incomplete — verify before trusting):\n\n${cached.summary}`
 			: cached.contextExhausted
@@ -75,6 +84,7 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 			contextWindow: cached.contextWindow,
 			summary: cached.summary,
 			sessionFile: cached.sessionFile,
+			...getTimeoutResultDetails(cached),
 			...(cached.errorMessage ? { errorMessage: cached.errorMessage } : {}),
 		},
 	};

@@ -31,7 +31,7 @@ const SECTION_FIELDS = [
 	},
 	{
 		title: "Runtime",
-		fields: ["mode", "session-mode", "async", "auto-exit", "parent-close", "no-session", "launched"],
+		fields: ["mode", "session-mode", "async", "auto-exit", "parent-close", "no-session", "timeout", "launched"],
 	},
 	{
 		title: "Model",
@@ -156,6 +156,11 @@ function buildSections(defs: AgentDetailDefaults | null, meta?: PersistedSubagen
 		label: "no-session",
 		value: String(meta ? meta.noSession : (defs?.noSession ?? false)),
 	});
+	const wallClock = meta?.timeout ?? defs?.timeout;
+	const idle = meta?.idleTimeout ?? defs?.idleTimeout;
+	const budgets = [wallClock ? `${wallClock}s` : "", idle ? `idle ${idle}s` : ""].filter(Boolean);
+	const onTimeout = (meta?.onTimeout ?? defs?.onTimeout ?? "report") as string;
+	fields.push({ label: "timeout", value: budgets.length ? `${budgets.join(" / ")} (${onTimeout})` : "none" });
 
 	return SECTION_FIELDS.map((section) => ({
 		title: section.title,

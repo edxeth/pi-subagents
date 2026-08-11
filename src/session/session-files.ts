@@ -67,6 +67,12 @@ export interface PersistedSubagentLaunchMetadata {
 	systemPrompt?: string;
 	boundarySystemPrompt: boolean;
 	taskExpansion?: "shell";
+	/** Wall-clock budget the parent re-arms when this session is resumed. */
+	timeout?: number;
+	/** Idle budget the parent re-arms when this session is resumed. */
+	idleTimeout?: number;
+	timeoutWarnThreshold?: string;
+	onTimeout?: "report" | "block-resume";
 	contextWarnThreshold?: string;
 	contextWarnStep?: string;
 	reportContextUsage?: boolean;

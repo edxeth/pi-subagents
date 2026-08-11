@@ -2,6 +2,7 @@ import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-ag
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { endedUnderContextPressure } from "../session/completion-reason.ts";
+import { readSubagentTimeoutSidecar } from "../session/timeout-sidecar.ts";
 import { type ResumeServiceRuntime, resumeSubagentSession } from "../runtime/resume-service.ts";
 import { shouldAwaitSubagentLaunch } from "../runtime/running-registry.ts";
 import { getSubagentBatchStopMetadata, requestSubagentBatchStop } from "../runtime/state.ts";
@@ -124,6 +125,17 @@ export function registerSubagentResumeTool(
 				throw new Error(
 					"This sub-agent stopped early as instructed by its context-warning policy, and its context window is spent. " +
 						"Resuming gives it no room to work. Launch a fresh sub-agent with the remaining work instead.",
+				);
+			}
+			// A budget kill is recoverable by default — a resume re-arms the same
+			// budget, so it cannot run away again. Only an agent that opted into
+			// `on-timeout: block-resume` refuses, because a second partial run of a
+			// non-idempotent child is not safe to attempt.
+			const timedOut = readSubagentTimeoutSidecar(params.sessionFile);
+			if (timedOut?.blocksResume) {
+				throw new Error(
+					`The system stopped this sub-agent because it went past its ${timedOut.kind === "idle-timeout" ? "limit for time without output" : "time limit"}. ` +
+						"Its agent file does not allow a resume after that. Start a new sub-agent with a smaller task instead.",
 				);
 			}
 

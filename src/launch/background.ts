@@ -10,10 +10,12 @@ import { buildAppendSystemInheritancePlan } from "./append-system.ts";
 import { getPiInvocation, getSubagentChildProcessEnv } from "./child-command.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
 import { coordinateSubagentLaunch } from "./launch-coordinator.ts";
+import { PI_SUBAGENT_TIMEOUT_STARTED_AT } from "../tools/timeout-reminders.ts";
 import {
 	resolveSubagentNoContextFiles,
 	resolveSubagentParentClosePolicy,
 	resolveSubagentReportContextUsage,
+	resolveSubagentTimeoutState,
 } from "./policy.ts";
 import {
 	getApprovalLaunchArgs,
@@ -91,6 +93,11 @@ export async function launchBackgroundSubagent(
 	}
 
 	const { envVars, launchEntryCount } = launch;
+	// The child warns against the parent's clock so its "seconds remaining"
+	// matches the deadline the parent will actually enforce.
+	if (prepared.agentDefs?.timeout || prepared.agentDefs?.idleTimeout) {
+		envVars[PI_SUBAGENT_TIMEOUT_STARTED_AT] = String(startTime);
+	}
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
 
 	const invocation = getPiInvocation(args);
@@ -119,6 +126,7 @@ export async function launchBackgroundSubagent(
 		autoExit: prepared.agentDefs?.autoExit ?? false,
 		noSession,
 		reportContextUsage: resolveSubagentReportContextUsage(prepared.agentDefs),
+		...resolveSubagentTimeoutState(prepared.agentDefs),
 		childProcess: child,
 		startTime,
 		sessionFile: prepared.subagentSessionFile,

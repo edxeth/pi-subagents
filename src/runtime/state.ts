@@ -12,6 +12,11 @@ function getSubagentCompletionStatus(
 	running?: Pick<RunningSubagent, "mode" | "autoExit">,
 ): SubagentCompletionStatus {
 	if (result.error === "cancelled") return "cancelled";
+	// A runaway the runtime had to kill is never a completion, whatever it
+	// managed to print before the signal. Without this an interactive child with
+	// `auto-exit: false` and real output falls through to the operator-close
+	// branch below and is filed as a success.
+	if (result.timedOut) return "failed";
 	// Provider/network errors may set errorMessage with exitCode 0
 	// (Pi exits cleanly even when model calls fail after retry exhaustion).
 	if (result.errorMessage) return "failed";

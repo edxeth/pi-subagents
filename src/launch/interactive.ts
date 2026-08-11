@@ -14,10 +14,12 @@ import { getPiShellParts } from "./child-command.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
 import { buildInteractiveSentinelShellCommands } from "./interactive-sentinel.ts";
 import { coordinateSubagentLaunch } from "./launch-coordinator.ts";
+import { PI_SUBAGENT_TIMEOUT_STARTED_AT } from "../tools/timeout-reminders.ts";
 import {
 	resolveSubagentNoContextFiles,
 	resolveSubagentParentClosePolicy,
 	resolveSubagentReportContextUsage,
+	resolveSubagentTimeoutState,
 } from "./policy.ts";
 import {
 	getApprovalLaunchArgs,
@@ -156,6 +158,12 @@ export async function launchInteractiveSubagent(
 		...launch.envVars,
 		...(zellijTarget ? { ZELLIJ_SESSION_NAME: zellijTarget.sessionName } : {}),
 		...(ordinarySurface ? { PI_SUBAGENT_SURFACE: ordinarySurface } : {}),
+		// The child warns against the parent's clock, not its own: a pane child
+		// starts after a shell-ready delay and would otherwise report time it
+		// has already lost as time it still has.
+		...(prepared.agentDefs?.timeout || prepared.agentDefs?.idleTimeout
+			? { [PI_SUBAGENT_TIMEOUT_STARTED_AT]: String(startTime) }
+			: {}),
 	};
 	const envPrefix = `${Object.entries(envVars)
 		.map(([key, value]) => `${key}=${shellEscape(value)}`)
@@ -217,6 +225,7 @@ export async function launchInteractiveSubagent(
 		autoExit: prepared.agentDefs?.autoExit ?? false,
 		noSession,
 		reportContextUsage: resolveSubagentReportContextUsage(prepared.agentDefs),
+		...resolveSubagentTimeoutState(prepared.agentDefs),
 		surface,
 		startTime,
 		sessionFile: prepared.subagentSessionFile,

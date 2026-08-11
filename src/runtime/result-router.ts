@@ -9,6 +9,7 @@ import {
 	runningSubagents,
 	stopAfterCurrentSubagentBatch,
 } from "./state.ts";
+import { formatTimeoutOutcome, getTimeoutResultDetails } from "./timeout-budget.ts";
 
 interface ParentMessageSink {
 	sendMessage(message: unknown, options: unknown): void;
@@ -98,6 +99,7 @@ export function deliverCompletedSubagentResult(
 				contextTokens: completed.contextTokens,
 				contextWindow: completed.contextWindow,
 				sessionFile: completed.sessionFile,
+				...getTimeoutResultDetails(completed),
 				...(completed.errorMessage ? { errorMessage: completed.errorMessage } : {}),
 			},
 		},
@@ -148,6 +150,15 @@ function getCompletedSubagentContent(
 	formatElapsed: (elapsed: number) => string,
 	sessionRef: string,
 ): string {
+	// A budget kill is the dominant fact about this run: without it the parent
+	// reads an ordinary non-zero exit and retries the same runaway.
+	if (completed.timedOut) {
+		return `${formatTimeoutOutcome(
+			{ ...completed, timedOut: completed.timedOut },
+			hasRealSubagentOutput(completed),
+			formatElapsed,
+		)}${sessionRef}`;
+	}
 	if (completed.errorMessage) {
 		const resultBody = hasRealSubagentOutput(completed)
 			? `Last output before the failure (may be incomplete — verify before trusting):\n\n${completed.summary}`

@@ -227,6 +227,20 @@ export function runPi(ctx, prompt, extraEnv = {}) {
 		PI_ARTIFACT_PROJECT_ROOT: "",
 		...extraEnv,
 	};
+	// The run under test is a root session. Spawn-grant variables must be absent
+	// rather than blank: an empty PI_SUBAGENT_SPAWNABLE is a deny-all grant, not
+	// the root default. Inheriting them — which happens whenever these scripts
+	// are run from inside a subagent — makes every child launch fail with
+	// "Spawn whitelist does not include target agent".
+	for (const name of [
+		"PI_SUBAGENT_SPAWNABLE",
+		"PI_SUBAGENT_SPAWN_BUDGET",
+		"PI_SUBAGENT_SPAWN_DEPTH",
+		"PI_SUBAGENT_SPAWN_WIDTH",
+		"PI_SUBAGENT_SPAWN_WIDTH_EFFECTIVE",
+	]) {
+		if (!(name in extraEnv)) delete envOverride[name];
+	}
 
 	return execFileSync(
 		"pi",
@@ -328,4 +342,27 @@ export function getAllSubagentChildren(events) {
 		}
 	}
 	return children;
+}
+
+/**
+ * Details for one launched child, whichever shape the parent produced. A model
+ * is free to put several launches in one batched call, and a test that only
+ * understands single results fails for a reason that has nothing to do with
+ * what it is testing.
+ */
+export function findSubagentChild(events, agent) {
+	return getAllSubagentChildren(events).find((child) => child.agent === agent) ?? null;
+}
+
+/**
+ * All model-visible text from subagent tool results, joined. Batched launches
+ * report their children in one joined block, so per-result text is not a
+ * reliable unit to assert against.
+ */
+export function getAllSubagentText(events) {
+	return getToolResults(events, "subagent")
+		.flatMap((result) => result.content ?? [])
+		.filter((block) => block.type === "text" && typeof block.text === "string")
+		.map((block) => block.text)
+		.join("\n\n");
 }

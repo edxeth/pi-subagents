@@ -21,6 +21,10 @@
 		"test:e2e-live-extensions": "node scripts/test-e2e-live-extensions.mjs",
 		"test:e2e-live-stop-after-turn": "node scripts/test-e2e-live-stop-after-turn.mjs",
 		"test:e2e-live-mixed-batch": "node scripts/test-e2e-live-mixed-batch.mjs",
+		"test:frontmatter-timeout": "node scripts/test-frontmatter-timeout.mjs",
+		"test:frontmatter-idle-timeout": "node scripts/test-frontmatter-idle-timeout.mjs",
+		"test:frontmatter-timeout-warn": "node scripts/test-frontmatter-timeout-warn.mjs",
+		"test:frontmatter-on-timeout": "node scripts/test-frontmatter-on-timeout.mjs",
 		"test:live-herdr-mux": "node scripts/test-live-herdr-mux.mjs",
 		"test:live-herdr-pi": "node scripts/test-live-herdr-pi.mjs"
 	},

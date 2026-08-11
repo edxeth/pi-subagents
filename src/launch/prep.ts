@@ -11,6 +11,11 @@ import {
 	type SubagentSessionMode,
 } from "../session/session-files.ts";
 import { PI_SUBAGENT_CONTEXT_WARN_STEP, PI_SUBAGENT_CONTEXT_WARN_THRESHOLD } from "../tools/context-reminders.ts";
+import {
+	PI_SUBAGENT_IDLE_TIMEOUT,
+	PI_SUBAGENT_TIMEOUT,
+	PI_SUBAGENT_TIMEOUT_WARN_THRESHOLD,
+} from "../tools/timeout-reminders.ts";
 import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
 import { SPAWNING_TOOL_NAMES } from "../tools/tool-names.ts";
 import { parseSpawnEnv, resolveSpawnPolicy, type SpawnPolicyResult } from "../spawn/policy.ts";
@@ -381,6 +386,12 @@ export function buildPersistedSubagentLaunchMetadata(
 		...(systemPrompt ? { systemPrompt } : {}),
 		boundarySystemPrompt,
 		...(prepared.agentDefs?.taskExpansion ? { taskExpansion: prepared.agentDefs.taskExpansion } : {}),
+		...(prepared.agentDefs?.timeout ? { timeout: prepared.agentDefs.timeout } : {}),
+		...(prepared.agentDefs?.idleTimeout ? { idleTimeout: prepared.agentDefs.idleTimeout } : {}),
+		...(prepared.agentDefs?.timeoutWarnThreshold
+			? { timeoutWarnThreshold: prepared.agentDefs.timeoutWarnThreshold }
+			: {}),
+		...(prepared.agentDefs?.onTimeout ? { onTimeout: prepared.agentDefs.onTimeout } : {}),
 		...(prepared.agentDefs?.contextWarnThreshold
 			? {
 					contextWarnThreshold: prepared.agentDefs.contextWarnThreshold,
@@ -430,6 +441,9 @@ export function getBaseSubagentEnvVars(
 	}
 	envVars[PI_SUBAGENT_CONTEXT_WARN_THRESHOLD] = prepared.agentDefs?.contextWarnThreshold ?? "";
 	envVars[PI_SUBAGENT_CONTEXT_WARN_STEP] = prepared.agentDefs?.contextWarnStep ?? "";
+	envVars[PI_SUBAGENT_TIMEOUT] = prepared.agentDefs?.timeout ? String(prepared.agentDefs.timeout) : "";
+	envVars[PI_SUBAGENT_IDLE_TIMEOUT] = prepared.agentDefs?.idleTimeout ? String(prepared.agentDefs.idleTimeout) : "";
+	envVars[PI_SUBAGENT_TIMEOUT_WARN_THRESHOLD] = prepared.agentDefs?.timeoutWarnThreshold ?? "";
 	envVars.PI_SUBAGENT_NAME = params.name;
 	if (params.agent) envVars.PI_SUBAGENT_AGENT = params.agent;
 	const spawnPolicy = prepared.spawnPolicy ?? resolvePreparedSpawnPolicy(params, prepared.agentDefs);

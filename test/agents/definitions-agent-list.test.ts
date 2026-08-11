@@ -152,7 +152,7 @@ describe("agent definitions and catalog", () => {
 		);
 	});
 
-	it("ignores the removed fork, blocking, and timeout frontmatter keys", () => {
+	it("ignores the removed fork and blocking frontmatter keys while reading timeout", () => {
 		const dir = createTestDir();
 		const configDir = join(dir, "agent-root");
 		const agentsDir = join(configDir, "agents");
@@ -170,9 +170,11 @@ describe("agent definitions and catalog", () => {
 		assert.equal(resolveEffectiveSessionModeForTest({ agent: "legacy" }, defs), "lineage-only");
 		assert.equal(resolveSubagentBlockingForTest({}, defs), false);
 		assert.equal(
-			Object.keys(defs as Record<string, unknown>).some((key) => ["fork", "blocking", "timeout"].includes(key)),
+			Object.keys(defs as Record<string, unknown>).some((key) => ["fork", "blocking"].includes(key)),
 			false,
 		);
+		// `timeout` came back as a real budget; the other two stayed removed.
+		assert.equal(defs?.timeout, 30);
 	});
 
 	it("skips disabled agents and falls back to the next available definition", () => {

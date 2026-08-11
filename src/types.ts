@@ -6,6 +6,19 @@ type CompletedDelivery = "steer" | "wait";
 export type SubagentCompletionStatus = "completed" | "failed" | "cancelled";
 export type SubagentSummarySource = "subagent" | "runtime";
 export type ParentShutdownAction = "terminate" | "continue";
+/** Which runtime budget a killed child exceeded. */
+export type SubagentTimeoutKind = "timeout" | "idle-timeout";
+
+/**
+ * Wall-clock and idle budgets for one child. An omitted budget is unbounded,
+ * which is the default for every agent.
+ */
+export interface SubagentTimeoutBudget {
+	/** Seconds of total runtime since launch. */
+	timeoutSeconds?: number;
+	/** Seconds without the child's session file growing. */
+	idleTimeoutSeconds?: number;
+}
 
 export interface SubagentParamsInput {
 	name: string;
@@ -53,6 +66,14 @@ export interface SubagentResult {
 	contextWarned?: boolean;
 	/** True when the child failed while its context was already spent. */
 	contextExhausted?: boolean;
+	/** Set when the runtime killed the child for exceeding a timeout budget. */
+	timedOut?: SubagentTimeoutKind;
+	/** The budget, in seconds, that expired. */
+	timedOutAfter?: number;
+	/** True when the agent's `on-timeout` policy refuses a resume of this session. */
+	timeoutBlocksResume?: boolean;
+	/** True when the runtime could not confirm the child was terminated. */
+	timeoutKillFailed?: boolean;
 	error?: string;
 	errorMessage?: string;
 	ping?: SubagentPing;
@@ -88,6 +109,18 @@ export interface RunningSubagent {
 	autoExit?: boolean;
 	noSession?: boolean;
 	reportContextUsage?: boolean;
+	/** Budgets the watcher enforces for this child. Absent means unbounded. */
+	timeoutBudget?: SubagentTimeoutBudget;
+	/** Mirrors the agent's `on-timeout` policy for the result the parent reads. */
+	timeoutBlocksResume?: boolean;
+	/** Last time the child's session file grew, for the idle budget. */
+	lastProgressAt?: number;
+	/** Set once the watcher has decided to kill this child on a budget. */
+	timeoutExpiry?: { kind: SubagentTimeoutKind; seconds: number };
+	/** Pending SIGKILL escalation for a timeout kill. */
+	timeoutKillTimer?: ReturnType<typeof setTimeout>;
+	/** Set when closing a pane child's surface failed, so the kill may not have taken. */
+	timeoutKillFailed?: boolean;
 	resultOwner?: { kind: CompletedDelivery; ownerId: string };
 	completionPromise?: Promise<SubagentResult>;
 	spawnWidthSlotAcquired?: boolean;
@@ -174,6 +207,12 @@ export interface SubagentResultMessageDetails {
 	outputTokens?: number;
 	contextTokens?: number;
 	contextWindow?: number;
+	/** Which budget the runtime killed this child on, when it did. */
+	timedOut?: SubagentTimeoutKind;
+	/** The budget, in seconds, that expired. */
+	timedOutAfter?: number;
+	/** True when the agent's `on-timeout` policy refuses a resume. */
+	timeoutBlocksResume?: boolean;
 	error?: string;
 	errorMessage?: string;
 }
