@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { realpathSync, rmSync } from "node:fs";
 import { launchBackgroundSubagent } from "../../src/launch/background.ts";
 import { launchInteractiveSubagent } from "../../src/launch/interactive.ts";
 import {
@@ -630,7 +630,9 @@ describe("Herdr interactive launch parity", () => {
 		assert.equal(running.modelContextWindow, 2048);
 		assert.equal(running.reportContextUsage, false);
 		assert.equal(readSubagentLaunchMetadataForTest(running.sessionFile)?.reportContextUsage, false);
-		assert.match(childLog, new RegExp(`PWD=${childCwd.replace(/'/g, "'\\''")}`));
+		const expectedChildCwd = realpathSync(childCwd);
+		const escapedChildCwd = expectedChildCwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		assert.match(childLog, new RegExp(`PWD=${escapedChildCwd}`));
 		assert.match(childLog, /CUSTOM_ENV=from-background-agent/);
 		assert.match(childLog, /SURFACE=\n/);
 		assert.match(childLog, /--no-approve/);
