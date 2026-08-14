@@ -78,7 +78,14 @@ function getContext(entry: AgentListEntry): "fresh_chat_needs_full_brief" | "cop
 }
 
 function getCompletion(entry: AgentListEntry): "exits_automatically" | "human_or_agent_must_finish" {
-	return entry.autoExit === false ? "human_or_agent_must_finish" : "exits_automatically";
+	if (entry.autoExit === true) return "exits_automatically";
+	if (entry.autoExit === false) return "human_or_agent_must_finish";
+	// Undefined `auto-exit` resolves to manual lifecycle at launch: interactive
+	// children are told to stay open for the operator and never receive
+	// `subagent_done`, so their result only arrives once a human (or
+	// subagent_kill) closes the pane. Background children must call
+	// `subagent_done` themselves and keep the exits_automatically contract.
+	return entry.mode === "background" ? "exits_automatically" : "human_or_agent_must_finish";
 }
 
 function renderDefaultModelLine(entry: AgentListEntry): string | undefined {

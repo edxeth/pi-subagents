@@ -396,6 +396,42 @@ describe("agent definitions and catalog", () => {
 		assert.match(reminder, /no `models:` line ignores model and thinking overrides/);
 	});
 
+	it("renders the completion contract to match each child's actual exit path", () => {
+		const dir = createTestDir();
+		const configDir = join(dir, "agent-root");
+		const agentsDir = join(configDir, "agents");
+		mkdirSync(agentsDir, { recursive: true });
+		process.env.PI_CODING_AGENT_DIR = configDir;
+
+		writeFileSync(
+			join(agentsDir, "pairing.md"),
+			`---\nname: pairing\ndescription: Interactive agent without auto-exit\nmode: interactive\n---\n\nBody.`,
+		);
+		writeFileSync(
+			join(agentsDir, "fire-and-forget.md"),
+			`---\nname: fire-and-forget\ndescription: Interactive agent with auto-exit\nmode: interactive\nauto-exit: true\n---\n\nBody.`,
+		);
+		writeFileSync(
+			join(agentsDir, "runner.md"),
+			`---\nname: runner\ndescription: Background agent without auto-exit\nmode: background\n---\n\nBody.`,
+		);
+		writeFileSync(
+			join(agentsDir, "pinned-open.md"),
+			`---\nname: pinned-open\ndescription: Background agent with explicit auto-exit false\nmode: background\nauto-exit: false\n---\n\nBody.`,
+		);
+
+		const reminder = renderAgentListReminderForTest(getAgentListEntriesForTest(dir));
+		// Interactive children without `auto-exit` are told to stay open for the
+		// operator and never receive `subagent_done`, so their results only
+		// arrive after the pane is closed. The roster must not promise otherwise.
+		assert.match(reminder, /`pairing`[\s\S]*?completion: human_or_agent_must_finish/);
+		assert.match(reminder, /`fire-and-forget`[\s\S]*?completion: exits_automatically/);
+		// Background children must call `subagent_done` themselves, so the
+		// default contract stays exits_automatically for them.
+		assert.match(reminder, /`runner`[\s\S]*?completion: exits_automatically/);
+		assert.match(reminder, /`pinned-open`[\s\S]*?completion: human_or_agent_must_finish/);
+	});
+
 	it("defaults spawning to false for named agent definitions", () => {
 		const dir = createTestDir();
 		const configDir = join(dir, "agent-root");
