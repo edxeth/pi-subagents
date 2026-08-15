@@ -1,6 +1,12 @@
 import type { ResolvedAgentDefinition } from "./definitions.ts";
 import { getEffectiveAgentDefinitions } from "./definitions.ts";
 import { buildModelRef, parseAllowedModels } from "./model-refs.ts";
+import { formatTimeoutSeconds } from "../runtime/timeout-budget.ts";
+import {
+	getContextReminderThresholds,
+	parseContextWarnStep,
+	parseContextWarnThreshold,
+} from "../tools/context-reminders.ts";
 
 type SubagentSessionMode = "standalone" | "lineage-only" | "fork";
 
@@ -19,6 +25,11 @@ export interface AgentListEntry {
 	spawning: true | string[] | false;
 	spawnDepth?: number;
 	spawnWidth?: number;
+	timeout?: number;
+	idleTimeout?: number;
+	contextWarnThreshold?: string;
+	contextWarnStep?: string;
+	reportContextUsage?: boolean;
 	visibleTo: string[];
 }
 
@@ -61,6 +72,11 @@ export function getAgentListEntries(
 			spawning: agent.spawning ?? false,
 			...(agent.spawnDepth !== undefined ? { spawnDepth: agent.spawnDepth } : {}),
 			...(agent.spawnWidth !== undefined ? { spawnWidth: agent.spawnWidth } : {}),
+			...(agent.timeout !== undefined ? { timeout: agent.timeout } : {}),
+			...(agent.idleTimeout !== undefined ? { idleTimeout: agent.idleTimeout } : {}),
+			...(agent.contextWarnThreshold !== undefined ? { contextWarnThreshold: agent.contextWarnThreshold } : {}),
+			...(agent.contextWarnStep !== undefined ? { contextWarnStep: agent.contextWarnStep } : {}),
+			...(agent.reportContextUsage !== undefined ? { reportContextUsage: agent.reportContextUsage } : {}),
 			visibleTo: agent.visibleTo ?? ["all"],
 		}));
 }
@@ -111,10 +127,41 @@ function renderSpawningLines(entry: AgentListEntry): string[] {
 	];
 }
 
+/**
+ * The starting percentage of a schedule that reaches the final "stop" stage,
+ * or undefined when the policy is off or the schedule collapsed to fewer than
+ * three distinct thresholds — a collapsed schedule warns the child but never
+ * instructs it to stop, so no parent-facing stop behavior exists.
+ */
+function getContextWarnPercent(entry: AgentListEntry): number | undefined {
+	if (entry.contextWarnThreshold === undefined) return undefined;
+	const percent = parseContextWarnThreshold(entry.contextWarnThreshold);
+	if (percent === null) return undefined;
+	const step = parseContextWarnStep(entry.contextWarnStep);
+	return getContextReminderThresholds(percent, step).length === 3 ? percent : undefined;
+}
+
+function renderLimitLines(entry: AgentListEntry): string[] {
+	const contextWarnPercent = getContextWarnPercent(entry);
+	return [
+		entry.timeout !== undefined ? `  timeout: ${formatTimeoutSeconds(entry.timeout)}` : undefined,
+		entry.idleTimeout !== undefined ? `  idle-timeout: ${formatTimeoutSeconds(entry.idleTimeout)}` : undefined,
+		contextWarnPercent !== undefined ? `  context-warn: ${contextWarnPercent}%` : undefined,
+		entry.reportContextUsage === false ? "  report-context-usage: false" : undefined,
+	].filter((line): line is string => line !== undefined);
+}
+
 export function renderAgentListReminder(entries: AgentListEntry[]): string {
 	const hasModelInfo = entries.some(
 		(entry) => buildModelRef(entry.model, entry.thinking) || entry.allowModelOverride !== false,
 	);
+	const hasIdleTimeout = entries.some((entry) => entry.idleTimeout !== undefined);
+	const hasTimeLimits = entries.some((entry) => entry.timeout !== undefined || entry.idleTimeout !== undefined);
+	const hasContextWarn = entries.some((entry) => getContextWarnPercent(entry) !== undefined);
+	const hasForkedContextWarn = entries.some(
+		(entry) => entry.sessionMode === "fork" && getContextWarnPercent(entry) !== undefined,
+	);
+	const hasHiddenContextReport = entries.some((entry) => entry.reportContextUsage === false);
 	const agentLines =
 		entries.length === 0
 			? ["No agents are spawnable in this session."]
@@ -128,6 +175,7 @@ export function renderAgentListReminder(entries: AgentListEntry[]): string {
 						renderDefaultModelLine(entry),
 						renderModelsLine(entry),
 						...renderSpawningLines(entry),
+						...renderLimitLines(entry),
 					]
 						.filter(Boolean)
 						.join("\n");
@@ -148,6 +196,28 @@ export function renderAgentListReminder(entries: AgentListEntry[]): string {
 		...(hasModelInfo
 			? [
 					"- `default_model:` runs when model/thinking are omitted. `models:` lists accepted overrides; `models: any model ref` accepts any available model. An agent with no `models:` line ignores model and thinking overrides. For a listed ref, copy it exactly and split `provider/model:thinking` into model=`provider/model`, thinking=`thinking`. Never use an unlisted model when an explicit list is present.",
+				]
+			: []),
+		...(hasTimeLimits
+			? [
+					"- `timeout: X` stops this agent when its whole run reaches X. `idle-timeout: X` stops it when it makes no output for X." +
+						(hasIdleTimeout ? " A steer you send is not its output." : "") +
+						" A stop is not a failure. The result holds the partial work, or it says that the agent made no output. Read the result text. It tells you what to do next.",
+				]
+			: []),
+		...(hasContextWarn
+			? [
+					"- `context-warn: Y%` makes this agent wrap up and report before its own context window fills, so its work is not lost to compaction. When a result says the agent stopped early, the stop saved the report. Do not resume an agent that stopped this way. Start a new agent for the unfinished work.",
+				]
+			: []),
+		...(hasForkedContextWarn
+			? [
+					"- A `copy_of_this_chat` agent with `context-warn` starts with this conversation already using part of its window, so it has less room for its own work.",
+				]
+			: []),
+		...(hasHiddenContextReport
+			? [
+					"- `report-context-usage: false` hides the token counts in the result. When this agent stops early, the result still reports it.",
 				]
 			: []),
 		"- If the user names an agent that is not listed, say it was not found and stop; do not suggest a different listed agent.",
@@ -173,6 +243,10 @@ export function getAgentListSignature(entries: AgentListEntry[]): string {
 			spawning: entry.spawning,
 			spawnDepth: entry.spawnDepth,
 			spawnWidth: entry.spawnWidth,
+			timeout: entry.timeout,
+			idleTimeout: entry.idleTimeout,
+			contextWarn: entry.contextWarnThreshold !== undefined ? getContextWarnPercent(entry) ?? null : undefined,
+			reportContextUsage: entry.reportContextUsage,
 			visibleTo: entry.visibleTo,
 		})),
 	);
