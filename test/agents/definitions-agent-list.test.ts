@@ -396,6 +396,53 @@ describe("agent definitions and catalog", () => {
 		assert.match(reminder, /no `models:` line ignores model and thinking overrides/);
 	});
 
+	it("renders the completion contract to match each child's actual exit path", () => {
+		const dir = createTestDir();
+		const configDir = join(dir, "agent-root");
+		const agentsDir = join(configDir, "agents");
+		mkdirSync(agentsDir, { recursive: true });
+		process.env.PI_CODING_AGENT_DIR = configDir;
+
+		writeFileSync(
+			join(agentsDir, "pairing.md"),
+			`---\nname: pairing\ndescription: Interactive agent without auto-exit\nmode: interactive\n---\n\nBody.`,
+		);
+		writeFileSync(
+			join(agentsDir, "fire-and-forget.md"),
+			`---\nname: fire-and-forget\ndescription: Interactive agent with auto-exit\nmode: interactive\nauto-exit: true\n---\n\nBody.`,
+		);
+		writeFileSync(
+			join(agentsDir, "runner.md"),
+			`---\nname: runner\ndescription: Background agent without auto-exit\nmode: background\n---\n\nBody.`,
+		);
+		writeFileSync(
+			join(agentsDir, "pinned-open.md"),
+			`---\nname: pinned-open\ndescription: Background agent with explicit auto-exit false\nmode: background\nauto-exit: false\n---\n\nBody.`,
+		);
+		writeFileSync(
+			join(agentsDir, "no-mode.md"),
+			`---\nname: no-mode\ndescription: Agent with no mode field\n---\n\nBody.`,
+		);
+
+		const reminder = renderAgentListReminderForTest(getAgentListEntriesForTest(dir));
+		// Bound each assertion to one agent block. Unbounded `[\s\S]*?` regexes
+		// matched across the blank-line block boundary into the next agent's
+		// completion line, so they passed even against the old renderer.
+		const blockFor = (name: string) =>
+			reminder.match(new RegExp(`^- \`${name}\`:[\\s\\S]*?(?=\\n\\n|\\n</subagent-roster>)`, "m"))?.[0] ?? "";
+		// Interactive children without `auto-exit` are told to stay open for the
+		// operator and never receive `subagent_done`, so their results only
+		// arrive after the pane is closed. The roster must not promise otherwise.
+		// An omitted `mode` takes the interactive launch path as well.
+		assert.match(blockFor("pairing"), /completion: human_or_agent_must_finish/);
+		assert.match(blockFor("no-mode"), /completion: human_or_agent_must_finish/);
+		assert.match(blockFor("fire-and-forget"), /completion: exits_automatically/);
+		// Background children must call `subagent_done` themselves, so the
+		// default contract stays exits_automatically for them.
+		assert.match(blockFor("runner"), /completion: exits_automatically/);
+		assert.match(blockFor("pinned-open"), /completion: human_or_agent_must_finish/);
+	});
+
 	it("defaults spawning to false for named agent definitions", () => {
 		const dir = createTestDir();
 		const configDir = join(dir, "agent-root");
