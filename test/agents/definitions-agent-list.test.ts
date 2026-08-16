@@ -419,17 +419,28 @@ describe("agent definitions and catalog", () => {
 			join(agentsDir, "pinned-open.md"),
 			`---\nname: pinned-open\ndescription: Background agent with explicit auto-exit false\nmode: background\nauto-exit: false\n---\n\nBody.`,
 		);
+		writeFileSync(
+			join(agentsDir, "no-mode.md"),
+			`---\nname: no-mode\ndescription: Agent with no mode field\n---\n\nBody.`,
+		);
 
 		const reminder = renderAgentListReminderForTest(getAgentListEntriesForTest(dir));
+		// Bound each assertion to one agent block. Unbounded `[\s\S]*?` regexes
+		// matched across the blank-line block boundary into the next agent's
+		// completion line, so they passed even against the old renderer.
+		const blockFor = (name: string) =>
+			reminder.match(new RegExp(`^- \`${name}\`:[\\s\\S]*?(?=\\n\\n|\\n</subagent-roster>)`, "m"))?.[0] ?? "";
 		// Interactive children without `auto-exit` are told to stay open for the
 		// operator and never receive `subagent_done`, so their results only
 		// arrive after the pane is closed. The roster must not promise otherwise.
-		assert.match(reminder, /`pairing`[\s\S]*?completion: human_or_agent_must_finish/);
-		assert.match(reminder, /`fire-and-forget`[\s\S]*?completion: exits_automatically/);
+		// An omitted `mode` takes the interactive launch path as well.
+		assert.match(blockFor("pairing"), /completion: human_or_agent_must_finish/);
+		assert.match(blockFor("no-mode"), /completion: human_or_agent_must_finish/);
+		assert.match(blockFor("fire-and-forget"), /completion: exits_automatically/);
 		// Background children must call `subagent_done` themselves, so the
 		// default contract stays exits_automatically for them.
-		assert.match(reminder, /`runner`[\s\S]*?completion: exits_automatically/);
-		assert.match(reminder, /`pinned-open`[\s\S]*?completion: human_or_agent_must_finish/);
+		assert.match(blockFor("runner"), /completion: exits_automatically/);
+		assert.match(blockFor("pinned-open"), /completion: human_or_agent_must_finish/);
 	});
 
 	it("defaults spawning to false for named agent definitions", () => {
