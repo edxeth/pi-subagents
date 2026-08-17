@@ -434,6 +434,32 @@ export function splitHerdrPane(options: {
 	return parseCreatedPane(result, "pane split");
 }
 
+// Best-effort: the pane shell decides whether a staged POSIX script can be typed as-is.
+// Older Herdr builds may not expose process-info, so every failure degrades to an empty
+// list and the caller falls back to the platform default.
+// On an idle pane the foreground process is the pane's own shell, which is the state a
+// launch targets. A busy pane can report the program it is running instead (`node.exe`),
+// so callers classify the reported names and fall back when none of them is a known shell.
+// A shell started by hand inside the pane is not reported separately on Windows, because
+// ConPTY exposes a single foreground process group.
+export function getHerdrPaneProcessNames(paneId: string): string[] {
+	try {
+		const result = runHerdrApi("pane process-info", ["pane", "process-info", "--pane", paneId]);
+		const info = isRecord(result.process_info) ? result.process_info : undefined;
+		if (!info) return [];
+		const processes = Array.isArray(info.foreground_processes) ? info.foreground_processes : [];
+		const names: string[] = [];
+		for (const entry of processes) {
+			if (!isRecord(entry)) continue;
+			const name = stringField(entry, "name") ?? stringField(entry, "argv0");
+			if (name) names.push(name);
+		}
+		return names;
+	} catch {
+		return [];
+	}
+}
+
 export function runHerdrPaneCommand(paneId: string, command: string): void {
 	runHerdrVoid("pane run", ["pane", "run", paneId, command]);
 }

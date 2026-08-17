@@ -78,6 +78,7 @@ import "./mux/poll.test.ts";
 import "./mux/herdr.test.ts";
 import "./mux/herdr-placement.test.ts";
 import "./mux/runtime-probe.test.ts";
+import "./mux/staged-shell.test.ts";
 import "./mux/zellij-placement.test.ts";
 import "./mux/zellij-owned-placement.test.ts";
 import "./agents/roster-filtering.test.ts";
