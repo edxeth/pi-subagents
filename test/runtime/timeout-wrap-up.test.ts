@@ -1,3 +1,4 @@
+import { mkdirSync, readdirSync } from "node:fs";
 import { once } from "node:events";
 import { restartSubagentForTimeoutWrapUp } from "../../src/runtime/timeout-wrap-up.ts";
 import type { PersistedSubagentLaunchMetadata } from "../../src/session/session-files.ts";
@@ -10,6 +11,7 @@ import {
 	existsSync,
 	it,
 	join,
+	rmSync,
 	readFileSync,
 	writeExecutable,
 	writeFileSync,
@@ -131,6 +133,8 @@ cat > "${stdinFile}"
 
 	it("closes an interactive pane when restart fails after surface creation", async () => {
 		const dir = createTestDir();
+		const capsuleRoot = join(dir, "capsules");
+		mkdirSync(capsuleRoot, { recursive: true });
 		const binDir = dir;
 		const tmuxLog = join(dir, "tmux.log");
 		writeFileSync(tmuxLog, "");
@@ -153,6 +157,8 @@ esac
 		process.env.PI_SUBAGENT_MUX = "tmux";
 		process.env.TMUX = "fake-tmux-socket";
 		process.env.SHELL = "/bin/sh";
+		const originalCapsuleDir = process.env.PI_SUBAGENT_ENV_CAPSULE_DIR;
+		process.env.PI_SUBAGENT_ENV_CAPSULE_DIR = capsuleRoot;
 
 		try {
 			const sessionFile = join(dir, "interactive-child.jsonl");
@@ -172,6 +178,11 @@ esac
 			const log = readFileSync(tmuxLog, "utf8");
 			assert.match(log, /new-window/);
 			assert.match(log, /kill-pane -t %42/, "a partially created wrap-up pane must be closed on launch failure");
+			assert.equal(
+				existsSync(capsuleRoot) ? readdirSync(capsuleRoot).length : 0,
+				0,
+				"an unconsumed launch capsule must not survive a failed wrap-up delivery",
+			);
 		} finally {
 			if (originalPath === undefined) delete process.env.PATH;
 			else process.env.PATH = originalPath;
@@ -181,6 +192,77 @@ esac
 			else process.env.TMUX = originalTmux;
 			if (originalShell === undefined) delete process.env.SHELL;
 			else process.env.SHELL = originalShell;
+			if (originalCapsuleDir === undefined) delete process.env.PI_SUBAGENT_ENV_CAPSULE_DIR;
+			else process.env.PI_SUBAGENT_ENV_CAPSULE_DIR = originalCapsuleDir;
+		}
+	});
+
+	it("applies persisted deny-env to interactive wrap-up children", async () => {
+		const dir = createTestDir();
+		const capsuleRoot = join(dir, "capsules");
+		mkdirSync(capsuleRoot, { recursive: true });
+		const tmuxLog = join(dir, "tmux.log");
+		writeFileSync(tmuxLog, "");
+		writeExecutable(
+			dir,
+			"tmux",
+			`#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${tmuxLog}"
+case "$1" in
+  new-window) printf '%%42\\n' ;;
+esac
+`,
+		);
+		const originalPath = process.env.PATH;
+		const originalMux = process.env.PI_SUBAGENT_MUX;
+		const originalTmux = process.env.TMUX;
+		const originalShell = process.env.SHELL;
+		const originalKeep = process.env.WRAP_TEST_KEEP;
+		const originalDenied = process.env.WRAP_TEST_DENIED;
+		process.env.PATH = `${dir}:${originalPath ?? ""}`;
+		process.env.PI_SUBAGENT_MUX = "tmux";
+		process.env.TMUX = "fake-tmux-socket";
+		process.env.SHELL = "/bin/sh";
+		const originalCapsuleDir = process.env.PI_SUBAGENT_ENV_CAPSULE_DIR;
+		process.env.PI_SUBAGENT_ENV_CAPSULE_DIR = capsuleRoot;
+		process.env.WRAP_TEST_KEEP = "kept";
+		process.env.WRAP_TEST_DENIED = "secret";
+
+		try {
+			const sessionFile = join(dir, "interactive-child.jsonl");
+			writeFileSync(
+				sessionFile,
+				`${JSON.stringify({ type: "session", version: 3, id: "child", timestamp: new Date().toISOString(), cwd: dir })}\n`,
+			);
+			const running = makeRunning(dir, sessionFile);
+			running.mode = "interactive";
+			running.launchMetadata = { ...running.launchMetadata!, mode: "interactive", denyEnv: "WRAP_TEST_DENIED" };
+
+			await restartSubagentForTimeoutWrapUp(running, { getShellReadyDelayMs: () => 0 });
+
+			const log = readFileSync(tmuxLog, "utf8");
+			const capsuleMatch = log.match(/run-child\.mjs' '([^']+)'/);
+			assert.ok(capsuleMatch, "expected the wrap-up command to invoke the capsule launcher");
+			const capsule = JSON.parse(readFileSync(capsuleMatch[1], "utf8"));
+			assert.equal(capsule.parentEnv.WRAP_TEST_DENIED, undefined, "persisted deny-env must filter the wrap-up child env");
+			assert.equal(capsule.parentEnv.WRAP_TEST_KEEP, "kept", "non-denied env must still flow");
+			assert.equal(capsule.overrides.PI_SUBAGENT_AUTO_EXIT, "1", "wrap-up overrides must survive");
+		} finally {
+			if (originalPath === undefined) delete process.env.PATH;
+			else process.env.PATH = originalPath;
+			if (originalMux === undefined) delete process.env.PI_SUBAGENT_MUX;
+			else process.env.PI_SUBAGENT_MUX = originalMux;
+			if (originalTmux === undefined) delete process.env.TMUX;
+			else process.env.TMUX = originalTmux;
+			if (originalShell === undefined) delete process.env.SHELL;
+			else process.env.SHELL = originalShell;
+			if (originalKeep === undefined) delete process.env.WRAP_TEST_KEEP;
+			else process.env.WRAP_TEST_KEEP = originalKeep;
+			if (originalDenied === undefined) delete process.env.WRAP_TEST_DENIED;
+			else process.env.WRAP_TEST_DENIED = originalDenied;
+			if (originalCapsuleDir === undefined) delete process.env.PI_SUBAGENT_ENV_CAPSULE_DIR;
+			else process.env.PI_SUBAGENT_ENV_CAPSULE_DIR = originalCapsuleDir;
+			rmSync(capsuleRoot, { recursive: true, force: true });
 		}
 	});
 });

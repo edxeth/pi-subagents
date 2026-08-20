@@ -3,7 +3,7 @@ import {
 	type BackgroundLaunchRuntime,
 	launchBackgroundSubagent as launchBackgroundSubagentWithRuntime,
 } from "../launch/background.ts";
-import { getPiInvocation, getPiShellParts, getSubagentChildProcessEnv } from "../launch/child-command.ts";
+import { getPiInvocation, getSubagentChildProcessEnv } from "../launch/child-command.ts";
 import { type InteractiveLaunchRuntime, launchInteractiveSubagent } from "../launch/interactive.ts";
 import type { SubagentLaunchContext } from "../launch/prep.ts";
 import { cleanupNoSessionSessionFile } from "../launch/prep.ts";
@@ -78,10 +78,6 @@ export function startWidgetRefresh() {
 
 export function getPiInvocationForTest(args: string[]) {
 	return getPiInvocation(args);
-}
-
-export function getPiShellPartsForTest(args: string[]) {
-	return getPiShellParts(args);
 }
 
 export function getSubagentChildProcessEnvForTest(

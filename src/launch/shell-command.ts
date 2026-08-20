@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { shellEscape } from "../mux.ts";
 import { getPiInvocation } from "./child-command.ts";
 import { buildParentEnvSnapshot, PANE_IDENTITY_ENV_PATTERNS, resolveDenyEnvPatterns } from "./child-env.ts";
-import { writeEnvCapsule } from "./env-capsule.ts";
+import { disposeEnvCapsule, writeEnvCapsule } from "./env-capsule.ts";
 import { buildInteractiveSentinelShellCommands } from "./interactive-sentinel.ts";
 import { buildShellChangeDirectoryPrefix } from "./resume.ts";
 
@@ -24,6 +24,11 @@ export interface InteractiveShellCommand {
 	/** The string typed or staged into the child pane. Paths only — never env data. */
 	command: string;
 	capsulePath: string;
+	/**
+	 * Delete the capsule. Call only when the launch failed before the pane's
+	 * launcher could consume it; after a successful send the pane owns the file.
+	 */
+	dispose: () => void;
 }
 
 export function getRunChildLauncherPath(): string {
@@ -54,5 +59,5 @@ export function buildInteractiveShellCommand(input: InteractiveShellCommandInput
 	const command =
 		`trap ${shellEscape(sentinel.exitTrap)} EXIT; ` +
 		`${buildShellChangeDirectoryPrefix(input.cwd)}${launcher}; ${sentinel.direct}`;
-	return { command, capsulePath };
+	return { command, capsulePath, dispose: () => disposeEnvCapsule(capsulePath) };
 }

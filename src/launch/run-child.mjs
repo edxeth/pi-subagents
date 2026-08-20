@@ -1,4 +1,5 @@
-import { readFileSync, unlinkSync } from "node:fs";
+import { readFileSync, rmdirSync, unlinkSync } from "node:fs";
+import { dirname } from "node:path";
 import { spawn } from "node:child_process";
 
 // One-shot child launcher. Reads the launch capsule written by the parent pi
@@ -22,6 +23,11 @@ try {
 	// One-shot even on malformed input: consume the file before parsing it.
 	capsuleSource = readFileSync(capsulePath, "utf8");
 	unlinkSync(capsulePath);
+	try {
+		rmdirSync(dirname(capsulePath));
+	} catch {
+		// Directory not empty or already gone; the file itself is consumed.
+	}
 } catch (error) {
 	process.stderr.write(`run-child: cannot read capsule ${capsulePath}: ${error?.message ?? error}\n`);
 	process.exit(2);

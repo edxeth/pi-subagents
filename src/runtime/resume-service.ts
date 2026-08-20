@@ -510,7 +510,7 @@ async function resumeSubagentSessionWithoutWidth(
 		}
 		if (zellijTarget) resumeEnvVars.ZELLIJ_SESSION_NAME = zellijTarget.sessionName;
 		if (ordinarySurface) resumeEnvVars.PI_SUBAGENT_SURFACE = ordinarySurface;
-		const { command } = buildInteractiveShellCommand({
+		const { command, dispose } = buildInteractiveShellCommand({
 			cwd: resumeCwd ?? undefined,
 			piArgs,
 			envOverrides: resumeEnvVars,
@@ -518,16 +518,22 @@ async function resumeSubagentSessionWithoutWidth(
 			doneSentinelFile,
 			...(zellijTarget ? { deriveZellijPaneSurface: true } : {}),
 		});
-		const surface =
-			ordinarySurface ??
-			(await createZellijCommandSurface(surfaceName, zellijTarget!, getZellijShellCommand(command), zellijContext));
-		if (!zellijTarget) {
-			await new Promise<void>((resolve) => setTimeout(resolve, runtime.getShellReadyDelayMs()));
-			sendShellCommand(surface, command);
+		try {
+			const surface =
+				ordinarySurface ??
+				(await createZellijCommandSurface(surfaceName, zellijTarget!, getZellijShellCommand(command), zellijContext));
+			if (!zellijTarget) {
+				await new Promise<void>((resolve) => setTimeout(resolve, runtime.getShellReadyDelayMs()));
+				sendShellCommand(surface, command);
+			}
+			running.surface = surface;
+			running.doneSentinelFile = doneSentinelFile;
+			running.zellijTarget = zellijTarget;
+		} catch (error) {
+			// Nothing consumed the capsule; do not leave credentials behind.
+			dispose();
+			throw error;
 		}
-		running.surface = surface;
-		running.doneSentinelFile = doneSentinelFile;
-		running.zellijTarget = zellijTarget;
 	}
 
 	if (shouldPersistInvocationMetadata) {

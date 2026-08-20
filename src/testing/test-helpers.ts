@@ -15,7 +15,6 @@ import {
 } from "../agents/titles.ts";
 import {
 	getPiInvocation,
-	getPiShellParts,
 	getSubagentChildProcessEnv,
 	parseCommandWords,
 } from "../launch/child-command.ts";
@@ -165,10 +164,6 @@ export { clearPublishedRunningSubagentCountForTest };
 
 export function getPiInvocationForTest(args: string[]) {
 	return getPiInvocation(args);
-}
-
-export function getPiShellPartsForTest(args: string[]) {
-	return getPiShellParts(args);
 }
 
 export function getSubagentChildProcessEnvForTest(

@@ -199,6 +199,7 @@ export async function restartSubagentForTimeoutWrapUp(
 				}
 			: undefined;
 	let surface: string | undefined;
+	let disposeCapsule: (() => void) | undefined;
 	try {
 		if (!zellijTarget) {
 			surface = await createSurface(metadata.sessionTitle ?? running.title ?? running.name, {
@@ -220,7 +221,7 @@ export async function restartSubagentForTimeoutWrapUp(
 		piArgs.push(`@${taskPath}`);
 		if (zellijTarget) launch.env.ZELLIJ_SESSION_NAME = zellijTarget.sessionName;
 		if (surface) launch.env.PI_SUBAGENT_SURFACE = surface;
-		const { command } = buildInteractiveShellCommand({
+		const { command, dispose } = buildInteractiveShellCommand({
 			cwd: launch.cwd ?? undefined,
 			piArgs,
 			envOverrides: launch.env,
@@ -228,6 +229,7 @@ export async function restartSubagentForTimeoutWrapUp(
 			doneSentinelFile,
 			...(zellijTarget ? { deriveZellijPaneSurface: true } : {}),
 		});
+		disposeCapsule = dispose;
 		if (zellijTarget) {
 			surface = await createZellijCommandSurface(
 				metadata.sessionTitle ?? running.title ?? running.name,
@@ -246,6 +248,8 @@ export async function restartSubagentForTimeoutWrapUp(
 		running.doneSentinelFile = doneSentinelFile;
 		running.zellijTarget = zellijTarget;
 	} catch (error) {
+		// Nothing consumed the capsule; do not leave credentials behind.
+		disposeCapsule?.();
 		if (surface) {
 			try {
 				await closeSurfaceAsync(surface, zellijTarget);

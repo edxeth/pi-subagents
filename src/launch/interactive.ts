@@ -177,7 +177,7 @@ export async function launchInteractiveSubagent(
 
 	const { launchEntryCount } = launch;
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
-	const { command, capsulePath } = buildInteractiveShellCommand({
+	const { command, capsulePath, dispose } = buildInteractiveShellCommand({
 		cwd: prepared.runtimePaths.effectiveCwd ?? undefined,
 		piArgs,
 		envOverrides: envVars,
@@ -185,29 +185,37 @@ export async function launchInteractiveSubagent(
 		doneSentinelFile,
 		...(zellijTarget ? { deriveZellijPaneSurface: true } : {}),
 	});
-	const surface =
-		ordinarySurface ??
-		(await createZellijCommandSurface(surfaceName, zellijTarget!, getZellijShellCommand(command), zellijContext));
-	traceSubagentLaunch("interactive.surface", {
-		id,
-		name: params.name,
-		surface,
-		surfacePreCreated,
-	});
-	if (!surfacePreCreated && !zellijTarget) {
-		await new Promise<void>((resolve) => setTimeout(resolve, runtime.getShellReadyDelayMs()));
+	let surface: string;
+	try {
+		surface =
+			ordinarySurface ??
+			(await createZellijCommandSurface(surfaceName, zellijTarget!, getZellijShellCommand(command), zellijContext));
+		traceSubagentLaunch("interactive.surface", {
+			id,
+			name: params.name,
+			surface,
+			surfacePreCreated,
+		});
+		if (!surfacePreCreated && !zellijTarget) {
+			await new Promise<void>((resolve) => setTimeout(resolve, runtime.getShellReadyDelayMs()));
+		}
+		traceSubagentLaunch("interactive.send", {
+			id,
+			name: params.name,
+			surface,
+			sessionFile: prepared.subagentSessionFile,
+			doneSentinelFile,
+			piArgs,
+			capsulePath,
+			envKeys: Object.keys(envVars).sort(),
+		});
+		if (!zellijTarget) sendShellCommand(surface, command);
+	} catch (error) {
+		// The pane never received the command, so nothing will consume the
+		// capsule. Delete it rather than leaving credentials on disk.
+		dispose();
+		throw error;
 	}
-	traceSubagentLaunch("interactive.send", {
-		id,
-		name: params.name,
-		surface,
-		sessionFile: prepared.subagentSessionFile,
-		doneSentinelFile,
-		piArgs,
-		capsulePath,
-		envKeys: Object.keys(envVars).sort(),
-	});
-	if (!zellijTarget) sendShellCommand(surface, command);
 	return {
 		id,
 		name: params.name,

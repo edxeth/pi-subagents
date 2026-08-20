@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
-import { shellEscape } from "../mux.ts";
-import { filterDeniedEnv } from "./child-env.ts";
+import { buildParentEnvSnapshot } from "./child-env.ts";
 
 export interface PiInvocation {
 	command: string;
@@ -79,19 +78,12 @@ export function getPiInvocation(args: string[]): PiInvocation {
 	return { command: "pi", args };
 }
 
-export function getPiShellParts(args: string[]): string[] {
-	const invocation = getPiInvocation(args);
-	return [shellEscape(invocation.command), ...invocation.args.map((arg) => shellEscape(arg))];
-}
-
 export function getSubagentChildProcessEnv(
 	_invocation: PiInvocation,
 	envVars: Record<string, string>,
 	denyPatterns: string[] = [],
 ): NodeJS.ProcessEnv {
-	const parentEnv: Record<string, string> = {};
-	for (const [key, value] of Object.entries(process.env)) {
-		if (typeof value === "string") parentEnv[key] = value;
-	}
-	return { ...filterDeniedEnv(parentEnv, denyPatterns), ...envVars };
+	// Background children get the same snapshot policy as interactive ones:
+	// deny-filtered and stripped of shell bookkeeping the child recomputes.
+	return { ...buildParentEnvSnapshot(process.env, denyPatterns), ...envVars };
 }

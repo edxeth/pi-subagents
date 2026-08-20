@@ -54,7 +54,6 @@ export {
 	getCompletedSubagentResultForTest,
 	getLaunchedSubagentResultForTest,
 	getPiInvocationForTest,
-	getPiShellPartsForTest,
 	getShellReadyDelayMs,
 	getStartedSubagentDetailsForTest,
 	getSubagentChildProcessEnvForTest,

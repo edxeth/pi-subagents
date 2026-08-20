@@ -1,6 +1,6 @@
-import { chmodSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 /**
  * One-shot launch capsule: the transport that carries a child's environment
@@ -31,6 +31,16 @@ export const ENV_CAPSULE_DIR_PREFIX = "pi-subagent-env-";
 const ENV_CAPSULE_FILE_NAME = "capsule.json";
 export const DEFAULT_ENV_CAPSULE_MAX_AGE_MS = 60 * 60 * 1000;
 
+/**
+ * Root directory for new capsules. PI_SUBAGENT_ENV_CAPSULE_DIR redirects the
+ * root (used by the test suite so ambient env snapshots never land in the
+ * shared system tmpdir); the parent process env is the source either way.
+ */
+function resolveEnvCapsuleRoot(): string {
+	const redirect = process.env.PI_SUBAGENT_ENV_CAPSULE_DIR?.trim();
+	return redirect || tmpdir();
+}
+
 /** Remove capsule dirs older than maxAge. Returns how many were removed. */
 export function sweepStaleEnvCapsules(maxAgeMs = DEFAULT_ENV_CAPSULE_MAX_AGE_MS, dir = tmpdir()): number {
 	let entries: string[];
@@ -57,10 +67,33 @@ export function sweepStaleEnvCapsules(maxAgeMs = DEFAULT_ENV_CAPSULE_MAX_AGE_MS,
 	return removed;
 }
 
+/**
+ * Delete a capsule and its directory. Safe to call at any time: after the
+ * pane's launcher has consumed the file this is a no-op, and a directory that
+ * is not empty is left alone. Failure-path ownership: every launch site must
+ * call this when surface creation or command delivery throws, so a capsule is
+ * never left behind for a child that cannot run it.
+ */
+export function disposeEnvCapsule(capsulePath: string): void {
+	try {
+		unlinkSync(capsulePath);
+	} catch {
+		// Already consumed or never readable; nothing to protect.
+	}
+	const dir = dirname(capsulePath);
+	if (!basename(dir).startsWith(ENV_CAPSULE_DIR_PREFIX)) return;
+	try {
+		rmdirSync(dir);
+	} catch {
+		// Not empty or already removed.
+	}
+}
+
 /** Write a capsule and return its path. Stale capsules are swept first. */
 export function writeEnvCapsule(capsule: EnvCapsule, dir = tmpdir()): string {
-	sweepStaleEnvCapsules(DEFAULT_ENV_CAPSULE_MAX_AGE_MS, dir);
-	const capsuleDir = mkdtempSync(join(dir, ENV_CAPSULE_DIR_PREFIX));
+	const root = dir === tmpdir() ? resolveEnvCapsuleRoot() : dir;
+	sweepStaleEnvCapsules(DEFAULT_ENV_CAPSULE_MAX_AGE_MS, root);
+	const capsuleDir = mkdtempSync(join(root, ENV_CAPSULE_DIR_PREFIX));
 	const capsulePath = join(capsuleDir, ENV_CAPSULE_FILE_NAME);
 	writeFileSync(capsulePath, `${JSON.stringify(capsule)}\n`, { mode: 0o600 });
 	chmodSync(capsulePath, 0o600);

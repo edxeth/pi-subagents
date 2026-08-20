@@ -71,7 +71,6 @@ export {
 	getPersistedApprovalLaunchArgsForTest,
 	getPersistedSessionParityArgsForTest,
 	getPiInvocationForTest,
-	getPiShellPartsForTest,
 	getPreparedSessionLaunchArgsForTest,
 	getResumeCwdForTest,
 	getShellReadyDelayMs,
