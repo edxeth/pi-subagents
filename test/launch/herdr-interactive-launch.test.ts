@@ -151,10 +151,19 @@ async function readEventually(
 	throw new Error(`Timed out waiting for ${path}; last content: ${lastText}`);
 }
 
-function extractTaskArtifactPath(commandText: string): string {
-	const match = commandText.match(/'@([^']+)'/);
-	if (!match?.[1]) throw new Error("Expected Herdr launch command to include a task artifact argument");
+function extractCapsulePath(commandText: string): string {
+	const match = commandText.match(/run-child\.mjs' '([^']+)'/);
+	if (!match?.[1]) throw new Error("Expected Herdr launch command to invoke the capsule launcher");
 	return match[1];
+}
+
+function readLaunchCapsule(launchScript: string): {
+	args: string[];
+	overrides: Record<string, string>;
+	parentEnv: Record<string, string>;
+	cwd?: string;
+} {
+	return JSON.parse(readFileSync(extractCapsulePath(launchScript), "utf8"));
 }
 
 function extractHerdrRunScriptPath(log: string): string {
@@ -227,9 +236,11 @@ describe("Herdr interactive launch parity", () => {
 			}
 
 			rmSync(running.doneSentinelFile!, { force: true });
+			assert.equal(existsSync(extractCapsulePath(launchScript)), false, "capsule must be consumed after one run");
 			const result = spawnSync(launchScriptPath, { encoding: "utf8" });
 			assert.equal(result.error, undefined);
-			assert.match(readFileSync(running.doneSentinelFile!, "utf8"), /__SUBAGENT_DONE_42__/);
+			// The capsule is one-shot: a re-run still records a sentinel status, not a stale 42.
+			assert.match(readFileSync(running.doneSentinelFile!, "utf8"), /__SUBAGENT_DONE_\d+__/);
 		} finally {
 			if (originalPiCommand === undefined) delete process.env.PI_SUBAGENT_PI_COMMAND;
 			else process.env.PI_SUBAGENT_PI_COMMAND = originalPiCommand;
@@ -311,12 +322,21 @@ describe("Herdr interactive launch parity", () => {
 		assert.doesNotMatch(log, /pane send-keys w1:p2 Enter/);
 		const launchScript = readHerdrRunScript(log);
 		assert.match(launchScript, new RegExp(`cd '${childCwd.replace(/'/g, "'\\''")}' &&`));
-		assert.match(launchScript, new RegExp(`'--session' '${running.sessionFile.replace(/'/g, "'\\''")}'`));
-		assert.match(launchScript, /'--no-session'/);
-		assert.match(launchScript, /'--approve'/);
-		assert.match(launchScript, /CUSTOM_ENV='from-agent'/);
-		assert.match(launchScript, /PI_SUBAGENT_SURFACE='w1:p2'/);
-		assert.match(launchScript, /'--alpha' 'two words'/);
+		const capsule = readLaunchCapsule(launchScript);
+		assert.equal(capsule.cwd, childCwd);
+		const sessionIndex = capsule.args.indexOf("--session");
+		assert.notEqual(sessionIndex, -1);
+		assert.equal(capsule.args[sessionIndex + 1], running.sessionFile);
+		assert.ok(capsule.args.includes("--no-session"));
+		assert.ok(capsule.args.includes("--approve"));
+		assert.equal(capsule.overrides.CUSTOM_ENV, "from-agent");
+		assert.equal(capsule.overrides.PI_SUBAGENT_SURFACE, "w1:p2");
+		const alphaIndex = capsule.args.indexOf("--alpha");
+		assert.notEqual(alphaIndex, -1);
+		assert.equal(capsule.args[alphaIndex + 1], "two words");
+		// The observable pane command must not carry env material.
+		assert.doesNotMatch(launchScript, /CUSTOM_ENV=/);
+		assert.doesNotMatch(launchScript, /PI_SUBAGENT_SURFACE=/);
 	});
 
 	it("uses an agent env Herdr placement policy before creating the child surface", async () => {
@@ -433,7 +453,8 @@ describe("Herdr interactive launch parity", () => {
 		assert.match(log, /pane run w1:p2 /);
 		assert.doesNotMatch(log, /pane send-keys w1:p2 Enter/);
 		const launchScript = readHerdrRunScript(log);
-		assert.match(launchScript, /PI_SUBAGENT_SURFACE='w1:p2'/);
+		const capsule = readLaunchCapsule(launchScript);
+		assert.equal(capsule.overrides.PI_SUBAGENT_SURFACE, "w1:p2");
 	});
 
 	it("launches interactive Herdr children with resolved capability, model, and lifecycle facts", async () => {
@@ -542,21 +563,36 @@ describe("Herdr interactive launch parity", () => {
 		assert.match(log, /pane run w1:p2 /);
 		assert.doesNotMatch(log, /pane send-keys w1:p2 Enter/);
 		const launchScript = readHerdrRunScript(log);
-		assert.match(launchScript, /PI_SUBAGENT_AUTO_EXIT='1'/);
-		assert.match(launchScript, /PI_DENY_TOOLS='subagent,subagent_resume,subagent_kill,grep,set_tab_title'/);
-		assert.match(launchScript, /PI_SUBAGENT_EXTENSIONS=''/);
-		assert.match(launchScript, /--model 'zai-messages\/glm-5-turbo:off'/);
-		assert.match(launchScript, /--no-context-files/);
-		assert.match(launchScript, /--append-system-prompt ''/);
-		assert.match(launchScript, /'--no-extensions' '-e' '.*\/tools\/subagent-done\.ts'/);
-		assert.equal(launchScript.match(/'--tools' '([^']+)'/)?.[1], "read,grep,caller_ping,subagent_done");
-		assert.equal(
-			launchScript.match(/'--exclude-tools' '([^']+)'/)?.[1],
-			"subagent,subagent_resume,subagent_kill,grep,set_tab_title",
-		);
-		assert.match(launchScript, new RegExp(`'--skill' '${skillFile.replace(/'/g, "'\\''")}'`));
+		const capsule = readLaunchCapsule(launchScript);
+		assert.equal(capsule.overrides.PI_SUBAGENT_AUTO_EXIT, "1");
+		assert.equal(capsule.overrides.PI_DENY_TOOLS, "subagent,subagent_resume,subagent_kill,grep,set_tab_title");
+		assert.equal(capsule.overrides.PI_SUBAGENT_EXTENSIONS, "");
+		const modelIndex = capsule.args.indexOf("--model");
+		assert.notEqual(modelIndex, -1);
+		assert.equal(capsule.args[modelIndex + 1], "zai-messages/glm-5-turbo:off");
+		assert.ok(capsule.args.includes("--no-context-files"));
+		const appendIndex = capsule.args.indexOf("--append-system-prompt");
+		assert.notEqual(appendIndex, -1);
+		assert.equal(capsule.args[appendIndex + 1], "");
+		const noExtIndex = capsule.args.indexOf("--no-extensions");
+		assert.notEqual(noExtIndex, -1);
+		assert.equal(capsule.args[noExtIndex + 1], "-e");
+		assert.ok(capsule.args[noExtIndex + 2].endsWith("/tools/subagent-done.ts"));
+		const toolsIndex = capsule.args.indexOf("--tools");
+		assert.notEqual(toolsIndex, -1);
+		assert.equal(capsule.args[toolsIndex + 1], "read,grep,caller_ping,subagent_done");
+		const excludeIndex = capsule.args.indexOf("--exclude-tools");
+		assert.notEqual(excludeIndex, -1);
+		assert.equal(capsule.args[excludeIndex + 1], "subagent,subagent_resume,subagent_kill,grep,set_tab_title");
+		const skillIndex = capsule.args.indexOf("--skill");
+		assert.notEqual(skillIndex, -1);
+		assert.equal(capsule.args[skillIndex + 1], skillFile);
+		assert.doesNotMatch(launchScript, /PI_SUBAGENT_AUTO_EXIT=/);
+		assert.doesNotMatch(launchScript, /PI_DENY_TOOLS=/);
 
-		const taskArtifact = readFileSync(extractTaskArtifactPath(launchScript), "utf8");
+		const taskArg = capsule.args.find((arg: string) => arg.startsWith("@"));
+		assert.ok(taskArg, "expected capsule argv to carry the @task artifact");
+		const taskArtifact = readFileSync(taskArg.slice(1), "utf8");
 		assert.match(taskArtifact, /<skill name="review">/);
 		assert.match(taskArtifact, /Review skill body token\./);
 		assert.match(taskArtifact, /Complete your task autonomously\./);

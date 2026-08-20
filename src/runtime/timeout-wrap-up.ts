@@ -3,21 +3,22 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getArtifactStorageRoot } from "../artifact-storage.ts";
 import { buildAppendSystemInheritancePlan } from "../launch/append-system.ts";
-import { getPiInvocation, getPiShellParts, getSubagentChildProcessEnv } from "../launch/child-command.ts";
+import { getPiInvocation, getSubagentChildProcessEnv } from "../launch/child-command.ts";
+import { resolveDenyEnvPatterns } from "../launch/child-env.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "../launch/context-boundary.ts";
 import { parseEnvString } from "../launch/env.ts";
-import { buildInteractiveSentinelShellCommands } from "../launch/interactive-sentinel.ts";
 import {
 	getExtensionLaunchArgs,
 	getPersistedPromptLaunchArgs,
 	getPersistedSessionParityArgs,
 } from "../launch/prep.ts";
 import { writeResumeTaskArtifact } from "../launch/prompt-artifacts.ts";
-import { buildResumePiArgs, buildShellChangeDirectoryPrefix, getResumeCwd } from "../launch/resume.ts";
+import { buildResumePiArgs, getResumeCwd } from "../launch/resume.ts";
+import { buildInteractiveShellCommand } from "../launch/shell-command.ts";
 import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
 import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
 import { closeSurfaceAsync } from "../mux/io.ts";
-import { createSurface, getMuxBackend, sendShellCommand, shellEscape } from "../mux.ts";
+import { createSurface, getMuxBackend, sendShellCommand } from "../mux.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import { getDoneSentinelFile } from "../session/session-files.ts";
 import { PI_SUBAGENT_CONTEXT_WARN_STEP, PI_SUBAGENT_CONTEXT_WARN_THRESHOLD } from "../tools/context-reminders.ts";
@@ -128,7 +129,7 @@ async function getWrapUpLaunchParts(running: RunningSubagent, signal?: AbortSign
 	env[PI_SUBAGENT_TIMEOUT_STARTED_AT] = String(running.startTime);
 	env[PI_SUBAGENT_TIMEOUT_WRAP_UP] = "1";
 	env.PI_SUBAGENT_NAME = running.name;
-	if (running.agent) env.PI_SUBAGENT_AGENT = running.agent;
+	env.PI_SUBAGENT_AGENT = running.agent ?? "";
 	env.PI_SUBAGENT_SESSION = running.sessionFile;
 	env.PI_SUBAGENT_AUTO_EXIT = "1";
 	env.PI_SUBAGENT_SPAWN_BUDGET = "0";
@@ -170,7 +171,7 @@ export async function restartSubagentForTimeoutWrapUp(
 				running.parentClosePolicy === "continue"
 					? (["pipe", "ignore", "ignore"] as const)
 					: (["pipe", "pipe", "pipe"] as const),
-			env: getSubagentChildProcessEnv(invocation, launch.env),
+			env: getSubagentChildProcessEnv(invocation, launch.env, resolveDenyEnvPatterns(running.launchMetadata?.denyEnv)),
 		});
 		running.childProcess = child;
 		child.stdin?.end(launch.prompt);
@@ -208,23 +209,25 @@ export async function restartSubagentForTimeoutWrapUp(
 			throwIfAborted(signal);
 		}
 		const doneSentinelFile = getDoneSentinelFile(running.sessionFile, `${running.id}-wrap-up`);
-		const parts = getPiShellParts(buildResumePiArgs(running.sessionFile, "interactive"));
-		for (const arg of launch.args) parts.push(shellEscape(arg));
+		const piArgs = buildResumePiArgs(running.sessionFile, "interactive");
+		piArgs.push(...launch.args);
 		const taskPath = writeResumeTaskArtifact(
 			running.name,
 			launch.prompt,
 			running.sessionFile,
 			launch.cwd ?? process.cwd(),
 		);
-		parts.push(shellEscape(`@${taskPath}`));
+		piArgs.push(`@${taskPath}`);
 		if (zellijTarget) launch.env.ZELLIJ_SESSION_NAME = zellijTarget.sessionName;
 		if (surface) launch.env.PI_SUBAGENT_SURFACE = surface;
-		const envPrefix = `${Object.entries(launch.env)
-			.map(([key, value]) => `${key}=${shellEscape(value)}`)
-			.join(" ")} `;
-		const sentinel = buildInteractiveSentinelShellCommands(doneSentinelFile);
-		const surfacePrefix = zellijTarget ? "PI_SUBAGENT_SURFACE=pane:$ZELLIJ_PANE_ID " : "";
-		const command = `trap ${shellEscape(sentinel.exitTrap)} EXIT; ${buildShellChangeDirectoryPrefix(launch.cwd)}${envPrefix}${surfacePrefix}${parts.join(" ")}; ${sentinel.direct}`;
+		const { command } = buildInteractiveShellCommand({
+			cwd: launch.cwd ?? undefined,
+			piArgs,
+			envOverrides: launch.env,
+			denyEnv: metadata.denyEnv,
+			doneSentinelFile,
+			...(zellijTarget ? { deriveZellijPaneSurface: true } : {}),
+		});
 		if (zellijTarget) {
 			surface = await createZellijCommandSurface(
 				metadata.sessionTitle ?? running.title ?? running.name,

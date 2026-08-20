@@ -59,7 +59,8 @@
 			"zellij"
 		],
 		"ignoreFiles": [
-			"scripts/check-file-sizes.mjs"
+			"scripts/check-file-sizes.mjs",
+			"src/launch/run-child.mjs"
 		]
 	},
 	"trustedDependencies": [

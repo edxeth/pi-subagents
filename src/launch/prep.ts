@@ -407,6 +407,7 @@ export function buildPersistedSubagentLaunchMetadata(
 
 		...(prepared.agentDefs?.flags ? { flags: prepared.agentDefs.flags } : {}),
 		...(prepared.agentDefs?.env ? { env: prepared.agentDefs.env } : {}),
+		...(prepared.agentDefs?.denyEnv ? { denyEnv: prepared.agentDefs.denyEnv } : {}),
 	};
 }
 
@@ -448,7 +449,7 @@ export function getBaseSubagentEnvVars(
 	envVars[PI_SUBAGENT_IDLE_TIMEOUT] = prepared.agentDefs?.idleTimeout ? String(prepared.agentDefs.idleTimeout) : "";
 	envVars[PI_SUBAGENT_TIMEOUT_WARN_THRESHOLD] = prepared.agentDefs?.timeoutWarnThreshold ?? "";
 	envVars.PI_SUBAGENT_NAME = params.name;
-	if (params.agent) envVars.PI_SUBAGENT_AGENT = params.agent;
+	envVars.PI_SUBAGENT_AGENT = params.agent ?? "";
 	const spawnPolicy = prepared.spawnPolicy ?? resolvePreparedSpawnPolicy(params, prepared.agentDefs);
 	envVars.PI_SUBAGENT_SPAWN_BUDGET = String(spawnPolicy.childBudget ?? 0);
 	envVars.PI_SUBAGENT_SPAWN_WIDTH_EFFECTIVE =

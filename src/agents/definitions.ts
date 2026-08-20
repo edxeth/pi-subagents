@@ -45,6 +45,8 @@ export interface AgentDefaults {
 
 	flags?: string;
 	env?: string;
+	/** Comma- or newline-separated env names (with `*` globs) excluded from the inherited parent env. */
+	denyEnv?: string;
 	parentClosePolicy?: "terminate" | "continue";
 }
 
@@ -170,6 +172,7 @@ function parseAgentDefinition(
 
 		flags: flagsRaw,
 		env: getBlock("env"),
+		denyEnv: getBlock("deny-env"),
 		parentClosePolicy:
 			parentClosePolicyRaw === "terminate" || parentClosePolicyRaw === "continue" ? parentClosePolicyRaw : undefined,
 	};

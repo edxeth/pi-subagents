@@ -56,6 +56,38 @@ describe("env frontmatter field", () => {
 		process.env.PI_CODING_AGENT_DIR = "/tmp";
 	});
 
+	it("parses deny-env names and globs from agent frontmatter", () => {
+		const dir = createTestDir();
+		const configDir = join(dir, "config");
+		mkdirSync(join(configDir, "agents"), { recursive: true });
+		writeFileSync(
+			join(configDir, "agents", "sealed.md"),
+			"---\nname: sealed\ndeny-env: AWS_*, OPENCODE_API_KEY\n---\n\nSealed body.",
+		);
+		process.env.PI_CODING_AGENT_DIR = configDir;
+
+		const defs = loadAgentDefaults("sealed");
+		assert.equal(defs?.denyEnv, "AWS_*, OPENCODE_API_KEY");
+
+		process.env.PI_CODING_AGENT_DIR = "/tmp";
+	});
+
+	it("parses deny-env from a YAML block", () => {
+		const dir = createTestDir();
+		const configDir = join(dir, "config");
+		mkdirSync(join(configDir, "agents"), { recursive: true });
+		writeFileSync(
+			join(configDir, "agents", "sealed-block.md"),
+			"---\nname: sealed-block\ndeny-env: |\n  AWS_*\n  OPENCODE_API_KEY\n---\n\nSealed body.",
+		);
+		process.env.PI_CODING_AGENT_DIR = configDir;
+
+		const defs = loadAgentDefaults("sealed-block");
+		assert.equal(defs?.denyEnv, "AWS_*\nOPENCODE_API_KEY");
+
+		process.env.PI_CODING_AGENT_DIR = "/tmp";
+	});
+
 	it("merges env vars into base subagent env vars", () => {
 		const env = getBaseSubagentEnvVarsForTest({
 			env: "FOO=bar\nBAZ=value,with,commas",

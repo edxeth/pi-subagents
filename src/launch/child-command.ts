@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { shellEscape } from "../mux.ts";
+import { filterDeniedEnv } from "./child-env.ts";
 
 export interface PiInvocation {
 	command: string;
@@ -86,6 +87,11 @@ export function getPiShellParts(args: string[]): string[] {
 export function getSubagentChildProcessEnv(
 	_invocation: PiInvocation,
 	envVars: Record<string, string>,
+	denyPatterns: string[] = [],
 ): NodeJS.ProcessEnv {
-	return { ...process.env, ...envVars };
+	const parentEnv: Record<string, string> = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (typeof value === "string") parentEnv[key] = value;
+	}
+	return { ...filterDeniedEnv(parentEnv, denyPatterns), ...envVars };
 }

@@ -82,6 +82,8 @@ export interface PersistedSubagentLaunchMetadata {
 
 	flags?: string;
 	env?: string;
+	/** Comma- or newline-separated env names (with `*` globs) excluded from the inherited parent env. */
+	denyEnv?: string;
 }
 
 const SUBAGENT_LAUNCH_METADATA_CUSTOM_TYPE = "pi-subagents_launch_metadata";

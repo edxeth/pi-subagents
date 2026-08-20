@@ -21,6 +21,13 @@ import {
 	writeSubagentLaunchMetadataEntryForTest,
 } from "../support/index.ts";
 import "../support/ambient-spawn-grant.ts";
+
+function readCapsuleFromTmuxLog(log: string): { args: string[]; overrides: Record<string, string> } {
+	const match = log.match(/run-child\.mjs' '([^']+)'/);
+	if (!match?.[1]) throw new Error("Expected resume command to invoke the capsule launcher");
+	return JSON.parse(readFileSync(match[1], "utf8"));
+}
+
 async function readNonEmptyFileEventually(path: string): Promise<string> {
 	let lastText = "";
 	for (let attempt = 0; attempt < 50; attempt++) {
@@ -655,9 +662,10 @@ esac
 		);
 
 		const log = readFileSync(logFile, "utf8");
-		const artifactPath = log.match(/@([^'\s]+child-session[^'\s]+)/)?.[1];
-		assert.ok(artifactPath);
-		const artifact = readFileSync(artifactPath, "utf8");
+		const capsule = readCapsuleFromTmuxLog(log);
+		const taskArg = capsule.args.find((arg: string) => arg.startsWith("@"));
+		assert.ok(taskArg, "expected capsule argv to carry the @task artifact");
+		const artifact = readFileSync(taskArg.slice(1), "utf8");
 		assert.match(artifact, /Follow-up marker: resume-marker/);
 		assert.doesNotMatch(artifact, /!`printf resume-marker`/);
 	});
@@ -817,8 +825,13 @@ esac
 		);
 
 		const log = readFileSync(logFile, "utf8");
-		assert.match(log, /@.*child-session.*resume-child-/);
+		const capsule = readCapsuleFromTmuxLog(log);
+		const taskArg = capsule.args.find(
+			(arg: string) => arg.startsWith("@") && arg.includes("child-session") && arg.includes("resume-child"),
+		);
+		assert.ok(taskArg, "expected capsule argv to carry the @task artifact");
 		assert.doesNotMatch(log, /send-keys -t %42 -l follow up/);
+		assert.doesNotMatch(log, /PI_SUBAGENT_[A-Z_]+=/, "typed command must not carry env material");
 	});
 });
 

@@ -3,17 +3,16 @@ import { fileURLToPath } from "node:url";
 import { getSubagentDisplayTitle, isSetTabTitleToolEnabled } from "../agents/titles.ts";
 import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
 import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
-import { createSurface, getMuxBackend, sendShellCommand, shellEscape } from "../mux.ts";
+import { createSurface, getMuxBackend, sendShellCommand } from "../mux.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import { buildPiPromptArgs, getDoneSentinelFile } from "../session/session-files.ts";
 import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
 import { SET_TAB_TITLE_TOOL_NAME } from "../tools/tool-names.ts";
 import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
 import { buildAppendSystemInheritancePlan } from "./append-system.ts";
-import { getPiShellParts } from "./child-command.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
-import { buildInteractiveSentinelShellCommands } from "./interactive-sentinel.ts";
 import { coordinateSubagentLaunch } from "./launch-coordinator.ts";
+import { buildInteractiveShellCommand } from "./shell-command.ts";
 import { PI_SUBAGENT_TIMEOUT_STARTED_AT } from "../tools/timeout-reminders.ts";
 import {
 	resolveSubagentNoContextFiles,
@@ -104,16 +103,16 @@ export async function launchInteractiveSubagent(
 	const skillInjection = getPreparedSkillInjection(prepared);
 	if (skillInjection) fullTask = `${skillInjection}\n\n${fullTask}`;
 
-	const parts = getPiShellParts(getPreparedSessionLaunchArgs(prepared));
+	const piArgs = getPreparedSessionLaunchArgs(prepared);
 	const subagentDonePath = join(dirname(dirname(fileURLToPath(import.meta.url))), "tools", "subagent-done.ts");
 	for (const arg of getPreparedExtensionLaunchArgs(prepared, subagentDonePath)) {
-		parts.push(shellEscape(arg));
+		piArgs.push(arg);
 	}
 
 	const model = getPreparedModel(prepared);
-	if (model) parts.push("--model", shellEscape(model));
+	if (model) piArgs.push("--model", model);
 	if (resolveSubagentNoContextFiles(prepared.agentDefs)) {
-		parts.push("--no-context-files");
+		piArgs.push("--no-context-files");
 	}
 
 	const appendSystemPlan = buildAppendSystemInheritancePlan({
@@ -126,23 +125,23 @@ export async function launchInteractiveSubagent(
 		const flag = appendSystemPlan.promptArgs[i];
 		const text = appendSystemPlan.promptArgs[i + 1] ?? "";
 		const value = flag === "--system-prompt" ? writeSystemPromptArtifact(params.name, text, ctx) : text;
-		parts.push(flag, shellEscape(value));
+		piArgs.push(flag, value);
 	}
 	for (const arg of getApprovalLaunchArgs(prepared.agentDefs, "interactive")) {
-		parts.push(shellEscape(arg));
+		piArgs.push(arg);
 	}
 	for (const arg of getSubagentToolLaunchArgs(
 		prepared.effectiveTools,
 		prepared.denySet,
 		isPreparedChildSpawningAllowed(prepared),
 	)) {
-		parts.push(shellEscape(arg));
+		piArgs.push(arg);
 	}
 	for (const arg of getPreparedSkillLaunchArgs(prepared)) {
-		parts.push(shellEscape(arg));
+		piArgs.push(arg);
 	}
 	for (const flag of getFlagsLaunchArgs(prepared.agentDefs?.flags)) {
-		parts.push(shellEscape(flag));
+		piArgs.push(flag);
 	}
 
 	const startTime = Date.now();
@@ -164,9 +163,6 @@ export async function launchInteractiveSubagent(
 			? { [PI_SUBAGENT_TIMEOUT_STARTED_AT]: String(startTime) }
 			: {}),
 	};
-	const envPrefix = `${Object.entries(envVars)
-		.map(([key, value]) => `${key}=${shellEscape(value)}`)
-		.join(" ")} `;
 
 	const taskArg = `@${writeTaskArtifact(params.name, fullTask, ctx)}`;
 	const promptArgs = buildPiPromptArgs(getPreparedSkillList(prepared), taskArg, directTask);
@@ -177,16 +173,18 @@ export async function launchInteractiveSubagent(
 		taskArg,
 		promptArgs,
 	});
-	for (const promptArg of promptArgs) parts.push(shellEscape(promptArg));
+	piArgs.push(...promptArgs);
 
-	const cdPrefix = prepared.runtimePaths.effectiveCwd
-		? `cd ${shellEscape(prepared.runtimePaths.effectiveCwd)} && `
-		: "";
 	const { launchEntryCount } = launch;
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
-	const sentinel = buildInteractiveSentinelShellCommands(doneSentinelFile);
-	const surfacePrefix = zellijTarget ? "PI_SUBAGENT_SURFACE=pane:$ZELLIJ_PANE_ID " : "";
-	const command = `trap ${shellEscape(sentinel.exitTrap)} EXIT; ${cdPrefix}${envPrefix}${surfacePrefix}${parts.join(" ")}; ${sentinel.direct}`;
+	const { command, capsulePath } = buildInteractiveShellCommand({
+		cwd: prepared.runtimePaths.effectiveCwd ?? undefined,
+		piArgs,
+		envOverrides: envVars,
+		denyEnv: prepared.agentDefs?.denyEnv,
+		doneSentinelFile,
+		...(zellijTarget ? { deriveZellijPaneSurface: true } : {}),
+	});
 	const surface =
 		ordinarySurface ??
 		(await createZellijCommandSurface(surfaceName, zellijTarget!, getZellijShellCommand(command), zellijContext));
@@ -205,7 +203,8 @@ export async function launchInteractiveSubagent(
 		surface,
 		sessionFile: prepared.subagentSessionFile,
 		doneSentinelFile,
-		commandParts: parts,
+		piArgs,
+		capsulePath,
 		envKeys: Object.keys(envVars).sort(),
 	});
 	if (!zellijTarget) sendShellCommand(surface, command);

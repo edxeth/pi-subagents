@@ -92,7 +92,7 @@ export async function coordinateSubagentLaunch(
 		boundarySystemPrompt: launchMetadata.boundarySystemPrompt ? CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT : undefined,
 	});
 	Object.assign(envVars, appendSystemPlan.env);
-	if (prepared.agentDefs?.autoExit) envVars.PI_SUBAGENT_AUTO_EXIT = "1";
+	envVars.PI_SUBAGENT_AUTO_EXIT = prepared.agentDefs?.autoExit ? "1" : "";
 	envVars.PI_SUBAGENT_SESSION = prepared.subagentSessionFile;
 	const launchEntryCount = existsSync(prepared.subagentSessionFile) ? getEntryCount(prepared.subagentSessionFile) : 0;
 

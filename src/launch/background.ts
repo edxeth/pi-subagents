@@ -8,6 +8,7 @@ import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
 import type { RunningSubagent, SubagentParamsInput } from "../types.ts";
 import { buildAppendSystemInheritancePlan } from "./append-system.ts";
 import { getPiInvocation, getSubagentChildProcessEnv } from "./child-command.ts";
+import { resolveDenyEnvPatterns } from "./child-env.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
 import { coordinateSubagentLaunch } from "./launch-coordinator.ts";
 import { PI_SUBAGENT_TIMEOUT_STARTED_AT } from "../tools/timeout-reminders.ts";
@@ -101,6 +102,7 @@ export async function launchBackgroundSubagent(
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
 
 	const invocation = getPiInvocation(args);
+	const denyPatterns = resolveDenyEnvPatterns(prepared.agentDefs?.denyEnv);
 	const child = spawn(invocation.command, invocation.args, {
 		cwd: prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
 		detached: true,
@@ -108,7 +110,7 @@ export async function launchBackgroundSubagent(
 			resolveSubagentParentClosePolicy(prepared.agentDefs) === "continue"
 				? ["ignore", "ignore", "ignore"]
 				: ["ignore", "pipe", "pipe"],
-		env: getSubagentChildProcessEnv(invocation, envVars),
+		env: getSubagentChildProcessEnv(invocation, envVars, denyPatterns),
 	});
 	child.unref();
 	const running: RunningSubagent = {
