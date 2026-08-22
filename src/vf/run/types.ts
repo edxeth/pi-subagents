@@ -28,6 +28,18 @@ export function isTerminalRunState(state: VerifiedRunState): boolean {
 	return state === "completed" || state === "failed" || state === "cancelled";
 }
 
+/**
+ * Failure codes that left every candidate settled with its traces and
+ * snapshots preserved: selection alone can be retried (the retry never
+ * re-runs candidates). Everything else needs a fresh launch.
+ */
+export const RETRYABLE_VERIFICATION_FAILURE_CODES = [
+	"verifier-failed",
+	"degenerate-scores",
+	"comparison-count",
+	"cache",
+] as const;
+
 class VerifiedRunError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -133,6 +145,9 @@ export interface VerifiedRunSelection {
 	distinctCandidates: number;
 	/** Candidate indices collapsed as exact duplicates (same tree + report). */
 	collapsed: number[];
+	/** Exact-duplicate equivalence report: each collapsed candidate and the
+	 * distinct representative it is equivalent to (same tree + report hash). */
+	equivalences: Array<{ candidate: number; equivalentTo: number }>;
 	runnerUpSessionFiles: string[];
 }
 

@@ -1,14 +1,16 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, openSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isPidAlive } from "../supervisor/manifest.ts";
 import { resolveSupervisorRuntime } from "../supervisor/spawn.ts";
+import { defaultVerifierCachePath } from "../verifier/bridge.ts";
 import {
 	isTerminalRunState,
 	isVerifiedRunDelivered,
 	newVerifiedRunLeaseId,
 	readVerifiedRunManifest,
+	RETRYABLE_VERIFICATION_FAILURE_CODES,
 	verifiedRunFilePaths,
 	writeVerifiedRunManifest,
 	type VerifiedRunManifest,
@@ -94,6 +96,69 @@ export function respawnVerifiedSupervisor(runDir: string, options: { env?: NodeJ
 		throw new Error(`Cannot respawn supervisor for run ${manifest.runId}: pid ${manifest.lease.pid} is still alive.`);
 	}
 	spawnVerifiedSupervisor(runDir, manifest.leaseId, options.env);
+}
+
+/**
+ * Retry verification for a halted run (ticket 06): re-rank the preserved
+ * candidate traces without re-running any candidate. Allowed only for
+ * selection-phase failures whose candidates all settled and whose sessions
+ * and worktrees are intact. An optional verifier override lets the parent
+ * point the retry at a repaired backend (fixed credentials, another model,
+ * another criteria file) under the same non-empty model/criteria rules as
+ * the original launch.
+ */
+export function retryVerifiedRunVerification(
+	runDir: string,
+	options: { verifier?: Partial<VerifiedRunManifest["request"]["verifier"]>; env?: NodeJS.ProcessEnv } = {},
+): StartedVerifiedRun {
+	const manifest = readVerifiedRunManifest(runDir);
+	if (!isTerminalRunState(manifest.state)) {
+		throw new Error(`Cannot retry verification: run ${manifest.runId} is still ${manifest.state}.`);
+	}
+	if (manifest.result?.ok) {
+		throw new Error(`Cannot retry verification: run ${manifest.runId} already completed with a winner.`);
+	}
+	const failure = manifest.result?.failure;
+	if (!failure || !(RETRYABLE_VERIFICATION_FAILURE_CODES as readonly string[]).includes(failure.code)) {
+		throw new Error(
+			`Cannot retry verification: run ${manifest.runId} failed with ${failure?.code ?? "(no failure recorded)"}, ` +
+				`which is not a selection-phase failure (${RETRYABLE_VERIFICATION_FAILURE_CODES.join(", ")}). Start a fresh launch instead.`,
+		);
+	}
+	const settled = manifest.candidates.filter((candidate) => candidate.settled).length;
+	if (settled !== manifest.request.candidateCount) {
+		throw new Error(
+			`Cannot retry verification: only ${settled}/${manifest.request.candidateCount} candidates settled; the retry re-ranks traces, it never re-runs candidates.`,
+		);
+	}
+	for (const spec of manifest.request.candidates) {
+		if (!existsSync(spec.sessionFile)) {
+			throw new Error(`Cannot retry verification: candidate session ${spec.sessionFile} is gone.`);
+		}
+		if (!existsSync(spec.worktree)) {
+			throw new Error(`Cannot retry verification: candidate worktree ${spec.worktree} is gone.`);
+		}
+	}
+	if (options.verifier) {
+		const merged = { ...manifest.request.verifier, ...options.verifier };
+		if (!merged.model?.trim() || !merged.criteriaPath?.trim()) {
+			throw new Error("Cannot retry verification: the verifier override must keep a non-empty model and criteriaPath.");
+		}
+		manifest.request.verifier = merged;
+	}
+	// The halted attempt's cache carries the degenerate scores that stopped
+	// the run; a retry must re-ask the backend, not replay the poison.
+	rmSync(defaultVerifierCachePath(runDir), { force: true });
+	const leaseId = newVerifiedRunLeaseId();
+	manifest.state = "verifying";
+	manifest.result = null;
+	manifest.leaseId = leaseId;
+	manifest.lease = null;
+	writeVerifiedRunManifest(runDir, manifest);
+	// Each verification attempt's outcome is deliverable exactly once.
+	rmSync(verifiedRunFilePaths(runDir).deliveryClaim, { force: true });
+	spawnVerifiedSupervisor(runDir, leaseId, options.env);
+	return { runId: manifest.runId, runDir, leaseId, manifestPath: verifiedRunFilePaths(runDir).manifest };
 }
 
 export interface VerifiedRunSnapshot {

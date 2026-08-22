@@ -111,19 +111,22 @@ function safeTrace(manifest: VerifiedRunManifest, index: number, sessionFile: st
 export function collapseDuplicates(settled: SettledCandidate[]): {
 	distinct: SettledCandidate[];
 	collapsed: number[];
+	equivalences: Array<{ candidate: number; equivalentTo: number }>;
 } {
 	const byKey = new Map<string, SettledCandidate>();
 	const collapsed: number[] = [];
+	const equivalences: Array<{ candidate: number; equivalentTo: number }> = [];
 	for (const candidate of settled) {
 		if (!candidate.completed || !candidate.distinctKey) continue;
 		const existing = byKey.get(candidate.distinctKey);
 		if (existing) {
 			collapsed.push(candidate.spec.index);
+			equivalences.push({ candidate: candidate.spec.index, equivalentTo: existing.spec.index });
 		} else {
 			byKey.set(candidate.distinctKey, candidate);
 		}
 	}
-	return { distinct: [...byKey.values()], collapsed };
+	return { distinct: [...byKey.values()], collapsed, equivalences };
 }
 
 export function writeTraceArtifacts(runDir: string, settled: SettledCandidate[]): string[] {
@@ -149,12 +152,17 @@ export async function selectWinner(
 	runDir: string,
 	distinct: SettledCandidate[],
 	collapsed: number[],
+	equivalences: Array<{ candidate: number; equivalentTo: number }>,
 	options: { signal?: AbortSignal } = {},
 ): Promise<SelectionOutcome> {
 	if (distinct.length < 2) {
+		const equivalenceNote =
+			collapsed.length > 0
+				? ` The ${distinct.length + collapsed.length} completed candidates collapsed to ${distinct.length} distinct outcome(s) with identical git tree and report hashes - they are treated as equivalent candidates, not as a backend failure`
+				: "";
 		throw new SettleAbort(
 			"insufficient-distinct-candidates",
-			`run ${manifest.runId} settled with ${distinct.length} distinct completed candidate(s); at least two are required, so the whole run fails and nothing is applied.`,
+			`run ${manifest.runId} settled with ${distinct.length} distinct completed candidate(s); at least two are required, so the whole run fails and nothing is applied.${equivalenceNote}.`,
 		);
 	}
 	const response = await runVerifierSelect({
@@ -191,6 +199,7 @@ export async function selectWinner(
 		winnerTrace: winner.trace ?? "",
 		distinctCandidates: distinct.length,
 		collapsed,
+		equivalences,
 		runnerUpSessionFiles: distinct
 			.filter((candidate) => candidate.spec.index !== winner.spec.index)
 			.map((candidate) => candidate.spec.sessionFile),

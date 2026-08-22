@@ -11,6 +11,7 @@ Exit codes (mirrored by the TypeScript side in bridge.ts):
     3  missing verifier credentials
     4  verifier backend/scoring error (on_error="raise" re-raised)
     5  halt: comparison-count or cache assertion failed (never a winner)
+    6  capability: the backend failed the preflight probe/canary (never a winner)
 
 No scoring math is reimplemented here; llm_verifier.select() is called verbatim.
 """
@@ -18,6 +19,7 @@ No scoring math is reimplemented here; llm_verifier.select() is called verbatim.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
@@ -30,12 +32,17 @@ EXIT_CRITERIA = 22
 EXIT_CREDENTIALS = 3
 EXIT_VERIFIER = 4
 EXIT_HALT = 5
+EXIT_CAPABILITY = 6
 
 N_EVALUATIONS_DEFAULT = 4
 N_EVALUATIONS_BENCHMARK = 8
 PIVOTS_DEFAULT = 2
 SEED_DEFAULT = 0
 ON_ERROR = "raise"
+DEGENERATE_SPREAD_EPSILON = 1e-6
+# Distinct A-T letters the score-tag distribution must cover for the
+# backend to count as logprob-capable (calibrated against DeepSeek).
+MIN_SCORE_LETTERS_COVERED = 3
 
 VALID_THINKING = ("off", "low", "high", "max")
 
@@ -154,6 +161,31 @@ def validate_select_request(req: dict) -> dict:
     }
 
 
+def validate_probe_request(req: dict) -> dict:
+    model = _require_str(req, "model")
+    criteria_path = _require_str(req, "criteriaPath")
+    if not os.path.isabs(criteria_path):
+        fail("malformed-request", 'field "criteriaPath" must be an absolute path', EXIT_MALFORMED)
+    thinking = req.get("thinking")
+    if thinking is not None and thinking not in VALID_THINKING:
+        fail("malformed-request", f'field "thinking" must be one of {list(VALID_THINKING)}', EXIT_MALFORMED)
+    env = req.get("env")
+    if env is None:
+        env = {}
+    if not isinstance(env, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in env.items()):
+        fail("malformed-request", 'field "env" must be an object of string -> string', EXIT_MALFORMED)
+    mock = req.get("mockVerifier")
+    if mock is not None and not isinstance(mock, dict):
+        fail("malformed-request", 'field "mockVerifier" must be null or an object (test seam)', EXIT_MALFORMED)
+    return {
+        "model": model,
+        "criteria_path": criteria_path,
+        "thinking": thinking,
+        "env": env,
+        "mock": mock,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Mock verifier client (test seam). Speaks the OpenAI/DeepSeek response shape
 # the library's call_deepseek path reads: tokens + per-position logprobs with
@@ -175,12 +207,22 @@ def _letter_distribution(letter: str):
     return alts
 
 
-def build_mock_client(config: dict):
+def build_mock_client(config: dict, force_flat: bool = False):
     good_marker = config.get("goodMarker", "")
     mid_marker = config.get("midMarker", "")
     fail_calls = bool(config.get("failCalls", False))
     sleep_seconds = float(config.get("sleepSeconds", 0) or 0)
     log_file = config.get("logFile")
+    # Ticket-06 test modes: `flatScores` makes every letter distribution
+    # uniform (the backend "cannot discriminate" — scores come back exactly
+    # 0.5/0.5); `stripLogprobs` returns text score letters with NO logprob
+    # distributions (the logprob-less proxy: text parsing alone would
+    # fabricate confident 0/1 scores, which only the probe catches).
+    # `degradeForSelect` is a bridge-level flag (not read here): the caller
+    # constructs the mock with force_flat so the probe discriminates while
+    # the tournament goes flat — a backend that degraded after preflight.
+    flat_scores = bool(config.get("flatScores", False))
+    strip_logprobs = bool(config.get("stripLogprobs", False))
     state = {"calls": 0}
 
     def create(**kwargs):
@@ -205,24 +247,35 @@ def build_mock_client(config: dict):
                 return "C"
             return "T"
 
-        letter_a, letter_b = grade(trace_a), grade(trace_b)
+        if flat_scores or force_flat:
+            letter_a, letter_b = "J", "J"
+        else:
+            letter_a, letter_b = grade(trace_a), grade(trace_b)
         text = (
             "mock analysis\n"
             f"<score_A> {letter_a} </score_A>\n"
             f"<score_B> {letter_b} </score_B>"
         )
-        positions = [
-            SimpleNamespace(token="<score_A>", logprob=-0.1, top_logprobs=_letter_distribution(letter_a)),
-            SimpleNamespace(token=f" {letter_a}", logprob=-0.05, top_logprobs=_letter_distribution(letter_a)),
-            SimpleNamespace(token=" </score_A>", logprob=-0.1, top_logprobs=_letter_distribution(letter_a)),
-            SimpleNamespace(token="\n", logprob=-0.1, top_logprobs=_letter_distribution(letter_a)),
-            SimpleNamespace(token="<score_B>", logprob=-0.1, top_logprobs=_letter_distribution(letter_b)),
-            SimpleNamespace(token=f" {letter_b}", logprob=-0.05, top_logprobs=_letter_distribution(letter_b)),
-            SimpleNamespace(token=" </score_B>", logprob=-0.1, top_logprobs=_letter_distribution(letter_b)),
-        ]
+        if flat_scores or force_flat:
+            uniform = lambda: [SimpleNamespace(token=f" {c}", logprob=math.log(1 / 20)) for c in LETTERS]
+            dist_a, dist_b = uniform(), uniform()
+        else:
+            dist_a, dist_b = _letter_distribution(letter_a), _letter_distribution(letter_b)
+        if strip_logprobs:
+            content = None  # a proxy that answers but exposes no logprobs
+        else:
+            content = [
+                SimpleNamespace(token="<score_A>", logprob=-0.1, top_logprobs=dist_a),
+                SimpleNamespace(token=f" {letter_a}", logprob=-0.05, top_logprobs=dist_a),
+                SimpleNamespace(token=" </score_A>", logprob=-0.1, top_logprobs=dist_a),
+                SimpleNamespace(token="\n", logprob=-0.1, top_logprobs=dist_a),
+                SimpleNamespace(token="<score_B>", logprob=-0.1, top_logprobs=dist_b),
+                SimpleNamespace(token=f" {letter_b}", logprob=-0.05, top_logprobs=dist_b),
+                SimpleNamespace(token=" </score_B>", logprob=-0.1, top_logprobs=dist_b),
+            ]
         choice = SimpleNamespace(
             message=SimpleNamespace(content=text),
-            logprobs=SimpleNamespace(content=positions),
+            logprobs=SimpleNamespace(content=content),
             finish_reason="stop",
         )
         return SimpleNamespace(
@@ -236,8 +289,10 @@ def build_mock_client(config: dict):
         chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
     )
     # Tag as DeepSeek-style so the library reads our self-emitted tags
-    # instead of trying the vLLM-only prefill trick.
-    client._llm_verifier_deepseek = True
+    # instead of trying the vLLM-only prefill trick. The stripLogprobs mode
+    # deliberately stays untagged: it simulates an OpenAI-compatible proxy
+    # that answers with text but no logprob distributions.
+    client._llm_verifier_deepseek = not strip_logprobs
     return client
 
 
@@ -276,6 +331,179 @@ def run_preview(req: dict) -> None:
     })
 
 
+# ---------------------------------------------------------------------------
+# Preflight capability probe + deterministic canary (ticket 06).
+#
+# ONE real scoring call against the configured backend, made before any
+# candidate launches: an obviously-good trace is scored against an
+# obviously-bad one through the library's own prompt/call/extract path. The
+# backend passes only when (a) the score-tag positions expose a token
+# logprob distribution covering several A-T letters (a text-only or
+# logprob-less proxy fails here even though it "answers"), and (b) the
+# good trace strictly outranks the bad one (a flat backend cannot
+# discriminate and would fabricate a winner).
+# ---------------------------------------------------------------------------
+
+CANARY_PROBLEM = (
+    "Print the integer stored in answer.txt and state it in the final "
+    "report; the correct value is 42."
+)
+
+
+def canary_traces(mock) -> "tuple[str, str]":
+    """Deterministic obviously-good vs obviously-bad traces. With the mock
+    seam active, the good trace carries the configured good marker so the
+    mock's grading rules apply to the canary exactly as to real traces."""
+    good_marker = mock.get("goodMarker", "") if isinstance(mock, dict) else ""
+    good = (
+        "[Command] cat answer.txt\n"
+        "[Output]\n42\n"
+        "[Command] ./run_tests.sh\n"
+        "[Output]\nOK: 3 passed, 0 failed\n"
+        "Final report: the value is 42, verified by reading the file and "
+        "running the test suite."
+    )
+    if good_marker:
+        good += f"\ncanary marker: {good_marker}"
+    bad = (
+        "[Command] cat answer.txt\n"
+        "[Output]\ncat: answer.txt: No such file or directory\n"
+        "[Command] echo done\n"
+        "[Output]\ndone\n"
+        "Final report: I could not read the file; my best guess is 7."
+    )
+    return good, bad
+
+
+def _tag_letter_coverage(tokens, position_logprobs, tag) -> dict:
+    """Distinct valid score letters -> max probability at the position after
+    `tag`, mirroring extract_score's token normalization ('>A' fusions,
+    case folding). Empty when the backend exposed no distribution there."""
+    from llm_verifier import fine_grained_reward as fgr
+
+    letters: dict[str, float] = {}
+    if tokens is None or position_logprobs is None:
+        return letters
+    tag_lp = fgr._find_tag_logprobs(tokens, position_logprobs, tag)
+    if tag_lp:
+        for tok_str, logprob in tag_lp:
+            tok = tok_str.strip()
+            if tok.startswith(">"):  # DeepSeek fuses '>' with the letter
+                tok = tok[1:].strip()
+            if tok in fgr.SCALE["valid_tokens"]:
+                key = tok.upper()
+                letters[key] = max(letters.get(key, 0.0), math.exp(logprob))
+    return letters
+
+
+def run_probe(req: dict) -> None:
+    import llm_verifier
+    from llm_verifier import fine_grained_reward as fgr
+    from llm_verifier.prompts import load_prompts
+
+    os.environ.update(req["env"])
+    if req["thinking"]:
+        os.environ["DEEPSEEK_EFFORT"] = req["thinking"]
+
+    try:
+        note, criteria = load_prompts(req["criteria_path"])
+    except FileNotFoundError as exc:
+        fail("criteria", f"criteria file not found: {exc}", EXIT_CRITERIA, path=req["criteria_path"])
+    except ValueError as exc:
+        fail("criteria", f"criteria file is not valid: {exc}", EXIT_CRITERIA, path=req["criteria_path"])
+
+    if req["mock"] is not None:
+        client = build_mock_client(req["mock"])
+        fgr.create_client = lambda: client
+    else:
+        client = fgr.create_client()
+
+    print(
+        f"verifier-bridge: capability probe model={req['model']} "
+        f"criteria={req['criteria_path']}",
+        file=sys.stderr,
+    )
+    check_credentials(req)
+
+    good_trace, bad_trace = canary_traces(req["mock"])
+    prompt = fgr.build_prompt(CANARY_PROBLEM, good_trace, bad_trace, criteria[0], note)
+    llm_verifier.USAGE.reset()
+    started = time.monotonic()
+    try:
+        text, tokens, position_logprobs = fgr.call_verifier(client, prompt, model=req["model"])
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        name = type(exc).__name__
+        if name == "MissingAPIKeyError":
+            fail("credentials", f"verifier probe needs credentials: {exc}", EXIT_CREDENTIALS)
+        fail(
+            "capability",
+            f"verifier probe call against model {req['model']} failed: {name}: {exc}",
+            EXIT_CAPABILITY,
+            model=req["model"],
+        )
+
+    letters_a = _tag_letter_coverage(tokens, position_logprobs, "<score_A>")
+    letters_b = _tag_letter_coverage(tokens, position_logprobs, "<score_B>")
+    score_good = fgr.extract_score(text, tokens, position_logprobs, "<score_A>")
+    score_bad = fgr.extract_score(text, tokens, position_logprobs, "<score_B>")
+
+    problems: list[str] = []
+    if not letters_a or not letters_b:
+        problems.append(
+            "backend exposed no A-T score-token logprobs at the score tags "
+            "(logprob-less or text-only backend; ranking would be fabricated)"
+        )
+    else:
+        thin = [
+            f"{len(letters)} letters at {label}"
+            for letters, label in ((letters_a, "<score_A>"), (letters_b, "<score_B>"))
+            if len(letters) < MIN_SCORE_LETTERS_COVERED
+        ]
+        if thin:
+            problems.append(
+                "score-token logprob coverage too thin: "
+                + ", ".join(thin)
+                + f" (need >= {MIN_SCORE_LETTERS_COVERED} distinct A-T letters)"
+            )
+    if score_good <= score_bad + 1e-9:
+        problems.append(
+            f"canary failed: the obviously-good trace scored {score_good:.4f} "
+            f"against {score_bad:.4f} for the obviously-bad one (good must rank higher; "
+            "a flat distribution cannot pick a real winner)"
+        )
+    if problems:
+        fail(
+            "capability",
+            f"verifier backend failed the preflight probe for model {req['model']}: "
+            + "; ".join(problems),
+            EXIT_CAPABILITY,
+            model=req["model"],
+            coverageA=sorted(letters_a),
+            coverageB=sorted(letters_b),
+            canaryGood=score_good,
+            canaryBad=score_bad,
+        )
+
+    emit({
+        "ok": True,
+        "kind": "probe",
+        "model": req["model"],
+        "thinking": req["thinking"],
+        "coverage": {
+            "scoreA": sorted(letters_a),
+            "scoreB": sorted(letters_b),
+        },
+        "canary": {
+            "goodScore": score_good,
+            "badScore": score_bad,
+            "margin": score_good - score_bad,
+        },
+        "usage": llm_verifier.token_usage(),
+        "elapsedMs": round((time.monotonic() - started) * 1000),
+    })
+
+
 def run_select(req: dict) -> None:
     import llm_verifier
     from llm_verifier import fine_grained_reward as fgr
@@ -297,7 +525,10 @@ def run_select(req: dict) -> None:
         fail("criteria", f"criteria file is not valid: {exc}", EXIT_CRITERIA, path=req["criteria_path"])
 
     if req["mock"] is not None:
-        client = build_mock_client(req["mock"])
+        # The mock's degradeForSelect mode models a backend that passed the
+        # preflight probe and went flat for the real tournament: the probe
+        # (a separate process) still discriminates, the tournament is flat.
+        client = build_mock_client(req["mock"], force_flat=bool(req["mock"].get("degradeForSelect", False)))
         fgr.create_client = lambda: client
 
     print(
@@ -355,6 +586,23 @@ def run_select(req: dict) -> None:
             )
         cache_report = {"path": req["cache_path"], "bytes": os.path.getsize(req["cache_path"])}
 
+    # Degenerate-score halt (ticket 06): a flat distribution means the
+    # backend cannot discriminate between candidates (the silent 0.5
+    # fallback of a logprob-less backend is the canonical shape). Picking
+    # any winner from it would be fabrication, so halt with no winner.
+    spread = max(result.scores) - min(result.scores)
+    if spread <= DEGENERATE_SPREAD_EPSILON:
+        fail(
+            "degenerate-scores",
+            f"verifier returned a flat score distribution "
+            f"(spread {spread:.2e}, scores {[round(s, 6) for s in result.scores]}); "
+            "the backend cannot discriminate between candidates, so no winner is "
+            "selected. Traces and candidate snapshots are preserved for a "
+            "verification retry.",
+            EXIT_HALT,
+            scores=result.scores,
+        )
+
     emit({
         "ok": True,
         "kind": "select",
@@ -378,8 +626,11 @@ def main() -> int:
     if kind == "preview":
         run_preview(req)
         return EXIT_OK
+    if kind == "probe":
+        run_probe(validate_probe_request(req))
+        return EXIT_OK
     if kind != "select":
-        fail("malformed-request", f'field "kind" must be "select" or "preview" (got {kind!r})', EXIT_MALFORMED)
+        fail("malformed-request", f'field "kind" must be "select", "preview", or "probe" (got {kind!r})', EXIT_MALFORMED)
     validated = validate_select_request(req)
     run_select(validated)
     return EXIT_OK

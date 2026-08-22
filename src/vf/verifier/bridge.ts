@@ -21,6 +21,7 @@ export const RUNNER_EXIT_CODES = {
 	verifier: 4,
 	halt: 5,
 	criteria: 22,
+	capability: 6,
 } as const;
 
 export type VerifierBridgeErrorKind =
@@ -28,6 +29,8 @@ export type VerifierBridgeErrorKind =
 	| "credentials"
 	| "criteria"
 	| "verifier-error"
+	| "capability"
+	| "degenerate-scores"
 	| "comparison-count"
 	| "cache"
 	| "timeout"
@@ -68,6 +71,10 @@ export interface MockVerifierConfig {
 	sleepSeconds?: number;
 	/** Append one JSON line per backend call (proves the model reached every call). */
 	logFile?: string;
+	/** Every letter distribution uniform: the backend cannot discriminate (scores 0.5/0.5). */
+	flatScores?: boolean;
+	/** Answer with text score letters but no logprob distributions (logprob-less proxy). */
+	stripLogprobs?: boolean;
 }
 
 export interface VerifierSelectRequest {
@@ -126,6 +133,31 @@ export interface PreviewCriteriaResponse {
 	criteriaPath: string;
 	groundTruthNote: string;
 	criteria: Array<{ id: string; name: string; description: string }>;
+}
+
+/** Preflight capability probe (ticket 06): one real scoring call that the
+ * backend must answer with discriminating A-T score-token logprobs. */
+export interface VerifierProbeRequest {
+	/** Plain library model id (provider prefix / `:thinking` already stripped). */
+	model: string;
+	thinking?: string | null;
+	/** Absolute path of the criteria file (validated, first criterion used). */
+	criteriaPath: string;
+	/** Verifier profile env block (credentials), merged over the process env. */
+	env?: Record<string, string>;
+	/** Test seam: run the probe against the mock backend instead of a real one. */
+	mockVerifier?: MockVerifierConfig | null;
+}
+
+export interface VerifierProbeResponse {
+	ok: true;
+	kind: "probe";
+	model: string;
+	thinking: string | null;
+	coverage: { scoreA: string[]; scoreB: string[] };
+	canary: { goodScore: number; badScore: number; margin: number };
+	usage: VerifierUsage;
+	elapsedMs: number;
 }
 
 /** SPEC: the score cache lives at `<run-dir>/cache.json`. */
@@ -322,6 +354,8 @@ function codeToKind(code: number | null): VerifierBridgeErrorKind {
 		case RUNNER_EXIT_CODES.verifier:
 		default:
 			return "verifier-error";
+		case RUNNER_EXIT_CODES.capability:
+			return "capability";
 	}
 }
 
@@ -421,4 +455,68 @@ export async function previewVerifierCriteria(
 		return response as PreviewCriteriaResponse;
 	}
 	throwMappedError(outcome, codeToKind(outcome.exitCode), "criteria preview failed");
+}
+
+function assertProbeRequest(request: VerifierProbeRequest): void {
+	const problems: string[] = [];
+	if (!request.model?.trim()) problems.push("model must be a non-empty string");
+	if (!request.criteriaPath?.trim()) problems.push("criteriaPath must be a non-empty string");
+	if (problems.length > 0) {
+		throw new VerifierBridgeError("malformed-request", `invalid probe request: ${problems.join("; ")}`);
+	}
+}
+
+function validateProbeResponse(response: unknown): VerifierProbeResponse {
+	const r = response as Partial<VerifierProbeResponse> | null;
+	const problems: string[] = [];
+	if (!r || r.ok !== true || r.kind !== "probe") problems.push("response is not an ok probe result");
+	if (typeof r?.model !== "string" || !r.model) problems.push("model echo missing");
+	const coverage = r?.coverage as Partial<VerifierProbeResponse["coverage"]> | undefined;
+	if (
+		!Array.isArray(coverage?.scoreA) ||
+		coverage.scoreA.length === 0 ||
+		!Array.isArray(coverage?.scoreB) ||
+		coverage.scoreB.length === 0
+	) {
+		problems.push("coverage block missing");
+	}
+	const canary = r?.canary as Partial<VerifierProbeResponse["canary"]> | undefined;
+	if (
+		typeof canary?.goodScore !== "number" ||
+		typeof canary?.badScore !== "number" ||
+		typeof canary?.margin !== "number"
+	) {
+		problems.push("canary block missing");
+	}
+	if (!r?.usage || typeof r.usage.calls !== "number") problems.push("usage block missing");
+	if (problems.length > 0) {
+		throw new VerifierBridgeError("protocol", `probe response failed validation: ${problems.join("; ")}`);
+	}
+	return r as VerifierProbeResponse;
+}
+
+/**
+ * Preflight capability probe (ticket 06): one real scoring call against the
+ * configured backend. Fails closed (kind "capability") when the backend
+ * exposes no usable A-T score-token logprobs or when the deterministic
+ * good-vs-bad canary does not rank the good trace higher.
+ */
+export async function runVerifierProbe(
+	request: VerifierProbeRequest,
+	options: RunBridgeOptions = {},
+): Promise<VerifierProbeResponse> {
+	assertProbeRequest(request);
+	const payload = {
+		kind: "probe",
+		model: request.model,
+		thinking: request.thinking ?? null,
+		criteriaPath: request.criteriaPath,
+		env: request.env ?? {},
+		mockVerifier: request.mockVerifier ?? null,
+	};
+	const outcome = await runRunnerProcess(payload, options);
+	if (outcome.response && (outcome.response as { ok?: boolean }).ok === true && outcome.exitCode === 0) {
+		return validateProbeResponse(outcome.response);
+	}
+	throwMappedError(outcome, codeToKind(outcome.exitCode), "verifier capability probe failed");
 }

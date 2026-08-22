@@ -3,7 +3,8 @@ import { existsSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { isPidAlive } from "./manifest.ts";
 import { createCandidateWorktrees, preflightWorktreeSource } from "../worktrees.ts";
-import { VerifierBridgeError } from "../verifier/bridge.ts";
+import { runVerifierProbe, VerifierBridgeError, type MockVerifierConfig } from "../verifier/bridge.ts";
+import { RETRYABLE_VERIFICATION_FAILURE_CODES } from "../run/types.ts";
 import {
 	collapseDuplicates,
 	selectWinner,
@@ -193,6 +194,32 @@ function provisionWorktrees(): void {
 	log(runDir, `created ${worktrees.length} candidate worktrees at base ${request.baseCommit}`);
 }
 
+/**
+ * Ticket 06 capability gate: before any worktree is created or candidate
+ * launched, the configured verifier backend must pass the preflight probe
+ * (usable A-T score-token logprobs) and the deterministic good-vs-bad
+ * canary. A logprob-less backend fails here, having spent nothing.
+ */
+async function gateVerifierCapability(): Promise<{ coverage: string[]; canary: { goodScore: number; badScore: number } } | null> {
+	if (manifest.candidates.length > 0) return null; // adopted run: a predecessor already gated
+	const verifier = manifest.request.verifier;
+	const probe = await runVerifierProbe(
+		{
+			model: verifier.model,
+			thinking: verifier.thinking,
+			criteriaPath: verifier.criteriaPath,
+			env: verifier.env,
+			mockVerifier: (verifier.mockVerifier as MockVerifierConfig | null | undefined) ?? null,
+		},
+		{ cwd: runDir, signal: verifyAbort.signal },
+	);
+	log(
+		runDir,
+		`capability probe passed: model=${probe.model} ${probe.coverage.scoreA.length} A-T letters at <score_A>, canary ${probe.canary.goodScore.toFixed(3)} > ${probe.canary.badScore.toFixed(3)}`,
+	);
+	return { coverage: probe.coverage.scoreA, canary: probe.canary };
+}
+
 function persistCandidateExits(): void {
 	let dirty = false;
 	for (const candidate of manifest.candidates) {
@@ -221,6 +248,8 @@ function allSettled(): boolean {
 let cancelled = false;
 const verifyAbort = new AbortController();
 let lastHeartbeat = Date.now();
+/** Traces written before a failure stay in the result's artifact list (ticket 06). */
+let preservedTraceArtifacts: string[] = [];
 
 process.on("SIGTERM", () => {
 	cancelled = true;
@@ -231,7 +260,42 @@ process.on("SIGINT", () => {
 	verifyAbort.abort();
 });
 
+/** Watchdog covering every verifier call (gate + selection): cancellation,
+ * lease loss, and heartbeat must be honored while the bridge runs. */
+function startWatchdog(): () => void {
+	const interval = setInterval(() => {
+		void (async () => {
+			if (!cancelled && existsSync(verifiedRunFilePaths(runDir).cancelSentinel)) {
+				cancelled = true;
+				log(runDir, "cancel observed during verification");
+				verifyAbort.abort();
+			}
+			const current = safeReadManifest();
+			if (current && (current.leaseId !== manifest.leaseId || (current.lease && current.lease.pid !== process.pid))) {
+				log(runDir, "lease lost during verification; aborting selection");
+				verifyAbort.abort();
+			}
+			if (Date.now() - lastHeartbeat >= HEARTBEAT_MS) {
+				lastHeartbeat = Date.now();
+				if (manifest.lease) manifest.lease.heartbeatAt = new Date().toISOString();
+				writeVerifiedRunManifest(runDir, manifest);
+			}
+		})();
+	}, TICK_MS);
+	return () => clearInterval(interval);
+}
+
+function verifierFailureCode(error: VerifierBridgeError): string {
+	if (["capability", "degenerate-scores", "comparison-count", "cache"].includes(error.kind)) return error.kind;
+	return "verifier-failed";
+}
+
 try {
+	const stopWatchdog = startWatchdog();
+	// Ticket 06: gate the verifier backend BEFORE creating worktrees or
+	// launching candidates (a fresh run only — an adopted run already paid
+	// for its candidates behind a gate a predecessor passed).
+	await gateVerifierCapability();
 	provisionWorktrees();
 	spawnCandidates(); // spawns only candidates no predecessor already recorded
 	manifest.state = "running";
@@ -273,43 +337,28 @@ try {
 	manifest.state = "verifying";
 	writeVerifiedRunManifest(runDir, manifest);
 
-	// While the bridge runs, keep watching cancellation, the lease, and the
-	// heartbeat; a selection must never outlive its ownership.
-	const watchdog = setInterval(() => {
-		void (async () => {
-			if (!cancelled && existsSync(verifiedRunFilePaths(runDir).cancelSentinel)) {
-				cancelled = true;
-				log(runDir, "cancel observed during verification");
-				verifyAbort.abort();
-			}
-			const current = safeReadManifest();
-			if (current && (current.leaseId !== manifest.leaseId || (current.lease && current.lease.pid !== process.pid))) {
-				log(runDir, "lease lost during verification; aborting selection");
-				verifyAbort.abort();
-			}
-			if (Date.now() - lastHeartbeat >= HEARTBEAT_MS) {
-				lastHeartbeat = Date.now();
-				if (manifest.lease) manifest.lease.heartbeatAt = new Date().toISOString();
-				writeVerifiedRunManifest(runDir, manifest);
-			}
-		})();
-	}, TICK_MS);
-
 	const settled = settleCandidates(manifest);
-	const { distinct, collapsed } = collapseDuplicates(settled);
+	const { distinct, collapsed, equivalences } = collapseDuplicates(settled);
 	const traceArtifacts = writeTraceArtifacts(runDir, settled);
+	preservedTraceArtifacts = traceArtifacts;
 	log(
 		runDir,
 		`settled: ${distinct.length} distinct completed (${collapsed.length} collapsed) of ${settled.length}`,
 	);
+	if (equivalences.length > 0) {
+		log(
+			runDir,
+			`equivalent candidates (identical tree + report): ${equivalences.map((e) => `w${e.candidate}=w${e.equivalentTo}`).join(", ")}`,
+		);
+	}
 	let selection: Awaited<ReturnType<typeof selectWinner>>["selection"];
 	let response: Awaited<ReturnType<typeof selectWinner>>["response"];
 	try {
-		({ selection, response } = await selectWinner(manifest, runDir, distinct, collapsed, {
+		({ selection, response } = await selectWinner(manifest, runDir, distinct, collapsed, equivalences, {
 			signal: verifyAbort.signal,
 		}));
 	} finally {
-		clearInterval(watchdog);
+		stopWatchdog();
 	}
 	writeResultArtifacts(runDir, selection.winnerReport, response);
 	manifest.result = {
@@ -335,9 +384,18 @@ try {
 		writeVerifiedRunManifest(runDir, manifest);
 		process.exit(0);
 	}
-	const code = error instanceof SettleAbort ? error.code : error instanceof VerifierBridgeError ? "verifier-failed" : "run-failed";
-	const message = error instanceof Error ? error.message : String(error);
-	manifest.result = failureResult(runStartedAt, code, message);
+	const code = error instanceof SettleAbort
+		? error.code
+		: error instanceof VerifierBridgeError
+			? verifierFailureCode(error)
+			: "run-failed";
+	let message = error instanceof Error ? error.message : String(error);
+	if ((RETRYABLE_VERIFICATION_FAILURE_CODES as readonly string[]).includes(code)) {
+		// Ticket 06: a halted selection preserves everything the candidates
+		// paid for; the retry path re-ranks frozen traces without respawning.
+		message += ` Candidate traces and snapshots are preserved in ${runDir}; retry verification without re-running candidates with retryVerifiedRunVerification(${JSON.stringify(runDir)}).`;
+	}
+	manifest.result = failureResult(runStartedAt, code, message, preservedTraceArtifacts);
 	manifest.state = "failed";
 	writeVerifiedRunManifest(runDir, manifest);
 	log(runDir, `run failed (${code}): ${message}`);
@@ -352,12 +410,12 @@ function safeReadManifest(): VerifiedRunManifest | null {
 	}
 }
 
-function failureResult(startedAt: number, code: string, message: string): VerifiedRunResult {
+function failureResult(startedAt: number, code: string, message: string, traces: string[] = []): VerifiedRunResult {
 	return {
 		ok: false,
 		selection: null,
 		failure: { code, message },
-		artifacts: { traces: [], report: "winner-report.md", ranking: "ranking.json" },
+		artifacts: { traces, report: "winner-report.md", ranking: "ranking.json" },
 		elapsedMs: Date.now() - startedAt,
 		finishedAt: new Date().toISOString(),
 	};

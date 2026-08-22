@@ -1,27 +1,27 @@
-import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { loadAgentDefaults } from "../../src/agents/definitions.ts";
-import { getPackagedCriteriaDir } from "../../src/vf/criteria.ts";
-import { newRunId } from "../../src/vf/supervisor/run-client.ts";
-import { candidateWorktreeBranchName, candidateWorktreeDirName, preflightWorktreeSource } from "../../src/vf/worktrees.ts";
-import {
-	adoptVerifiedRuns,
-} from "../../src/vf/run/adopt.ts";
+import { candidateWorktreeBranchName } from "../../src/vf/worktrees.ts";
+import { adoptVerifiedRuns } from "../../src/vf/run/adopt.ts";
 import {
 	cancelVerifiedRun,
 	listVerifiedRuns,
 	respawnVerifiedSupervisor,
-	startVerifiedRun,
 	waitForVerifiedRunResult,
 } from "../../src/vf/run/client.ts";
 import { launchVerifiedFanOut, VerifiedLaunchError, verifiedRunsBaseDir } from "../../src/vf/run/launch.ts";
 import { resolveSubagentCwd } from "../../src/launch/runtime-paths.ts";
-import { isTerminalRunState, readVerifiedRunManifest, verifiedRunFilePaths } from "../../src/vf/run/types.ts";
+import { readVerifiedRunManifest, verifiedRunFilePaths } from "../../src/vf/run/types.ts";
 import { getLiveSlotCount, initializeSpawnWidthForSession, resetSpawnWidthForTest } from "../../src/runtime/spawn-width.ts";
 import { resetSubagentStateForTest, runningSubagents } from "../../src/runtime/wiring.ts";
-import { assert, createTestDir, sleep, writeExecutable } from "../support/index.ts";
+import { assert, createTestDir, sleep } from "../support/index.ts";
+import {
+	buildSupervisedRun,
+	gitRun as run,
+	setupVerifiedRunFixture as setupFixture,
+	waitForVerifiedRunState as waitForState,
+} from "../support/verified-runs.ts";
 
 /**
  * Ticket 07 — VerifiedRun orchestration as one logical child.
@@ -35,87 +35,10 @@ import { assert, createTestDir, sleep, writeExecutable } from "../support/index.
 
 const RUN_TIMEOUT = 120_000;
 
-const FAKE_PI = `
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-
-const session = process.env.PI_SUBAGENT_SESSION ?? "";
-const captureDir = process.env.TEST_CAPTURE_DIR ?? "";
-const markerMap = process.env.TEST_MARKER_MAP ? JSON.parse(process.env.TEST_MARKER_MAP) : {};
-const slot = /-w(\\d+)$/.exec(process.env.COMPOSE_PROJECT_NAME ?? "");
-const marker = process.env.TEST_MARKER ?? (slot ? markerMap[slot[1]] ?? "" : "");
-const before = Number(process.env.TEST_DELAY_BEFORE_MS ?? "0");
-const after = Number(process.env.TEST_DELAY_AFTER_MS ?? "0");
-
-if (captureDir) {
-	writeFileSync(
-		join(captureDir, \`argv-\${process.pid}.json\`),
-		JSON.stringify(
-			{
-				argv: process.argv,
-				marker,
-				compose: process.env.COMPOSE_PROJECT_NAME ?? "",
-				portOffset: process.env.PORT_OFFSET ?? "",
-				session,
-				denyTools: process.env.PI_DENY_TOOLS ?? "",
-				spawnBudget: process.env.PI_SUBAGENT_SPAWN_BUDGET ?? "",
-			},
-			null,
-			2,
-		),
-	);
-}
-if (before > 0) await new Promise((resolve) => setTimeout(resolve, before));
-if (session) {
-	mkdirSync(dirname(session), { recursive: true });
-	const e = (id, parentId, message) =>
-		JSON.stringify({ type: "message", id, parentId, timestamp: "2026-08-22T00:00:00Z", message });
-	appendFileSync(
-		session,
-		[
-			e("m1", null, { role: "user", content: [{ type: "text", text: "candidate task prompt" }] }),
-			e("m2", "m1", { role: "assistant", content: [{ type: "text", text: \`working; marker \${marker}\` }] }),
-			e("m3", "m2", {
-				role: "assistant",
-				content: [{ type: "text", text: \`Final report for \${marker || "none"}: completed the task with tests passing.\` }],
-			}),
-		]
-			.map((line) => line + "\\n")
-			.join(""),
-	);
-}
-if (process.env.TEST_CHANGE) writeFileSync("change.txt", process.env.TEST_CHANGE + "\\n");
-if (after > 0) await new Promise((resolve) => setTimeout(resolve, after));
-process.exit(Number(process.env.TEST_EXIT_CODE ?? "0"));
-`;
-
 let fixtureRoot = "";
-
-function setupFixture(): { repo: string; parent: string; fakePi: string; captureDir: string } {
-	const parent = createTestDir();
-	const repo = join(parent, "repo");
-	mkdirSync(repo, { recursive: true });
-	run(repo, "init", "-q");
-	run(repo, "config", "user.email", "test@localhost");
-	run(repo, "config", "user.name", "Test");
-	writeFileSync(join(repo, "README.md"), "# test repo\n", "utf8");
-	run(repo, "add", "-A");
-	run(repo, "commit", "-q", "-m", "base");
-	const captureDir = join(parent, "captures");
-	mkdirSync(captureDir, { recursive: true });
-	const fakePi = writeExecutable(parent, "fake-pi.mjs", `#!/usr/bin/env node\n${FAKE_PI}`);
-	chmodSync(fakePi, 0o755);
-	return { repo, parent, fakePi, captureDir };
-}
 
 function loadVfAgent(repo: string) {
 	return loadAgentDefaults("vf-worker", undefined, repo, resolveSubagentCwd);
-}
-
-function run(cwd: string, ...args: string[]): string {
-	const result = spawnSync("git", args, { cwd, encoding: "utf8" });
-	if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
-	return result.stdout.trim();
 }
 
 afterEach(() => {
@@ -126,70 +49,6 @@ afterEach(() => {
 		fixtureRoot = "";
 	}
 });
-
-interface CandidateFixture {
-	marker: string;
-	exitCode?: number;
-	beforeMs?: number;
-	change?: string;
-}
-
-function buildSupervisedRun(
-	repo: string,
-	fakePi: string,
-	captureDir: string,
-	candidates: CandidateFixture[],
-	options: { baseCommit?: string; baseDir?: string } = {},
-): { runDir: string; runId: string } {
-	const baseDir = options.baseDir ?? createTestDir();
-	const runId = newRunId();
-	const sessionDir = join(baseDir, "sessions");
-	mkdirSync(sessionDir, { recursive: true });
-	const baseCommit = options.baseCommit ?? preflightWorktreeSource(repo).baseCommit;
-	const request = {
-		kind: "verified-fanout" as const,
-		name: "vf-test",
-		title: "VF test run",
-		piCommand: process.execPath,
-		taskArtifact: join(baseDir, "task.md"),
-		taskPrompt: "candidate task prompt",
-		sourceRepo: repo,
-		baseCommit,
-		agent: "tester",
-		candidateCount: candidates.length,
-		candidates: candidates.map((candidate, i) => ({
-			index: i + 1,
-			sessionFile: join(sessionDir, `w${i + 1}.jsonl`),
-			worktree: join(dirname(repo), candidateWorktreeDirName(repo, runId, i + 1)),
-			internalBranch: candidateWorktreeBranchName(runId, i + 1),
-			args: [fakePi],
-			env: {
-				PI_SUBAGENT_SESSION: join(sessionDir, `w${i + 1}.jsonl`),
-				TEST_CAPTURE_DIR: captureDir,
-				TEST_MARKER: candidate.marker,
-				TEST_EXIT_CODE: String(candidate.exitCode ?? 0),
-				TEST_DELAY_BEFORE_MS: String(candidate.beforeMs ?? 0),
-				...(candidate.change ? { TEST_CHANGE: candidate.change } : {}),
-			},
-			launchEntryCount: 0,
-		})),
-		verifier: {
-			model: "deepseek-v4-flash",
-			thinking: null,
-			env: {},
-			criteriaPath: join(getPackagedCriteriaDir(), "generic.md"),
-			mockVerifier: { goodMarker: "VF-GOOD", midMarker: "VF-MID" },
-		},
-		env: {
-			PATH: process.env.PATH ?? "",
-			HOME: process.env.HOME ?? "",
-		},
-		parentSessionId: null,
-		createdAt: new Date().toISOString(),
-	};
-	const started = startVerifiedRun({ baseDir, runId, request });
-	return { runDir: started.runDir, runId };
-}
 
 describe("verified fan-out supervisor (live processes)", () => {
 	it("spawns N candidates, ranks traces, and records the winner", async () => {
@@ -494,16 +353,3 @@ describe("verified fan-out reattach", () => {
 		rmSync(artifactRoot, { recursive: true, force: true });
 	});
 });
-
-async function waitForState(runDir: string, state: string) {
-	const deadline = Date.now() + 30_000;
-	for (;;) {
-		const manifest = readVerifiedRunManifest(runDir);
-		if (manifest.state === state) return manifest;
-		if (isTerminalRunState(manifest.state)) {
-			throw new Error(`run reached ${manifest.state} while waiting for ${state}: ${manifest.result?.failure?.message}`);
-		}
-		if (Date.now() > deadline) throw new Error(`timed out waiting for state ${state}`);
-		await sleep(100);
-	}
-}
