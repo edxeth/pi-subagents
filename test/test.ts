@@ -7,6 +7,7 @@ import "./tools/subagent-done.test.ts";
 import "./vf/verifier-profile.test.ts";
 import "./vf/supervisor.test.ts";
 import "./vf/worktrees.test.ts";
+import "./vf/flatten.test.ts";
 import "./tools/tool-policy.test.ts";
 import "./tools/subagent-done-autoexit-notify.test.ts";
 import "./tools/subagent-context-reminders.test.ts";
