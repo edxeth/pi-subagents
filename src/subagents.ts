@@ -78,6 +78,7 @@ import { registerSubagentResumeTool } from "./tools/resume-tool.ts";
 import { markInitialPromptLaunchComplete, registerSubagentCoreTools } from "./tools/subagent-tools.ts";
 import { registerSubagentsView } from "./tools/subagents-view.ts";
 import { ORCHESTRATOR_ALLOWED_TOOL_NAMES, SUBAGENT_TOOL_NAME } from "./tools/tool-names.ts";
+import { adoptVerifiedRuns } from "./vf/run/adopt.ts";
 
 export { classifyAssistantMessageForMixedBatch as classifyAssistantMessageForMixedBatchForTest } from "./runtime/batch-classifier.ts";
 export { shouldAwaitSubagentLaunch as shouldAwaitSubagentLaunchForTest } from "./runtime/running-registry.ts";
@@ -161,6 +162,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		resetSubagentBatchStopRequest();
 		applySubagentLineage(ctx);
 		attachWidgetContext(ctx);
+		try {
+			// Verified fan-outs outlive their parent session: deliver finished
+			// results exactly once and re-watch live runs (detached supervisors
+			// keep candidates running across quit/reload/replacement).
+			adoptVerifiedRuns(pi, ctx.cwd, { updateWidget: () => widgetManager.update() });
+		} catch {
+			// Adoption is best-effort at startup; a failure must never block
+			// the session from starting.
+		}
 
 		// Restrict active tools in orchestrator mode
 		if (ORCHESTRATOR_MODE) {

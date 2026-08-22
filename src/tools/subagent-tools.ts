@@ -3,6 +3,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentDefaults } from "../agents/definitions.ts";
 import { stripInternalLaunchOverrides } from "../launch/launch-overrides.ts";
+import { resolveVerifierCandidateCount } from "../vf/criteria.ts";
 import {
 	enforceAgentFrontmatter,
 	getSubagentAgentRequirementError,
@@ -26,6 +27,7 @@ import {
 	releaseSpawnWidthSlotOnCompletion,
 	tryAcquireSlots,
 } from "../runtime/spawn-width.ts";
+import { launchVerifiedFanOut } from "../vf/run/launch.ts";
 import type { RunningSubagent, SubagentParamsInput, SubagentResult } from "../types.ts";
 
 import { formatSubagentBatchLines, formatTaskPreview, renderSubagentCompletionText } from "./message-renderers.ts";
@@ -237,6 +239,15 @@ async function launchOneSubagent(
 		parentModelRef,
 		parentThinking,
 	};
+	if (agentDefs?.llmAsVerifier === true) {
+		// One logical child fronts the whole fan-out: N candidates are planned
+		// here and owned by a detached supervisor; no per-candidate routes are
+		// ever registered in this parent.
+		const { running } = await launchVerifiedFanOut(effectiveParams, agentDefs, launchCtx, {
+			slotsPreReserved: true,
+		});
+		return running;
+	}
 	let running: RunningSubagent;
 	if (isBackground) {
 		running = await runtime.launchBackgroundSubagent(effectiveParams, launchCtx);
@@ -398,8 +409,17 @@ export function registerSubagentCoreTools(
 						warning: getSubagentToolsWarning(agentDefs?.tools),
 					};
 				});
-				if (!tryAcquireSlots(children.length, widthLimit)) return getSpawnWidthLimitError(widthLimit);
-				let unlaunchedSlots = children.length;
+				// Slot cost per child: 1 normally, N candidates for a verified
+				// fan-out (SPEC: N candidates consume N spawn slots, reserved
+				// atomically before any worktree creation or verifier spend).
+				const slotCosts = prepared.map((entry) =>
+					entry.agentDefs?.llmAsVerifier === true
+						? resolveVerifierCandidateCount(entry.agentDefs.llmAsVerifierCandidates)
+						: 1,
+				);
+				const totalSlots = slotCosts.reduce((sum, cost) => sum + cost, 0);
+				if (!tryAcquireSlots(totalSlots, widthLimit)) return getSpawnWidthLimitError(widthLimit);
+				let unlaunchedSlots = totalSlots;
 				const hasBlockingChild = prepared.some((entry) => entry.blocking);
 				const launched: RunningSubagent[] = [];
 				try {
@@ -407,9 +427,10 @@ export function registerSubagentCoreTools(
 						markSubagentBatchBlocking();
 					}
 
-					for (const entry of prepared) {
+					for (let index = 0; index < prepared.length; index++) {
+						const entry = prepared[index];
 						const running = await launchOneSubagent(toolCallId, entry.child, entry.agentDefs, ctx, runtime, pi);
-						unlaunchedSlots--;
+						unlaunchedSlots -= slotCosts[index];
 						launched.push(running);
 						runtime.wireSubagentSteerBack(pi, running, running.completionPromise!);
 					}

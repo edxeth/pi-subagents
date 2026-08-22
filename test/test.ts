@@ -10,6 +10,7 @@ import "./vf/worktrees.test.ts";
 import "./vf/flatten.test.ts";
 import "./vf/criteria.test.ts";
 import "./vf/verifier-bridge.test.ts";
+import "./vf/verified-run.test.ts";
 import "./tools/tool-policy.test.ts";
 import "./tools/subagent-done-autoexit-notify.test.ts";
 import "./tools/subagent-context-reminders.test.ts";

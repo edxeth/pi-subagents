@@ -178,6 +178,10 @@ export interface RunningSubagent {
 	allowSteerDelivery?: boolean;
 	shutdownTimer?: ReturnType<typeof setTimeout>;
 	doneSentinelFile?: string;
+	/** Verified fan-out (ticket 07): run dir of the supervised fan-out this entry fronts. */
+	verifiedRunDir?: string;
+	/** Verified fan-out: durable run id (manifest name). */
+	verifiedRunId?: string;
 	zellijTarget?: { sessionName: string; parentPaneId: number };
 	surfaceClosePromise?: Promise<void>;
 }
