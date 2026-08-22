@@ -2,6 +2,7 @@ import type { ResolvedAgentDefinition } from "./definitions.ts";
 import { getEffectiveAgentDefinitions } from "./definitions.ts";
 import { buildModelRef, parseAllowedModels } from "./model-refs.ts";
 import { formatTimeoutSeconds } from "../runtime/timeout-budget.ts";
+import { resolveVerifierCandidateCount } from "../vf/criteria.ts";
 import {
 	getContextReminderThresholds,
 	parseContextWarnStep,
@@ -29,6 +30,8 @@ export interface AgentListEntry {
 	idleTimeout?: number;
 	/** `llm-as-a-verifier` marker: launches fan out to ranked candidates. */
 	llmAsVerifier?: boolean;
+	/** Explicit `llm-as-a-verifier-candidates` count, when set. */
+	llmAsVerifierCandidates?: number;
 	contextWarnThreshold?: string;
 	contextWarnStep?: string;
 	reportContextUsage?: boolean;
@@ -77,6 +80,9 @@ export function getAgentListEntries(
 			...(agent.timeout !== undefined ? { timeout: agent.timeout } : {}),
 			...(agent.idleTimeout !== undefined ? { idleTimeout: agent.idleTimeout } : {}),
 			...(agent.llmAsVerifier !== undefined ? { llmAsVerifier: agent.llmAsVerifier } : {}),
+			...(agent.llmAsVerifierCandidates !== undefined
+				? { llmAsVerifierCandidates: agent.llmAsVerifierCandidates }
+				: {}),
 			...(agent.contextWarnThreshold !== undefined ? { contextWarnThreshold: agent.contextWarnThreshold } : {}),
 			...(agent.contextWarnStep !== undefined ? { contextWarnStep: agent.contextWarnStep } : {}),
 			...(agent.reportContextUsage !== undefined ? { reportContextUsage: agent.reportContextUsage } : {}),
@@ -145,9 +151,15 @@ function getContextWarnPercent(entry: AgentListEntry): number | undefined {
 }
 
 function renderVerifiedFanOutLine(entry: AgentListEntry): string | undefined {
-	// The candidate count is owned by the sibling frontmatter field (ticket 10);
-	// the roster states the fan-out behavior without hardcoding an N.
-	return entry.llmAsVerifier === true ? "  verified-fan-out: true" : undefined;
+	if (entry.llmAsVerifier !== true) return undefined;
+	// Resolved N: explicit field > PI_SUBAGENT_LLM_VERIFIER_CANDIDATES > 3.
+	// The roster is advisory, so a bad env value surfaces inline here; the
+	// same error fails the actual launch closed at pre-flight.
+	try {
+		return `  verified-fan-out: true (${resolveVerifierCandidateCount(entry.llmAsVerifierCandidates)} candidates)`;
+	} catch (error) {
+		return `  verified-fan-out: true (${(error as Error).message})`;
+	}
 }
 
 function renderLimitLines(entry: AgentListEntry): string[] {
@@ -262,6 +274,7 @@ export function getAgentListSignature(entries: AgentListEntry[]): string {
 			timeout: entry.timeout,
 			idleTimeout: entry.idleTimeout,
 			llmAsVerifier: entry.llmAsVerifier,
+			llmAsVerifierCandidates: entry.llmAsVerifierCandidates,
 			contextWarn: entry.contextWarnThreshold !== undefined ? getContextWarnPercent(entry) ?? null : undefined,
 			reportContextUsage: entry.reportContextUsage,
 			visibleTo: entry.visibleTo,

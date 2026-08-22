@@ -62,15 +62,17 @@ describe("llm-as-a-verifier field", () => {
 		}
 	});
 
-	it("does not parse the candidate-count, model, or criteria sibling fields", () => {
-		// Those fields belong to ticket 10; here they must be inert so a
-		// definition that carries them still loads unchanged.
+	it("keeps the sibling fields from flipping the boolean marker", () => {
+		// Ticket 10 parses the siblings into their own fields; none of them may
+		// set the boolean, which stays true/false only.
 		const defs = loadDefinition(
 			"llm-as-a-verifier-candidates: 5\nllm-as-a-verifier-model: provider/model\nllm-as-a-verifier-criteria: code-change",
 		);
 		assert.equal(defs?.llmAsVerifier, undefined);
+		assert.equal(defs?.llmAsVerifierCandidates, 5);
 		const marked = loadDefinition("llm-as-a-verifier: true\nllm-as-a-verifier-candidates: 5");
 		assert.equal(marked?.llmAsVerifier, true);
+		assert.equal(marked?.llmAsVerifierCandidates, 5);
 	});
 
 	it("surfaces a verified marker in the ambient roster only for marked definitions", () => {

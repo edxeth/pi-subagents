@@ -2,6 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEnvString } from "../launch/env.ts";
 import { getAgentConfigDir } from "../agents/definitions.ts";
+import { EFFORT_ALIASES, LIBRARY_REASONING_EFFORTS, normalizeVerifierModelRef } from "./model-ref.ts";
+import type { LibraryReasoningEffort, NormalizedVerifierModelRef } from "./model-ref.ts";
+
+// Re-exported for callers of the profile module; the ref grammar itself lives
+// in model-ref.ts so agent-definition parsing can validate refs without a
+// config-dir cycle back into definitions.
+export { normalizeVerifierModelRef, LIBRARY_REASONING_EFFORTS } from "./model-ref.ts";
 
 /**
  * Verifier profiles (`agents/verifiers/<name>.md`).
@@ -14,19 +21,6 @@ import { getAgentConfigDir } from "../agents/definitions.ts";
 
 /** Model id the `llm-verifier` library uses when none is passed. */
 export const LIBRARY_DEFAULT_VERIFIER_MODEL = "gemini-2.5-flash";
-
-/** Reasoning efforts the library's `DEEPSEEK_EFFORT` setting understands. */
-export const LIBRARY_REASONING_EFFORTS = ["off", "low", "high", "max"] as const;
-export type LibraryReasoningEffort = (typeof LIBRARY_REASONING_EFFORTS)[number];
-
-const EFFORT_ALIASES: Record<string, LibraryReasoningEffort> = {
-	off: "off",
-	disabled: "off",
-	none: "off",
-	low: "low",
-	high: "high",
-	max: "max",
-};
 
 export type VerifierProfileSource = "project" | "global" | "bundled";
 
@@ -42,17 +36,6 @@ export class VerifierCredentialError extends Error {
 		super(message);
 		this.name = "VerifierCredentialError";
 	}
-}
-
-export interface NormalizedVerifierModelRef {
-	/** Provider prefix as written (`deepseek` in `deepseek/deepseek-v4-flash`), if any. */
-	provider: string | null;
-	/** Plain library model id: provider prefix and `:thinking` suffix stripped. */
-	modelId: string;
-	/** Reasoning effort translated from a `:thinking` suffix, if present. */
-	thinking: LibraryReasoningEffort | null;
-	/** Canonical display form (`deepseek/deepseek-v4-flash:high`). */
-	normalizedRef: string;
 }
 
 export interface VerifierProfile {
@@ -188,50 +171,6 @@ function parseEffort(field: string, raw: string, path: string): LibraryReasoning
 		);
 	}
 	return effort;
-}
-
-/**
- * Normalize a `provider/model[:thinking]` ref to what the library accepts:
- * a plain model id. The library forwards the model string verbatim
- * (`resolve_model`), so a prefixed or suffixed ref would be rejected upstream.
- */
-export function normalizeVerifierModelRef(ref: string): NormalizedVerifierModelRef {
-	const trimmed = ref.trim();
-	if (!trimmed) throw new VerifierProfileError("Verifier model ref is empty.");
-	let main = trimmed;
-	let thinking: LibraryReasoningEffort | null = null;
-	const colon = trimmed.lastIndexOf(":");
-	if (colon !== -1) {
-		const suffix = trimmed.slice(colon + 1).trim();
-		const effort = EFFORT_ALIASES[suffix.toLowerCase()];
-		if (!effort) {
-			throw new VerifierProfileError(
-				`Verifier model ref ${JSON.stringify(ref)} has an invalid :thinking suffix. Use one of ${LIBRARY_REASONING_EFFORTS.join(", ")}.`,
-			);
-		}
-		thinking = effort;
-		main = trimmed.slice(0, colon).trim();
-	}
-	let provider: string | null = null;
-	let modelId = main;
-	if (main.includes("/")) {
-		const parts = main.split("/").map((part) => part.trim());
-		if (parts.length !== 2) {
-			throw new VerifierProfileError(
-				`Verifier model ref ${JSON.stringify(ref)} must be provider/model or model (got ${parts.length} "/"-separated parts).`,
-			);
-		}
-		if (!parts[0] || !parts[1]) {
-			throw new VerifierProfileError(
-				`Verifier model ref ${JSON.stringify(ref)} has an empty provider or model id.`,
-			);
-		}
-		provider = parts[0];
-		modelId = parts[1];
-	}
-	if (!modelId) throw new VerifierProfileError(`Verifier model ref ${JSON.stringify(ref)} has an empty model id.`);
-	const normalizedRef = `${provider ? `${provider}/` : ""}${modelId}${thinking ? `:${thinking}` : ""}`;
-	return { provider, modelId, thinking, normalizedRef };
 }
 
 export function resolveVerifierProfile(name: string, baseCwd: string): VerifierProfile {
