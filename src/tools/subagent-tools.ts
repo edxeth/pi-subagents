@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentDefaults } from "../agents/definitions.ts";
+import { stripInternalLaunchOverrides } from "../launch/launch-overrides.ts";
 import {
 	enforceAgentFrontmatter,
 	getSubagentAgentRequirementError,
@@ -50,7 +51,7 @@ const SUBAGENT_THINKING_DESCRIPTION =
 	"Do not infer thinking from quality, depth, urgency, safety, or cost language. " +
 	"Use a thinking level supported by the selected model and the installed Pi version.";
 
-const SubagentChildParams = Type.Object({
+export const SubagentChildParams = Type.Object({
 	name: Type.String({ description: SUBAGENT_NAME_DESCRIPTION }),
 	task: Type.String({
 		description:
@@ -65,7 +66,7 @@ const SubagentChildParams = Type.Object({
 	thinking: Type.Optional(Type.String({ description: SUBAGENT_THINKING_DESCRIPTION })),
 });
 
-const SubagentParams = Type.Object({
+export const SubagentParams = Type.Object({
 	name: Type.Optional(Type.String({ description: SUBAGENT_NAME_DESCRIPTION })),
 	task: Type.Optional(
 		Type.String({
@@ -117,8 +118,10 @@ type SubagentToolParams = Partial<SubagentParamsInput> & {
 };
 
 function getRequestedChildren(params: SubagentToolParams): SubagentParamsInput[] {
-	if (Array.isArray(params.children) && params.children.length > 0) return params.children;
-	return [params as SubagentParamsInput];
+	if (Array.isArray(params.children) && params.children.length > 0) {
+		return params.children.map((child) => stripInternalLaunchOverrides(child));
+	}
+	return [stripInternalLaunchOverrides(params as SubagentParamsInput)];
 }
 
 function getSpawnWidthError(text: string): ToolResult {

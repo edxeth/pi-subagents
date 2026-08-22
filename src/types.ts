@@ -36,6 +36,20 @@ export interface SubagentParamsInput {
 	background?: boolean;
 	async?: boolean;
 	blocking?: boolean;
+	/**
+	 * Internal, runtime-only launch override: force the child process cwd
+	 * (verified fan-out points each candidate at its own git worktree).
+	 * Privileged — the model-callable subagent tool strips it at the boundary
+	 * and its schema never advertises it.
+	 */
+	forcedCwd?: string;
+	/**
+	 * Internal, runtime-only per-candidate env applied on top of the frozen
+	 * launch blueprint (e.g. COMPOSE_PROJECT_NAME/PORT_OFFSET per worktree).
+	 * Wins over static frontmatter `env` on collision (warned). Stripped from
+	 * model-callable tool input like `forcedCwd`.
+	 */
+	launchEnv?: Record<string, string>;
 }
 
 export interface WaitParams {

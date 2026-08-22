@@ -178,7 +178,7 @@ export async function launchInteractiveSubagent(
 	const { launchEntryCount } = launch;
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
 	const { command, capsulePath, dispose } = buildInteractiveShellCommand({
-		cwd: prepared.runtimePaths.effectiveCwd ?? undefined,
+		cwd: launch.forcedCwd ?? prepared.runtimePaths.effectiveCwd ?? undefined,
 		piArgs,
 		envOverrides: envVars,
 		denyEnv: prepared.agentDefs?.denyEnv,

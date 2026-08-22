@@ -12,6 +12,7 @@ import type { SubagentParamsInput } from "../types.ts";
 import { buildAppendSystemInheritancePlan } from "./append-system.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
 import { parseEnvString } from "./env.ts";
+import { freezeLaunchBlueprint, type LaunchRuntimeOverrides, resolveForcedChildCwd } from "./launch-overrides.ts";
 import { resolveSubagentNoSession } from "./policy.ts";
 import {
 	buildPersistedSubagentLaunchMetadata,
@@ -29,6 +30,10 @@ interface CoordinatedSystemPrompt {
 
 export interface CoordinatedSubagentLaunch {
 	prepared: PreparedSubagentLaunch;
+	/** Internal runtime-only overrides (forcedCwd/launchEnv) carried by this launch. */
+	runtimeOverrides: LaunchRuntimeOverrides;
+	/** Resolved forced child cwd; undefined when the child runs in the blueprint cwd. */
+	forcedCwd: string | undefined;
 	sessionMode: SubagentSessionMode;
 	noSession: boolean;
 	directTask: boolean;
@@ -45,7 +50,16 @@ export async function coordinateSubagentLaunch(
 	ctx: SubagentLaunchContext,
 	options: { mode: ResumeMode; systemPrompt?: string },
 ): Promise<CoordinatedSubagentLaunch> {
+	const runtimeOverrides: LaunchRuntimeOverrides = {
+		...(params.forcedCwd ? { forcedCwd: params.forcedCwd } : {}),
+		...(params.launchEnv ? { launchEnv: params.launchEnv } : {}),
+	};
 	const prepared = await prepareSubagentLaunch(params, ctx, options.mode);
+	// The launch plan above was resolved against the SOURCE cwd (ctx.cwd), not
+	// the forced cwd: definitions, capabilities, and skill text embed the source
+	// workspace. Freeze it, then apply runtime-only overrides on top.
+	freezeLaunchBlueprint(prepared);
+	const forcedCwd = resolveForcedChildCwd(runtimeOverrides, ctx.cwd);
 	const sessionMode = resolveEffectiveSessionMode(params, prepared.agentDefs);
 	const noSession = resolveSubagentNoSession(prepared.agentDefs);
 	const noSessionSeedMode = noSession ? getNoSessionSeedMode(sessionMode) : null;
@@ -98,6 +112,8 @@ export async function coordinateSubagentLaunch(
 
 	return {
 		prepared,
+		runtimeOverrides,
+		forcedCwd,
 		sessionMode,
 		noSession,
 		directTask,

@@ -104,7 +104,7 @@ export async function launchBackgroundSubagent(
 	const invocation = getPiInvocation(args);
 	const denyPatterns = resolveDenyEnvPatterns(prepared.agentDefs?.denyEnv);
 	const child = spawn(invocation.command, invocation.args, {
-		cwd: prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
+		cwd: launch.forcedCwd ?? prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
 		detached: true,
 		stdio:
 			resolveSubagentParentClosePolicy(prepared.agentDefs) === "continue"
