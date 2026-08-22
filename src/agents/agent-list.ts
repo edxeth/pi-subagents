@@ -27,6 +27,8 @@ export interface AgentListEntry {
 	spawnWidth?: number;
 	timeout?: number;
 	idleTimeout?: number;
+	/** `llm-as-a-verifier` marker: launches fan out to ranked candidates. */
+	llmAsVerifier?: boolean;
 	contextWarnThreshold?: string;
 	contextWarnStep?: string;
 	reportContextUsage?: boolean;
@@ -74,6 +76,7 @@ export function getAgentListEntries(
 			...(agent.spawnWidth !== undefined ? { spawnWidth: agent.spawnWidth } : {}),
 			...(agent.timeout !== undefined ? { timeout: agent.timeout } : {}),
 			...(agent.idleTimeout !== undefined ? { idleTimeout: agent.idleTimeout } : {}),
+			...(agent.llmAsVerifier !== undefined ? { llmAsVerifier: agent.llmAsVerifier } : {}),
 			...(agent.contextWarnThreshold !== undefined ? { contextWarnThreshold: agent.contextWarnThreshold } : {}),
 			...(agent.contextWarnStep !== undefined ? { contextWarnStep: agent.contextWarnStep } : {}),
 			...(agent.reportContextUsage !== undefined ? { reportContextUsage: agent.reportContextUsage } : {}),
@@ -141,6 +144,12 @@ function getContextWarnPercent(entry: AgentListEntry): number | undefined {
 	return getContextReminderThresholds(percent, step).length === 3 ? percent : undefined;
 }
 
+function renderVerifiedFanOutLine(entry: AgentListEntry): string | undefined {
+	// The candidate count is owned by the sibling frontmatter field (ticket 10);
+	// the roster states the fan-out behavior without hardcoding an N.
+	return entry.llmAsVerifier === true ? "  verified-fan-out: true" : undefined;
+}
+
 function renderLimitLines(entry: AgentListEntry): string[] {
 	const contextWarnPercent = getContextWarnPercent(entry);
 	return [
@@ -162,6 +171,7 @@ export function renderAgentListReminder(entries: AgentListEntry[]): string {
 		(entry) => entry.sessionMode === "fork" && getContextWarnPercent(entry) !== undefined,
 	);
 	const hasHiddenContextReport = entries.some((entry) => entry.reportContextUsage === false);
+	const hasVerifiedFanOut = entries.some((entry) => entry.llmAsVerifier === true);
 	const agentLines =
 		entries.length === 0
 			? ["No agents are spawnable in this session."]
@@ -175,6 +185,7 @@ export function renderAgentListReminder(entries: AgentListEntry[]): string {
 						renderDefaultModelLine(entry),
 						renderModelsLine(entry),
 						...renderSpawningLines(entry),
+						renderVerifiedFanOutLine(entry),
 						...renderLimitLines(entry),
 					]
 						.filter(Boolean)
@@ -220,6 +231,11 @@ export function renderAgentListReminder(entries: AgentListEntry[]): string {
 					"- `report-context-usage: false` hides the token counts in the result. When this agent stops early, the result still reports it.",
 				]
 			: []),
+		...(hasVerifiedFanOut
+			? [
+					"- `verified-fan-out: true` means one launch of this agent runs several fresh candidate attempts of the same task and an LLM verifier ranks them; you still receive exactly one result for the launch. Do not launch it again for the same task while a run is open.",
+				]
+			: []),
 		"- If the user names an agent that is not listed, say it was not found and stop; do not suggest a different listed agent.",
 		"</subagent-rules>",
 	].join("\n");
@@ -245,6 +261,7 @@ export function getAgentListSignature(entries: AgentListEntry[]): string {
 			spawnWidth: entry.spawnWidth,
 			timeout: entry.timeout,
 			idleTimeout: entry.idleTimeout,
+			llmAsVerifier: entry.llmAsVerifier,
 			contextWarn: entry.contextWarnThreshold !== undefined ? getContextWarnPercent(entry) ?? null : undefined,
 			reportContextUsage: entry.reportContextUsage,
 			visibleTo: entry.visibleTo,

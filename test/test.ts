@@ -37,6 +37,7 @@ import "./launch/env-frontmatter.test.ts";
 import "./agents/definitions-agent-list.test.ts";
 import "./agents/spawn-fields.test.ts";
 import "./agents/timeout-fields.test.ts";
+import "./agents/verified-field.test.ts";
 import "./spawn/policy.test.ts";
 import "./runtime/launch-results.test.ts";
 import "./runtime/result-router.test.ts";

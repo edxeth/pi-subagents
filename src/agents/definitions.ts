@@ -39,6 +39,12 @@ export interface AgentDefaults {
 	timeoutWarnThreshold?: string;
 	/** What the parent allows after a timeout kill. Defaults to `report`. */
 	onTimeout?: "report" | "block-resume";
+	/**
+	 * `llm-as-a-verifier` frontmatter flag. Marks every launch of this
+	 * definition as a verified fan-out (ticket 01 owns the boolean only; the
+	 * candidates/model/criteria siblings live in ticket 10).
+	 */
+	llmAsVerifier?: boolean;
 	contextWarnThreshold?: string;
 	contextWarnStep?: string;
 	reportContextUsage?: boolean;
@@ -109,6 +115,7 @@ function parseAgentDefinition(
 	const contextWarnThresholdRaw = get("context-warn-threshold");
 	const contextWarnStepRaw = get("context-warn-step");
 	const reportContextUsageRaw = get("report-context-usage");
+	const llmAsVerifier = parseLlmAsVerifier(get("llm-as-a-verifier"), hasKey("llm-as-a-verifier"), path);
 	const spawnDepthRaw = get("spawn-depth");
 	const spawnWidthRaw = get("spawn-width");
 
@@ -166,6 +173,7 @@ function parseAgentDefinition(
 		...(idleTimeout !== undefined ? { idleTimeout } : {}),
 		timeoutWarnThreshold: timeoutWarnThresholdRaw,
 		onTimeout,
+		llmAsVerifier,
 		contextWarnThreshold: contextWarnThresholdRaw,
 		contextWarnStep: contextWarnStepRaw,
 		reportContextUsage: reportContextUsageRaw != null ? reportContextUsageRaw === "true" : undefined,
@@ -222,6 +230,24 @@ function parseOnTimeout(
 	if (!present) return undefined;
 	if (raw === "report" || raw === "block-resume") return raw;
 	throw new Error(`on-timeout must be "report" or "block-resume" (got ${JSON.stringify(raw ?? "")}) in ${path}.`);
+}
+
+/**
+ * Resolve the `llm-as-a-verifier` flag, rejecting anything but `true`/`false`.
+ *
+ * The candidate count moved to `llm-as-a-verifier-candidates` (ticket 10), so
+ * an integer here is a stale or mistyped definition. Accepting it would either
+ * guess a count the author meant to put on the sibling field or silently run
+ * the default — both wrong, so it fails agent loading instead.
+ */
+function parseLlmAsVerifier(
+	raw: string | undefined,
+	present: boolean,
+	path: string,
+): boolean | undefined {
+	if (!present) return undefined;
+	if (raw === "true" || raw === "false") return raw === "true";
+	throw new Error(`llm-as-a-verifier must be "true" or "false" (got ${JSON.stringify(raw ?? "")}) in ${path}.`);
 }
 
 function parseVisibleTo(raw: string | undefined): string[] {
