@@ -560,6 +560,8 @@ Use `caller_ping` when the child needs the parent. The child sends a message up,
 
 Resume tries to preserve the original launch shape: mode, model, prompt style, cwd, tools, extensions, and lifecycle settings. A resumed child should continue as the same child, even if the agent file changed after the first launch.
 
+One exception: candidate sessions of a `llm-as-a-verifier` fan-out are never resumable. Their run is finalized after selection and their isolated worktree workspace is removed, so `subagent_resume` refuses with a dedicated error; start a fresh launch of the agent instead.
+
 ## Child output
 
 The child's final assistant message is its output.

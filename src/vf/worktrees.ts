@@ -211,12 +211,25 @@ function rollbackWorktrees(created: CandidateWorktree[], runId: string, count: n
  * files excluded) into an internal commit on its audit branch. The commit is
  * bookkeeping: user hooks are not run and signing is disabled so a repo's
  * local configuration cannot alter or block the snapshot. An untouched
- * worktree commits an empty change on purpose — the tree hash then equals the
- * base tree, which later lets identical candidates collapse cleanly.
+ * worktree reuses HEAD as its snapshot — the tree hash then equals the base
+ * tree, which later lets identical candidates collapse cleanly and keeps the
+ * snapshot idempotent across verification retries (an empty-diff commit would
+ * cherry-pick nothing and fail the apply gate's tree-equality check).
  */
 export function snapshotCandidateWorktree(worktree: CandidateWorktree, message?: string): CandidateSnapshot {
 	const baseTreeHash = gitText(["rev-parse", `${worktree.baseCommit}^{tree}`], worktree.path).trim();
 	gitText(["add", "-A"], worktree.path);
+	// Idempotent: if HEAD already carries exactly this tree (an untouched
+	// candidate, or a re-settle after a halted selection retried its
+	// verification), reuse it instead of stacking an empty-diff commit — the
+	// apply gate cherry-picks this commit, and an empty-diff commit would
+	// cherry-pick nothing onto the base and fail the tree-equality check.
+	const stagedTree = gitText(["write-tree"], worktree.path).trim();
+	const headTree = gitText(["rev-parse", "HEAD^{tree}"], worktree.path).trim();
+	if (stagedTree === headTree) {
+		const commit = gitText(["rev-parse", "HEAD"], worktree.path).trim();
+		return { worktree, commit, treeHash: stagedTree, baseTreeHash, changed: stagedTree !== baseTreeHash };
+	}
 	const configArgs = [
 		...SNAPSHOT_IDENTITY.flatMap(([key, value]) => ["-c", `${key}=${value}`]),
 		"-c",
@@ -228,7 +241,6 @@ export function snapshotCandidateWorktree(worktree: CandidateWorktree, message?:
 		[
 			...configArgs,
 			"commit",
-			"--allow-empty",
 			"-m",
 			message ?? `vf(${worktree.runId}) candidate w${worktree.index} snapshot`,
 		],

@@ -18,7 +18,7 @@ import { resolveVerifiedFanOutLaunch } from "../criteria.ts";
 import { assertVerifierCredentials, resolveVerifierModel } from "../verifier-profile.ts";
 import { candidateWorktreeBranchName, candidateWorktreeDirName, preflightWorktreeSource } from "../worktrees.ts";
 import { newRunId } from "../supervisor/run-client.ts";
-import { startVerifiedRun, waitForVerifiedRunResult } from "./client.ts";
+import { startVerifiedRun, verifiedRunDirFor, waitForVerifiedRunResult } from "./client.ts";
 import { claimVerifiedRunDelivery } from "./types.ts";
 import type { VerifiedCandidateSpec, VerifiedRunManifest, VerifiedRunRequest } from "./types.ts";
 
@@ -95,6 +95,7 @@ export async function launchVerifiedFanOut(
 	}
 	const preflight = preflightWorktreeSource(ctx.cwd);
 	const runId = newRunId();
+	const runDir = verifiedRunDirFor(verifiedRunsBaseDir(ctx.cwd), runId);
 	const repoParent = dirname(preflight.repoRoot);
 	const repoBasename = basename(preflight.repoRoot);
 
@@ -159,6 +160,10 @@ export async function launchVerifiedFanOut(
 				);
 			}
 			denyCandidateSpawning(plan.launch.envVars);
+			// Ticket 08: candidate sessions are non-resumable once their run is
+			// finalized; this marker lets subagent_resume fail with the precise
+			// error instead of resurrecting a session in a deleted worktree.
+			plan.launch.envVars.PI_SUBAGENT_VF_RUN_DIR = runDir;
 			specs.push({
 				index,
 				sessionFile: plan.launch.prepared.subagentSessionFile,
@@ -302,10 +307,7 @@ export function verifiedRunToSubagentResult(
 	}
 	if (result.ok && result.selection) {
 		const selection = result.selection;
-		const footer =
-			`\n\n[verified fan-out ${manifest.runId}: winner w${selection.winnerIndex} of ` +
-			`${manifest.request.candidateCount} candidates, ${selection.distinctCandidates} distinct, ` +
-			`model ${selection.model}; run dir ${runDir}]`;
+		const footer = verificationFooter(manifest, runDir);
 		return {
 			name: params.name,
 			task: params.task,
@@ -325,4 +327,27 @@ export function verifiedRunToSubagentResult(
 		elapsed,
 		errorMessage: result.failure ? `${result.failure.code}: ${result.failure.message}` : "run failed",
 	};
+}
+
+/**
+ * Compact verification footer (ticket 08): everything needed to audit the
+ * selection — N, winner id, criteria, score, verifier token usage, artifact
+ * path — plus the exact review/revert commands for the applied winner.
+ */
+function verificationFooter(manifest: VerifiedRunManifest, runDir: string): string {
+	const selection = manifest.result!.selection!;
+	const apply = manifest.result!.apply;
+	const usage = selection.usage;
+	const applyLine = apply?.applied
+		? `winner changes applied and staged — review \`git diff --staged\`, revert \`git reset --hard ${manifest.request.baseCommit}\``
+		: apply
+			? `winner NOT applied (${apply.code}); winner retained on branch \`${selection.winnerBranch}\``
+			: `winner retained on branch \`${selection.winnerBranch}\``;
+	return (
+		`\n\n[verified fan-out ${manifest.runId}: winner w${selection.winnerIndex} of ` +
+		`${manifest.request.candidateCount} candidates (${selection.distinctCandidates} distinct), ` +
+		`score ${selection.winnerScore.toFixed(3)}, criteria ${selection.criteria.join(", ")}, ` +
+		`verifier ${selection.model} (${usage.calls} calls, ${usage.inputTokens} in / ${usage.outputTokens} out tokens)\n` +
+		`${applyLine}; artifacts ${runDir}]`
+	);
 }

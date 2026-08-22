@@ -35,6 +35,11 @@ function resolveVerifiedRunsRoot(baseDir: string): string {
 	return join(baseDir, "vf-runs");
 }
 
+/** Durable run dir for a run id under a verified-runs base dir. */
+export function verifiedRunDirFor(baseDir: string, runId: string): string {
+	return join(resolveVerifiedRunsRoot(baseDir), runId);
+}
+
 export interface StartedVerifiedRun {
 	runId: string;
 	runDir: string;
@@ -53,7 +58,7 @@ export function startVerifiedRun(options: {
 	request: VerifiedRunManifest["request"];
 	env?: NodeJS.ProcessEnv;
 }): StartedVerifiedRun {
-	const runDir = join(resolveVerifiedRunsRoot(options.baseDir), options.runId);
+	const runDir = verifiedRunDirFor(options.baseDir, options.runId);
 	const paths = verifiedRunFilePaths(runDir);
 	mkdirSync(paths.runDir, { recursive: true });
 	const leaseId = newVerifiedRunLeaseId();

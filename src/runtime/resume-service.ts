@@ -208,6 +208,18 @@ export async function resumeSubagentSession(
 	input: ResumeSessionInput,
 	runtime: ResumeServiceRuntime,
 ): Promise<RunningSubagent> {
+	// Verified fan-out candidates are non-resumable (SPEC): their run is
+	// finalized and their worktree workspace is deleted after selection, so a
+	// resume would resurrect a session whose cwd no longer exists. Follow-up
+	// work starts a fresh launch against the updated source tree.
+	const verifiedRunDir = process.env.PI_SUBAGENT_VF_RUN_DIR;
+	if (verifiedRunDir && verifiedRunDir.trim()) {
+		throw new Error(
+			`Session ${input.sessionFile} belongs to a verified fan-out run that is finalized (run dir ${verifiedRunDir}); ` +
+				"the candidate's worktree workspace was removed after selection, so the session cannot be resumed. " +
+				"Start a fresh launch of the agent instead.",
+		);
+	}
 	const widthLimit = getSpawnWidthLimit();
 	if (!tryAcquireSlots(1, widthLimit)) {
 		throw new Error(

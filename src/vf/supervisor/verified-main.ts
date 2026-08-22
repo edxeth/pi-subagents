@@ -3,6 +3,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { isPidAlive } from "./manifest.ts";
 import { createCandidateWorktrees, preflightWorktreeSource } from "../worktrees.ts";
+import { applyWinnerToSource, ApplyError, cleanupRunWorktrees } from "../apply.ts";
 import { runVerifierProbe, VerifierBridgeError, type MockVerifierConfig } from "../verifier/bridge.ts";
 import { RETRYABLE_VERIFICATION_FAILURE_CODES } from "../run/types.ts";
 import {
@@ -20,7 +21,9 @@ import {
 	writeVerifiedRunManifest,
 	type VerifiedCandidateRuntime,
 	type VerifiedRunManifest,
+	type VerifiedRunApply,
 	type VerifiedRunResult,
+	type VerifiedRunSelection,
 } from "../run/types.ts";
 
 /**
@@ -166,6 +169,7 @@ function provisionWorktrees(): void {
 		manifest.result = {
 			ok: false,
 			selection: null,
+			apply: null,
 			failure: {
 				code: "base-drift",
 				message: `run ${manifest.runId}: source base drifted before candidates launched (request recorded ${request.baseCommit}, source is now ${preflight.baseCommit}); aborting before any spend`,
@@ -361,10 +365,12 @@ try {
 		stopWatchdog();
 	}
 	writeResultArtifacts(runDir, selection.winnerReport, response);
+	const apply = applySelectionWinner(manifest, selection);
 	manifest.result = {
 		ok: true,
 		selection,
 		failure: null,
+		apply,
 		artifacts: {
 			traces: traceArtifacts,
 			report: "winner-report.md",
@@ -375,7 +381,10 @@ try {
 	};
 	manifest.state = "completed";
 	writeVerifiedRunManifest(runDir, manifest);
-	log(runDir, `run completed: winner w${selection.winnerIndex} (${distinct.length} distinct)`);
+	log(
+		runDir,
+		`run completed: winner w${selection.winnerIndex} (${distinct.length} distinct); apply ${apply.applied ? "succeeded" : `skipped (${apply.code})`}`,
+	);
 	process.exit(0);
 } catch (error) {
 	if (cancelled) {
@@ -402,6 +411,65 @@ try {
 	process.exit(0);
 }
 
+/**
+ * Ticket 08: apply the winner's snapshot commit to the source worktree as an
+ * explicit, IMMEDIATE clean-base compare-and-swap — this runs right here,
+ * inside the live supervisor that just finished selection, never at an
+ * arbitrary later time. Any drift/conflict/mismatch resets the transaction
+ * and applies nothing; the winner branch is retained either way. On success
+ * the candidate worktree directories are removed (branches/commits stay).
+ */
+function applySelectionWinner(
+	manifest: VerifiedRunManifest,
+	selection: VerifiedRunSelection,
+): VerifiedRunApply {
+	const request = manifest.request;
+	const finishedAt = new Date().toISOString();
+	try {
+		const applied = applyWinnerToSource({
+			sourceRepo: request.sourceRepo,
+			baseCommit: request.baseCommit,
+			winnerCommit: selection.winnerCommit,
+			winnerTreeHash: selection.winnerTreeHash,
+		});
+		let worktreesRemoved = true;
+		try {
+			cleanupRunWorktrees(
+				manifest.runId,
+				request.sourceRepo,
+				request.candidates.map((candidate) => candidate.worktree),
+			);
+		} catch (error) {
+			worktreesRemoved = false;
+			log(
+				runDir,
+				`worktree cleanup after apply failed: ${error instanceof Error ? error.message : String(error)} (branches remain)`,
+			);
+		}
+		log(runDir, `applied winner w${selection.winnerIndex} onto base ${request.baseCommit} (tree ${applied.treeHash})`);
+		return {
+			applied: true,
+			code: "applied",
+			message: `winner changes are staged in ${request.sourceRepo}; review with git diff --staged, revert with git reset --hard ${request.baseCommit}`,
+			treeHash: applied.treeHash,
+			worktreesRemoved,
+			finishedAt,
+		};
+	} catch (error) {
+		const code = error instanceof ApplyError ? error.code : "apply-failed";
+		const message = error instanceof Error ? error.message : String(error);
+		log(runDir, `apply skipped (${code}): ${message}`);
+		return {
+			applied: false,
+			code,
+			message,
+			treeHash: null,
+			worktreesRemoved: false,
+			finishedAt,
+		};
+	}
+}
+
 function safeReadManifest(): VerifiedRunManifest | null {
 	try {
 		return readVerifiedRunManifest(runDir);
@@ -414,6 +482,7 @@ function failureResult(startedAt: number, code: string, message: string, traces:
 	return {
 		ok: false,
 		selection: null,
+		apply: null,
 		failure: { code, message },
 		artifacts: { traces, report: "winner-report.md", ranking: "ranking.json" },
 		elapsedMs: Date.now() - startedAt,

@@ -210,7 +210,12 @@ describe("capability gate + degenerate halt (live supervisor)", () => {
 		assert.equal(retried.result?.selection?.winnerIndex, 1, "VF-GOOD candidate wins after the retry");
 		// The retry re-ranked frozen traces: exactly N candidate spawns ever.
 		assert.equal(readdirSync(captureDir).length, 3);
-		assert.equal(run(repo, "status", "--porcelain"), "");
+		// Ticket 08: the retry's winner went through the apply gate.
+		assert.equal(retried.result?.apply?.applied, true);
+		assert.equal(run(repo, "status", "--porcelain"), "A  change.txt");
+		for (const spec of retried.request.candidates) {
+			assert.equal(existsSync(spec.worktree), false, `worktree removed after apply: ${spec.worktree}`);
+		}
 		// A completed run has nothing left to retry.
 		assert.throws(() => retryVerifiedRunVerification(runDir), /already completed/);
 	});

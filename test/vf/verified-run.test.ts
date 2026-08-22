@@ -74,18 +74,20 @@ describe("verified fan-out supervisor (live processes)", () => {
 		assert.match(manifest.result?.selection?.winnerTrace ?? "", /Final report for VF-GOOD/);
 		// One spawn per candidate, no respawns.
 		assert.equal(readdirSync(captureDir).length, 3);
-		// Traces and ranking artifacts exist; worktrees retained for the apply gate.
+		// Traces and ranking artifacts exist; ticket 08 applies the winner and
+		// removes the worktree directories while the branches stay for audit.
 		const paths = verifiedRunFilePaths(runDir);
 		assert.equal(existsSync(paths.ranking), true);
 		assert.equal(manifest.result?.artifacts.traces.length, 3);
-		assert.equal(existsSync(manifest.request.candidates[0].worktree), true);
+		assert.equal(manifest.result?.apply?.applied, true, "winner applied by the live supervisor");
+		assert.equal(existsSync(manifest.request.candidates[0].worktree), false, "worktree removed after apply");
 		assert.equal(
 			run(repo, "show-ref", "--verify", `refs/heads/${candidateWorktreeBranchName(runId, 1)}`).length > 0,
 			true,
 			"winner snapshot branch retained",
 		);
-		// The source repo itself is untouched.
-		assert.equal(run(repo, "status", "--porcelain"), "");
+		// The winner's change is staged in the source repo (cherry-pick --no-commit).
+		assert.equal(run(repo, "status", "--porcelain"), "A  change.txt");
 	});
 
 	it("fails the whole run when fewer than two distinct candidates completed", async () => {
@@ -247,8 +249,14 @@ describe("verified fan-out orchestrator (one logical child)", () => {
 		const finalManifest = readVerifiedRunManifest(runDir);
 		assert.equal(finalManifest.state, "completed");
 		assert.equal(existsSync(verifiedRunFilePaths(runDir).deliveryClaim), true, "delivery claimed exactly once");
-		// Winner worktree retained + branch retained; source untouched.
-		assert.equal(existsSync(finalManifest.result?.selection?.winnerWorktree ?? ""), true);
+		// Apply gate: worktrees removed, branch retained; the winner tree here
+		// equals the base (candidates wrote no change), so nothing is staged.
+		assert.equal(existsSync(finalManifest.result?.selection?.winnerWorktree ?? ""), false);
+		assert.equal(
+			run(repo, "show-ref", "--verify", `refs/heads/${candidateWorktreeBranchName(runId, 1)}`).length > 0,
+			true,
+			"winner snapshot branch retained",
+		);
 		assert.equal(run(repo, "status", "--porcelain"), "");
 		rmSync(artifactRoot, { recursive: true, force: true });
 	});

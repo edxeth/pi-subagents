@@ -138,10 +138,16 @@ export interface VerifiedRunSelection {
 	winnerSessionFile: string;
 	winnerWorktree: string;
 	winnerBranch: string;
+	/** Internal snapshot commit of the winner (cherry-picked by the apply gate). */
+	winnerCommit: string;
 	winnerTreeHash: string;
 	winnerChanged: boolean;
+	/** Winner's verifier score in [0,1] (logprob expectation aggregate). */
+	winnerScore: number;
 	winnerReport: string;
 	winnerTrace: string;
+	/** Verifier token usage of the selection tournament. */
+	usage: { calls: number; inputTokens: number; outputTokens: number };
 	distinctCandidates: number;
 	/** Candidate indices collapsed as exact duplicates (same tree + report). */
 	collapsed: number[];
@@ -151,10 +157,25 @@ export interface VerifiedRunSelection {
 	runnerUpSessionFiles: string[];
 }
 
+/** Ticket 08 outcome of the guarded winner application. */
+export interface VerifiedRunApply {
+	applied: boolean;
+	/** "applied" on success; otherwise the fail-closed skip code (source-drift, apply-conflict, ...). */
+	code: string;
+	message: string;
+	/** Staged tree hash after a successful apply (equals the winner tree). */
+	treeHash: string | null;
+	/** True when the candidate worktree directories were removed after a successful apply. */
+	worktreesRemoved: boolean;
+	finishedAt: string;
+}
+
 export interface VerifiedRunResult {
 	ok: boolean;
 	selection: VerifiedRunSelection | null;
 	failure: VerifiedRunFailure | null;
+	/** Guarded winner application result (null while selection has not succeeded). */
+	apply: VerifiedRunApply | null;
 	/** Relative artifact names inside the run dir (traces/<i>.txt etc.). */
 	artifacts: { traces: string[]; report: string; ranking: string };
 	elapsedMs: number;
