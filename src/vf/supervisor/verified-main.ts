@@ -125,7 +125,7 @@ function spawnCandidates(): void {
 		if (!existsSync(spec.worktree)) {
 			fail(`candidate worktree missing before spawn: ${spec.worktree}`);
 		}
-		const child = spawn(request.piCommand, spec.args, {
+		const child = spawn(request.piCommand, [...request.piCommandArgs, ...spec.args], {
 			cwd: spec.worktree,
 			detached: true, // own process group: survives this supervisor's death
 			stdio: ["ignore", "ignore", "ignore"],

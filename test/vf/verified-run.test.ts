@@ -12,6 +12,7 @@ import {
 } from "../../src/vf/run/client.ts";
 import { launchVerifiedFanOut, VerifiedLaunchError, verifiedRunsBaseDir } from "../../src/vf/run/launch.ts";
 import { resolveSubagentCwd } from "../../src/launch/runtime-paths.ts";
+import { getPackagedCriteriaDir } from "../../src/vf/criteria.ts";
 import { readVerifiedRunManifest, verifiedRunFilePaths } from "../../src/vf/run/types.ts";
 import { getLiveSlotCount, initializeSpawnWidthForSession, resetSpawnWidthForTest } from "../../src/runtime/spawn-width.ts";
 import { resetSubagentStateForTest, runningSubagents } from "../../src/runtime/wiring.ts";
@@ -180,7 +181,7 @@ describe("verified fan-out supervisor (live processes)", () => {
 });
 
 describe("verified fan-out orchestrator (one logical child)", () => {
-	function setupProject(agentFrontmatter: string): { repo: string; parent: string; ctx: unknown } {
+	function setupProject(agentFrontmatter: string): { repo: string; parent: string; fakePi: string; captureDir: string; ctx: unknown } {
 		const { repo, parent, fakePi, captureDir } = setupFixture();
 		fixtureRoot = parent;
 		mkdirSync(join(repo, ".pi", "agents"), { recursive: true });
@@ -202,7 +203,7 @@ describe("verified fan-out orchestrator (one logical child)", () => {
 				getLeafId: () => null,
 			},
 		};
-		return { repo, parent, ctx };
+		return { repo, parent, fakePi, captureDir, ctx };
 	}
 
 	it("returns one logical child with byte-identical candidate prompts and a single outcome", async () => {
@@ -286,6 +287,77 @@ describe("verified fan-out orchestrator (one logical child)", () => {
 		rmSync(artifactRoot, { recursive: true, force: true });
 	});
 
+	it("threads the frontmatter criteria into the frozen verifier request (precedence over the packaged generic fallback)", async () => {
+		const artifactRoot = createTestDir();
+		const parents: string[] = [];
+		process.env.PI_ARTIFACT_PROJECT_ROOT = artifactRoot;
+		try {
+			// A repo-relative criteria file: the frontmatter path value wins over
+			// every fallback and resolves against the launch cwd.
+			const custom = setupProject(
+				"description: vf test agent\nllm-as-a-verifier: true\nllm-as-a-verifier-criteria: rubrics/custom.md\n",
+			);
+			parents.push(custom.parent);
+			mkdirSync(join(custom.repo, "rubrics"), { recursive: true });
+			writeFileSync(
+				join(custom.repo, "rubrics", "custom.md"),
+				"# Rubric\n\n## Criteria\n\n### Fit {#fit}\n\nJudge the fit only.\n",
+			);
+			run(custom.repo, "add", "-A");
+			run(custom.repo, "commit", "-q", "-m", "custom rubric");
+			const customLaunch = await launchVerifiedFanOut(
+				{ name: "vf-run", title: "VF run", task: "do the thing", agent: "vf-worker" },
+				loadVfAgent(custom.repo)!,
+				custom.ctx as never,
+			);
+			const customManifest = readVerifiedRunManifest(customLaunch.runDir);
+			assert.equal(
+				customManifest.request.verifier.criteriaPath,
+				join(custom.repo, "rubrics", "custom.md"),
+				"frontmatter path value resolves against the launch cwd",
+			);
+
+			// A built-in name selects that packaged rubric, not the generic default.
+			const builtin = setupProject(
+				"description: vf test agent\nllm-as-a-verifier: true\nllm-as-a-verifier-criteria: code-change\n",
+			);
+			parents.push(builtin.parent);
+			const builtinLaunch = await launchVerifiedFanOut(
+				{ name: "vf-run", title: "VF run", task: "do the thing", agent: "vf-worker" },
+				loadVfAgent(builtin.repo)!,
+				builtin.ctx as never,
+			);
+			assert.equal(
+				readVerifiedRunManifest(builtinLaunch.runDir).request.verifier.criteriaPath,
+				join(getPackagedCriteriaDir(), "code-change.md"),
+				"built-in name selects the packaged rubric",
+			);
+
+			// No value at all falls back to the packaged generic rubric.
+			const fallback = setupProject("description: vf test agent\nllm-as-a-verifier: true\n");
+			parents.push(fallback.parent);
+			const fallbackLaunch = await launchVerifiedFanOut(
+				{ name: "vf-run", title: "VF run", task: "do the thing", agent: "vf-worker" },
+				loadVfAgent(fallback.repo)!,
+				fallback.ctx as never,
+			);
+			assert.equal(
+				readVerifiedRunManifest(fallbackLaunch.runDir).request.verifier.criteriaPath,
+				join(getPackagedCriteriaDir(), "generic.md"),
+				"absent value falls back to the packaged generic rubric",
+			);
+
+			// Let every run settle so no supervisor outlives the test.
+			for (const launch of [customLaunch, builtinLaunch, fallbackLaunch]) {
+				const result = await launch.running.completionPromise!;
+				assert.equal(result.exitCode, 0);
+			}
+		} finally {
+			for (const parent of parents) rmSync(parent, { recursive: true, force: true });
+			rmSync(artifactRoot, { recursive: true, force: true });
+		}
+	});
+
 	it("fails closed on a dirty source tree before any spend", async () => {
 		const { repo, ctx } = setupProject("description: vf test agent\nllm-as-a-verifier: true\n");
 		const agentDefs = loadVfAgent(repo);
@@ -301,6 +373,67 @@ describe("verified fan-out orchestrator (one logical child)", () => {
 			/dirty/,
 		);
 		assert.deepEqual(listVerifiedRuns(artifactRoot), []);
+		rmSync(artifactRoot, { recursive: true, force: true });
+	});
+
+	it("carries a multi-word PI_SUBAGENT_PI_COMMAND prefix into every candidate argv", async () => {
+		// A wrapper command like `node /path/router.mjs` must reach candidates
+		// as the executable plus its prefix words; dropping the prefix would
+		// spawn the runtime with only pi flags (the live e2e hit exactly that).
+		const { repo, fakePi, captureDir, ctx } = setupProject("description: vf test agent\nllm-as-a-verifier: true\n");
+		fixtureRoot = join(captureDir, "..");
+		process.env.PI_SUBAGENT_PI_COMMAND = `${process.execPath} ${fakePi}`;
+		const agentDefs = loadVfAgent(repo);
+		const artifactRoot = createTestDir();
+		process.env.PI_ARTIFACT_PROJECT_ROOT = artifactRoot;
+		const { running, runDir } = await launchVerifiedFanOut(
+			{ name: "vf-run", title: "VF run", task: "do the thing", agent: "vf-worker" },
+			agentDefs!,
+			ctx as never,
+		);
+		const manifest = readVerifiedRunManifest(runDir);
+		assert.equal(manifest.request.piCommand, process.execPath);
+		assert.deepEqual(manifest.request.piCommandArgs, [fakePi]);
+		const result = await running.completionPromise!;
+		assert.equal(result.exitCode, 0);
+		const captures = readdirSync(captureDir)
+			.filter((name) => name.startsWith("argv-"))
+			.map((name) => JSON.parse(readFileSync(join(captureDir, name), "utf8")));
+		assert.equal(captures.length, 3, "all three candidates actually spawned through the wrapper");
+		for (const capture of captures) {
+			assert.equal(capture.argv[1], fakePi, `wrapper script must be argv[1]: ${JSON.stringify(capture.argv.slice(0, 3))}`);
+			assert.equal(capture.argv[2], "-p", "candidate pi args follow the wrapper prefix");
+		}
+		rmSync(artifactRoot, { recursive: true, force: true });
+	});
+
+	it("seeds each candidate session header with the candidate's worktree cwd", async () => {
+		// Real pi adopts a continued session's recorded cwd as its project
+		// root. If the header carries the source cwd, a real candidate escapes
+		// its worktree and edits the source tree (found by the ticket-09 live
+		// e2e); the fake-pi tests never read the header, so assert it here.
+		const { repo, ctx } = setupProject("description: vf test agent\nllm-as-a-verifier: true\n");
+		const agentDefs = loadVfAgent(repo);
+		const artifactRoot = createTestDir();
+		process.env.PI_ARTIFACT_PROJECT_ROOT = artifactRoot;
+		const { running } = await launchVerifiedFanOut(
+			{ name: "vf-run", title: "VF run", task: "do the thing", agent: "vf-worker" },
+			agentDefs!,
+			ctx as never,
+		);
+		const registry = runningSubagents.get(running.id)!;
+		const manifest = readVerifiedRunManifest(registry.verifiedRunDir!);
+		for (const candidate of manifest.request.candidates) {
+			const header = JSON.parse(readFileSync(candidate.sessionFile, "utf8").split("\n", 1)[0]);
+			assert.equal(header.type, "session");
+			assert.equal(
+				header.cwd,
+				candidate.worktree,
+				`candidate w${candidate.index} session header must record the worktree cwd, not the source cwd`,
+			);
+		}
+		const result = await running.completionPromise!;
+		assert.equal(result.exitCode, 0);
 		rmSync(artifactRoot, { recursive: true, force: true });
 	});
 });

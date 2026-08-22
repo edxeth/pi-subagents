@@ -64,7 +64,14 @@ export async function coordinateSubagentLaunch(
 	const noSession = resolveSubagentNoSession(prepared.agentDefs);
 	const noSessionSeedMode = noSession ? getNoSessionSeedMode(sessionMode) : null;
 	const directTask = sessionMode === "fork" || noSessionSeedMode === "fork";
-	const { seedMode, boundarySystemPrompt } = seedPreparedSubagentSession(prepared, params, ctx, sessionMode, noSession);
+	const { seedMode, boundarySystemPrompt } = seedPreparedSubagentSession(
+		prepared,
+		params,
+		ctx,
+		sessionMode,
+		noSession,
+		forcedCwd,
+	);
 	const systemPrompt = getCoordinatedSystemPrompt(prepared);
 	const agentEnv = parseEnvString(prepared.agentDefs?.env);
 	const herdrPlacementPolicy =

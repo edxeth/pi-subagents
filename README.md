@@ -430,6 +430,58 @@ allowed-models: openai/gpt-5.5:low, nahcrof/glm-5.1:off, anthropic/claude-opus-4
 
 `model` is the default and is always allowed. `allowed-models` lists the other models Pi may use for this agent, so you do not need to repeat `model`. The `:thinking` suffix is optional: `provider/model:low` allows only that thinking level, while `provider/model` allows the model with whatever thinking level Pi resolves. If `allow-model-override: false`, Pi ignores launch-time and resume-time model choices as usual.
 
+## Verified fan-out (`llm-as-a-verifier`)
+
+Marking an agent definition with `llm-as-a-verifier: true` turns every launch of that definition into a best-of-N run: N fresh candidate sessions attempt the identical task, an LLM verifier ranks their transcripts, and the parent receives the winning candidate's report as one logical child result — not N results.
+
+```yaml
+---
+description: Best-of-N implementation worker
+model: zai/glm-5-turbo:high
+llm-as-a-verifier: true
+llm-as-a-verifier-candidates: 3
+llm-as-a-verifier-criteria: code-change
+---
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `llm-as-a-verifier` | `false` | `true`/`false` only. Any other value (including an integer) fails agent loading. |
+| `llm-as-a-verifier-candidates` | `3` | Integer `>= 2`. May also come from `PI_SUBAGENT_LLM_VERIFIER_CANDIDATES`. |
+| `llm-as-a-verifier-model` | verifier profile | `provider/model[:thinking]` verifier override for this agent. |
+| `llm-as-a-verifier-criteria` | `generic` | Built-in rubric name (`generic`, `code-change`, `research`) or a path, resolved against the launch cwd. |
+
+Model and criteria are independent: setting one never suppresses the other. The candidate count consumes N spawn slots, reserved atomically before any worktree or verifier spend.
+
+### What a run does
+
+1. Pre-flight fails closed before any spend: unresolvable criteria, an invalid verifier profile, a non-Git or dirty source tree, or an unavailable verifier credential aborts the launch.
+2. A capability probe verifies the verifier backend returns usable A–T score-token logprobs and that an obviously-good trace beats an obviously-bad one. A logprob-less proxy fails here, having spent nothing.
+3. N candidates spawn in isolated git worktrees — real worktrees created as siblings of your repo (`<repo>-vf-<runid>-w<i>`) at the recorded clean base — with byte-identical task prompts (`task-expansion: shell` is expanded once and frozen). Candidates are normalized to background, auto-exit, non-spawning sessions.
+4. When all candidates settle, each transcript is flattened into a trace, exact duplicates collapse, and the verifier ranks the distinct traces with logprob expectation (`llm-verifier` in a private pinned venv; `n_evaluations=4`, `pivots=2`, `seed=0`, `on_error="raise"`). At least two distinct completed candidates are required, otherwise the run fails and nothing is applied. A flat/degenerate score distribution halts the run — a winner is never fabricated.
+5. For mutating agents, the winner's snapshot is applied to your worktree via `git cherry-pick --no-commit` only while the source still exactly matches the recorded base, followed by `git diff --check` and an exact tree-equality check. Any drift, conflict, or mismatch resets the transaction and applies nothing; the winner stays recoverable on its internal branch.
+6. The parent receives the winner's report plus a compact verification footer: N, winner id, distinct count, criteria ids, score, verifier model, token usage, artifact path, and the exact review (`git diff --staged`) and revert (`git reset --hard <base>`) commands.
+
+Verifier cost is `(N + k(N-k) + C(k,2)) x |criteria| x n_evaluations` calls (N=3, k=2 pivots, 3 criteria, 4 evaluations = 72 calls) — there is no live per-step scoring in this release.
+
+### Verifier model requirements
+
+The verifier is a scoring profile, not an agent. Profiles live at `.pi/agents/verifiers/<name>.md` (project overrides global by name); a bundled default ships `deepseek-v4-flash` with credentials taken from the launching environment. A profile accepts only `model`, `thinking`, and an `env` block — it is never launched as a child session.
+
+The backend must expose token-level logprobs for the scoring tokens. DeepSeek's official API (`deepseek-v4-flash`) is the tested default and needs `DEEPSEEK_API_KEY`; CLIProxyAPI/Codex-subscription and aggregator front-ends that strip logprobs fail the capability probe on purpose. Set `llm-as-a-verifier-model: provider/model[:thinking]` on an agent to use a different logprob-capable backend.
+
+### Criteria
+
+Three rubrics ship with the extension (`generic`, `code-change`, `research`), each with narrow criteria plus explicit ignore clauses and the upstream ground-truth note: do not trust the agent's self-assessment. A definition's `llm-as-a-verifier-criteria` value (built-in name or path, resolved to an absolute file at launch) takes precedence over the packaged `generic` fallback.
+
+Criteria text goes into the verifier's scoring prompt only — candidates never see it. Criteria are stable per agent type, not regenerated per task; the per-field override is an escape hatch for unusual task shapes, not the norm. The scoring prompt template itself is fixed by the library and is not user-editable. You can preview any criteria file without an API key through the managed venv (`python -m llm_verifier <file>`).
+
+### Worktrees and the concurrent-safety attestation
+
+Setting `llm-as-a-verifier` on a definition attests that the agent is safe to run N times concurrently against the same task. Worktrees isolate files — nothing more. Each candidate gets `COMPOSE_PROJECT_NAME` and a distinct `PORT_OFFSET`, but fixed host ports, `container_name`, shared volumes, deploys, and migrations remain the definition author's responsibility; the extension does not sandbox them.
+
+Worktree directories are removed after a successful selection+apply; each candidate's snapshot stays on an internal branch (`vf/<runid>/w<i>`) for audit and runner-up recovery. Runs live under the artifact root and survive closing or reloading the parent session; finished candidate sessions are never resumable (see [Resuming child sessions](#resuming-child-sessions)).
+
 ## Ambient awareness
 
 Ambient awareness is the quiet note Pi gives the parent model about available agents.
@@ -823,6 +875,7 @@ User-facing knobs:
 | `PI_SUBAGENT_ZELLIJ_PLACEMENT` | Zellij policy: `auto`, `right-stack`, `down-stack`, `floating`, or `tab-stack` |
 | `PI_SUBAGENT_ZELLIJ_MIN_COLUMNS` | Minimum usable columns for each side of a Zellij split (default: `50`) |
 | `PI_SUBAGENT_ZELLIJ_MIN_ROWS` | Minimum usable rows for each side of a Zellij split (default: `10`) |
+| `PI_SUBAGENT_LLM_VERIFIER_CANDIDATES` | Default candidate count for `llm-as-a-verifier` agents that do not set `llm-as-a-verifier-candidates` |
 
 Runtime internals you may see while debugging:
 
@@ -834,6 +887,8 @@ Runtime internals you may see while debugging:
 - `PI_SUBAGENT_SESSION`
 - `PI_SUBAGENT_SURFACE`
 - `PI_SUBAGENT_AUTO_EXIT`
+- `PI_SUBAGENT_LLM_VERIFIER_VENV` (verified fan-out: pre-provisioned `llm-verifier` venv root)
+- `PI_SUBAGENT_SUPERVISOR_RUNTIME` (verified fan-out: command that runs the detached supervisor `.ts` entry)
 
 Live test knobs:
 
@@ -841,6 +896,7 @@ Live test knobs:
 - `PI_SUBAGENT_LIVE_MODEL`
 - `PI_SUBAGENT_KEEP_E2E_TMP`
 - `PI_SUBAGENT_LIVE_LOCK_PATH`
+- `PI_SUBAGENT_ALLOW_VERIFIED_E2E` (verified fan-out live e2e; also needs `DEEPSEEK_API_KEY`)
 - `PI_SUBAGENT_PROVIDER_RECOVERY_DELAYS_MS` — override the provider-error recovery backoff windows (comma-separated ms, e.g. `10000,11000,12000`) so a live Pi process can exercise the wait → nudge → kill path without waiting the full 30/60/90s. Values below 10000ms are clamped so recovery does not race Pi's own default auto-retry backoff. Defaults to the production `30000,60000,90000`.
 
 ## Herdr placement
@@ -913,6 +969,7 @@ The mux tests cover Herdr detection, adapter errors, geometry-aware placement, s
 Live tests:
 
 ```bash
+PI_SUBAGENT_ALLOW_VERIFIED_E2E=1 DEEPSEEK_API_KEY=... npm run test:e2e-live-verified-fanout
 PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:e2e-live-blocking
 PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:e2e-live-mix-blocking
 npm run test:e2e-live-deny-tools

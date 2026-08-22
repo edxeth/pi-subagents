@@ -129,9 +129,10 @@ export async function launchVerifiedFanOut(
 		let frozenFullTask: string | undefined;
 		let fullTask = "";
 		let piCommand = "";
-		let baseEnv: Record<string, string> | undefined;
-		let denyPatterns: string[] = [];
-		let modelRef: string | undefined;
+	let baseEnv: Record<string, string> | undefined;
+	let denyPatterns: string[] = [];
+	let modelRef: string | undefined;
+	let piCommandArgs: string[] = [];
 		for (let index = 1; index <= fanout.candidates; index++) {
 			const worktree = join(repoParent, candidateWorktreeDirName(preflight.repoRoot, runId, index));
 			const candidateParams: SubagentParamsInput = {
@@ -150,6 +151,17 @@ export async function launchVerifiedFanOut(
 				frozenFullTask = plan.fullTask;
 				fullTask = plan.fullTask;
 				piCommand = plan.invocation.command;
+				// getPiInvocation builds [...prefixWords, ...args]; recover the
+				// prefix so the supervisor can reconstruct the full candidate
+				// command line (wrapper scripts, script-path invocations).
+				const invocationArgs = plan.invocation.args;
+				if (invocationArgs.slice(invocationArgs.length - plan.args.length).join("\u0000") !== plan.args.join("\u0000")) {
+					throw new VerifiedLaunchError(
+						"candidate invocation prefix could not be derived from the resolved pi command",
+						"invocation",
+					);
+				}
+				piCommandArgs = invocationArgs.slice(0, invocationArgs.length - plan.args.length);
 				denyPatterns = plan.denyPatterns;
 				modelRef = plan.launch.prepared.effectiveModelRef;
 				baseEnv = buildParentEnvSnapshot(process.env, denyPatterns);
@@ -181,6 +193,7 @@ export async function launchVerifiedFanOut(
 			name: params.name,
 			title: params.title,
 			piCommand,
+			piCommandArgs,
 			taskArtifact: frozenTaskArg!.slice(1),
 			taskPrompt: fullTask,
 			sourceRepo: preflight.repoRoot,

@@ -77,6 +77,8 @@ export interface VerifiedRunRequest {
 	title: string;
 	/** Resolved pi invocation (command resolved in the parent process). */
 	piCommand: string;
+	/** Prefix words between the command and the per-candidate argv (multi-word PI_SUBAGENT_PI_COMMAND, script path). */
+	piCommandArgs: string[];
 	/** Frozen prompt artifact consumed via @path by every candidate. */
 	taskArtifact: string;
 	/** The byte-identical full task text (also the verifier `problem`). */

@@ -122,6 +122,7 @@ export function buildSupervisedRun(
 		name: "vf-test",
 		title: "VF test run",
 		piCommand: process.execPath,
+		piCommandArgs: [],
 		taskArtifact: join(baseDir, "task.md"),
 		taskPrompt: "candidate task prompt",
 		sourceRepo: repo,

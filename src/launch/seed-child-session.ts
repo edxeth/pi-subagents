@@ -29,6 +29,7 @@ export function seedPreparedSubagentSession(
 	ctx: Pick<SubagentLaunchContext, "cwd" | "sessionManager">,
 	sessionMode: SubagentSessionMode,
 	noSession: boolean,
+	forcedCwd?: string,
 ): {
 	seedMode: Exclude<SubagentSessionMode, "standalone"> | null;
 	boundarySystemPrompt: boolean;
@@ -44,7 +45,11 @@ export function seedPreparedSubagentSession(
 					`or start pi with a persistent session (--session or --session-dir).`,
 			);
 		}
-		storage.seed(seedMode, prepared.sessionFile, prepared.runtimePaths.effectiveCwd ?? ctx.cwd, {
+		// The seeded session header's cwd becomes the child pi's project root
+		// when it continues the session, so a forced-cwd child (verified
+		// fan-out candidates in their worktrees) must record where it actually
+		// runs — not the blueprint cwd the launch was resolved against.
+		storage.seed(seedMode, prepared.sessionFile, forcedCwd ?? prepared.runtimePaths.effectiveCwd ?? ctx.cwd, {
 			...(prepared.sessionTitle ? { sessionName: prepared.sessionTitle } : {}),
 			activeLeafId: ctx.sessionManager.getLeafId?.(),
 		});
