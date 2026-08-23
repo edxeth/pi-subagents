@@ -31,13 +31,6 @@ export class VerifierProfileError extends Error {
 	}
 }
 
-export class VerifierCredentialError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "VerifierCredentialError";
-	}
-}
-
 export interface VerifierProfile {
 	name: string;
 	source: VerifierProfileSource;
@@ -192,13 +185,6 @@ export function resolveVerifierProfile(name: string, baseCwd: string): VerifierP
 	);
 }
 
-/** Credential the library needs for a given plain model id (mirrors its create_client order). */
-export function requiredCredentialForModel(modelId: string): string {
-	if (modelId.startsWith("deepseek")) return "DEEPSEEK_API_KEY";
-	if (modelId.startsWith("gemini")) return "VERTEX_API_KEY";
-	return "OPENAI_BASE_URL";
-}
-
 export interface ResolvedVerifierModel {
 	/** Plain library model id — the exact string `select(model=...)` receives. */
 	model: string;
@@ -209,14 +195,16 @@ export interface ResolvedVerifierModel {
 	thinking: LibraryReasoningEffort | null;
 	/** Env vars the profile pins; merged over the process env for the bridge process. */
 	env: Record<string, string>;
-	credential: { key: string | null; via: "profile-env" | "process-env" | "endpoint" | "not-required" };
 }
 
 /**
  * Resolve the verifier model for a launch. Precedence:
  * `llm-as-a-verifier-model` override → `verifiers/default.md` profile →
  * library default. A `-model`-only override still inherits the default
- * profile's `env` block for credentials.
+ * profile's `env` block for credentials. Resolution is credential-agnostic:
+ * which env var a backend needs is the library's contract — the bridge probe
+ * surfaces it (typed `credentials` failure) before any candidate spend, so no
+ * env-var name is ever inferred here from the model name.
  */
 export function resolveVerifierModel(options: {
 	override?: string | undefined;
@@ -231,51 +219,11 @@ export function resolveVerifierModel(options: {
 	// default is a safety net, not a reachable branch.
 	const model = modelRef.modelId || LIBRARY_DEFAULT_VERIFIER_MODEL;
 	const thinking = options.override ? modelRef.thinking : profile.thinking;
-	const credential = checkCredential(model, effectiveEnv, profile.env);
 	return {
 		model,
 		modelRef: { ...modelRef, modelId: model },
 		profile: { name: profile.name, source: profile.source, path: profile.path },
 		thinking: thinking ?? null,
 		env: profile.env,
-		credential,
 	};
-}
-
-function checkCredential(
-	modelId: string,
-	effectiveEnv: NodeJS.ProcessEnv,
-	profileEnv: Record<string, string>,
-): ResolvedVerifierModel["credential"] {
-	// OPENAI_BASE_URL satisfies any model: the library builds an
-	// OpenAI-compatible client for whatever id it is handed.
-	if (effectiveEnv.OPENAI_BASE_URL) return { key: null, via: "endpoint" };
-	const key = requiredCredentialForModel(modelId);
-	if (profileEnv[key]) return { key, via: "profile-env" };
-	if (effectiveEnv[key]) return { key, via: "process-env" };
-	return { key, via: "not-required" };
-}
-
-/**
- * Fail closed before any candidate spend when the resolved verifier model has
- * no credential in the profile env block or the process env. The library
- * would otherwise raise MissingAPIKeyError only after candidates were paid
- * for (or silently score with the wrong backend).
- */
-export function assertVerifierCredentials(
-	resolved: ResolvedVerifierModel,
-	env: NodeJS.ProcessEnv = process.env,
-): void {
-	if (resolved.credential.via !== "not-required") return;
-	const key = resolved.credential.key;
-	if (!key) return;
-	const pinnedKeys = Object.keys(resolved.env ?? {});
-	const repair = [
-		`Verifier model "${resolved.model}" needs ${key} before any candidate can launch (never send a keyless request).`,
-		pinnedKeys.length > 0
-			? `The verifier profile (${resolved.profile.path}) pins env ${pinnedKeys.join(", ")} but not ${key}.`
-			: `The verifier profile (${resolved.profile.path}) pins no env keys.`,
-		`Fix: add "${key}=..." to the env block of ${resolved.profile.path}, export ${key} in the environment, or set llm-as-a-verifier-model to a model you have credentials for.`,
-	].join(" ");
-	throw new VerifierCredentialError(repair);
 }

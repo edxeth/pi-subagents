@@ -290,7 +290,9 @@ function startWatchdog(): () => void {
 }
 
 function verifierFailureCode(error: VerifierBridgeError): string {
-	if (["capability", "degenerate-scores", "comparison-count", "cache"].includes(error.kind)) return error.kind;
+	if (["capability", "credentials", "degenerate-scores", "comparison-count", "cache"].includes(error.kind)) {
+		return error.kind;
+	}
 	return "verifier-failed";
 }
 

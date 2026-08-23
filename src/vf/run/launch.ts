@@ -15,7 +15,7 @@ import {
 import { SPAWNING_TOOL_NAMES } from "../../tools/tool-names.ts";
 import type { RunningSubagent, SubagentParamsInput, SubagentResult } from "../../types.ts";
 import { resolveVerifiedFanOutLaunch } from "../criteria.ts";
-import { assertVerifierCredentials, resolveVerifierModel } from "../verifier-profile.ts";
+import { resolveVerifierModel } from "../verifier-profile.ts";
 import { candidateWorktreeBranchName, candidateWorktreeDirName, preflightWorktreeSource } from "../worktrees.ts";
 import { newRunId } from "../supervisor/run-client.ts";
 import { startVerifiedRun, verifiedRunDirFor, waitForVerifiedRunResult } from "./client.ts";
@@ -86,7 +86,6 @@ export async function launchVerifiedFanOut(
 		ctx.cwd,
 	);
 	const verifier = resolveVerifierModel({ override: fanout.modelOverride ?? undefined, baseCwd: ctx.cwd });
-	assertVerifierCredentials(verifier);
 	if (agentDefs.noSession) {
 		throw new VerifiedLaunchError(
 			`Agent ${params.agent} uses no-session sessions; verified fan-out candidates need durable session files so their transcripts can be flattened and ranked.`,

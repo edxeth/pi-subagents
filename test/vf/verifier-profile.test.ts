@@ -2,13 +2,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import { assert, createTestDir, join } from "../support/index.ts";
 import {
-	assertVerifierCredentials,
 	LIBRARY_DEFAULT_VERIFIER_MODEL,
 	normalizeVerifierModelRef,
 	parseVerifierProfileSource,
 	resolveVerifierModel,
 	resolveVerifierProfile,
-	VerifierCredentialError,
 	VerifierProfileError,
 } from "../../src/vf/verifier-profile.ts";
 
@@ -150,7 +148,7 @@ describe("verifier model ref normalization", () => {
 	});
 });
 
-describe("verifier model precedence and credentials", () => {
+describe("verifier model precedence", () => {
 	afterEach(() => {
 		delete process.env.PI_CODING_AGENT_DIR;
 	});
@@ -168,8 +166,6 @@ describe("verifier model precedence and credentials", () => {
 		assert.equal(resolved.thinking, "high");
 		assert.equal(resolved.profile.source, "project");
 		assert.deepEqual(resolved.env, { DEEPSEEK_API_KEY: "sk-profile" });
-		assert.deepEqual(resolved.credential, { key: "DEEPSEEK_API_KEY", via: "profile-env" });
-		assertVerifierCredentials(resolved, EMPTY_ENV);
 	});
 
 	it("uses the resolved default profile model when no override is set", () => {
@@ -179,23 +175,21 @@ describe("verifier model precedence and credentials", () => {
 		assert.equal(resolved.thinking, null);
 	});
 
-	it("fails closed before candidate spend when the credential is missing", () => {
+	it("resolves without inspecting credentials — the capability gate owns that failure", () => {
+		// Model resolution is credential-agnostic on purpose: which env var a
+		// backend needs is the library's contract, surfaced pre-spend by the
+		// bridge probe (runner exit `credentials`), never inferred in TS from
+		// the model name. A launch must proceed with an empty environment.
 		const { baseCwd } = withProfileDirs({});
 		const resolved = resolveVerifierModel({ baseCwd, env: EMPTY_ENV });
 		assert.equal(resolved.model, "deepseek-v4-flash");
-		assert.throws(() => assertVerifierCredentials(resolved, EMPTY_ENV), (error: Error) => {
-			assert.ok(error instanceof VerifierCredentialError);
-			assert.match(error.message, /DEEPSEEK_API_KEY/);
-			assert.match(error.message, /never send a keyless request/);
-			return true;
-		});
+		assert.equal("credential" in resolved, false, "resolution must not infer credential names");
 	});
 
-	it("accepts a process-env credential and the OPENAI_BASE_URL endpoint path", () => {
+	it("keeps profile env pinning as the only credential surface", () => {
 		const { baseCwd } = withProfileDirs({});
 		const viaProcess = resolveVerifierModel({ baseCwd, env: { DEEPSEEK_API_KEY: "sk" } });
-		assert.deepEqual(viaProcess.credential, { key: "DEEPSEEK_API_KEY", via: "process-env" });
-		assertVerifierCredentials(viaProcess, { DEEPSEEK_API_KEY: "sk" });
+		assert.equal(viaProcess.model, "deepseek-v4-flash");
 
 		const viaEndpoint = resolveVerifierModel({
 			override: "vllm/qwen-logprob",
@@ -203,15 +197,7 @@ describe("verifier model precedence and credentials", () => {
 			env: { OPENAI_BASE_URL: "http://localhost:8000/v1" },
 		});
 		assert.equal(viaEndpoint.model, "qwen-logprob");
-		assert.deepEqual(viaEndpoint.credential, { key: null, via: "endpoint" });
-		assertVerifierCredentials(viaEndpoint, { OPENAI_BASE_URL: "http://localhost:8000/v1" });
-	});
-
-	it("requires the Gemini credential for Gemini models", () => {
-		const { baseCwd } = withProfileDirs({ project: "---\nmodel: gemini-2.5-flash\n---\n" });
-		const resolved = resolveVerifierModel({ baseCwd, env: EMPTY_ENV });
-		assert.deepEqual(resolved.credential, { key: "VERTEX_API_KEY", via: "not-required" });
-		assert.throws(() => assertVerifierCredentials(resolved, EMPTY_ENV), /VERTEX_API_KEY/);
+		assert.deepEqual(viaEndpoint.env, {});
 	});
 
 	it("exports the library default model for the bridge fallback", () => {

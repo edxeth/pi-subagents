@@ -191,7 +191,6 @@ describe("verified fan-out orchestrator (one logical child)", () => {
 		run(repo, "add", "-A");
 		run(repo, "commit", "-q", "-m", "agent definition");
 		process.env.PI_SUBAGENT_PI_COMMAND = fakePi;
-		process.env.DEEPSEEK_API_KEY = "test-only-key";
 		process.env.PI_SUBAGENT_VF_MOCK_VERIFIER = JSON.stringify({ goodMarker: "VF-GOOD", midMarker: "VF-MID" });
 		process.env.TEST_CAPTURE_DIR = captureDir;
 		process.env.TEST_MARKER_MAP = JSON.stringify({ "1": "VF-GOOD", "2": "VF-MID", "3": "" });

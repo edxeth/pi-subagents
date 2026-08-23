@@ -455,8 +455,8 @@ Model and criteria are independent: setting one never suppresses the other. The 
 
 ### What a run does
 
-1. Pre-flight fails closed before any spend: unresolvable criteria, an invalid verifier profile, a non-Git or dirty source tree, or an unavailable verifier credential aborts the launch.
-2. A capability probe verifies the verifier backend returns usable A–T score-token logprobs and that an obviously-good trace beats an obviously-bad one. A logprob-less proxy fails here, having spent nothing.
+1. Pre-flight fails closed before any spend: unresolvable criteria, an invalid verifier profile, or a non-Git or dirty source tree aborts the launch.
+2. A capability probe verifies the verifier backend returns usable A–T score-token logprobs and that an obviously-good trace beats an obviously-bad one. Missing credentials fail here too — the bridge surfaces the library's own guidance naming the env var it wants — and a logprob-less proxy fails identically, all before any candidate is launched.
 3. N candidates spawn in isolated git worktrees — real worktrees created as siblings of your repo (`<repo>-vf-<runid>-w<i>`) at the recorded clean base — with byte-identical task prompts (`task-expansion: shell` is expanded once and frozen). Candidates are normalized to background, auto-exit, non-spawning sessions.
 4. When all candidates settle, each transcript is flattened into a trace, exact duplicates collapse, and the verifier ranks the distinct traces with logprob expectation (`llm-verifier` in a private pinned venv; `n_evaluations=4`, `pivots=2`, `seed=0`, `on_error="raise"`). At least two distinct completed candidates are required, otherwise the run fails and nothing is applied. A flat/degenerate score distribution halts the run — a winner is never fabricated.
 5. For mutating agents, the winner's snapshot is applied to your worktree via `git cherry-pick --no-commit` only while the source still exactly matches the recorded base, followed by `git diff --check` and an exact tree-equality check. Any drift, conflict, or mismatch resets the transaction and applies nothing; the winner stays recoverable on its internal branch.
