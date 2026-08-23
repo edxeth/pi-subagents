@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { getSubagentActivityStartIndex } from "../session/session-files.ts";
+import { readVerifiedRunDisplay, type VerifiedCandidateDisplay } from "../vf/widget.ts";
 import type {
 	RunningSubagent,
 	SessionContentBlock,
@@ -87,6 +88,8 @@ export class SubagentWidgetManager {
 	private widgetInterval: ReturnType<typeof setInterval> | null = null;
 	private widgetFrame = 0;
 	private readonly getAgents: () => Iterable<RunningSubagent>;
+	/** Per-candidate stat holders for verified runs, keyed by run dir then index. */
+	private readonly verifiedCandidateStats = new Map<string, Map<number, RunningSubagent>>();
 
 	constructor(getAgents: () => Iterable<RunningSubagent>) {
 		this.getAgents = getAgents;
@@ -138,6 +141,7 @@ export class SubagentWidgetManager {
 		for (const agent of this.getAgents()) {
 			this.refreshRunningSubagentState(agent);
 		}
+		this.pruneVerifiedCandidateStats();
 
 		this.renderWidgetNow();
 
@@ -145,6 +149,49 @@ export class SubagentWidgetManager {
 			clearInterval(this.widgetInterval);
 			this.widgetInterval = null;
 		}
+	}
+
+	/** Drop candidate stat holders whose run is no longer registered in this session. */
+	private pruneVerifiedCandidateStats(): void {
+		const live = new Set(
+			[...this.getAgents()]
+				.filter((agent) => agent.verifiedRunDir)
+				.map((agent) => agent.verifiedRunDir as string),
+		);
+		for (const runDir of this.verifiedCandidateStats.keys()) {
+			if (!live.has(runDir)) this.verifiedCandidateStats.delete(runDir);
+		}
+	}
+
+	/** Reuse the ordinary session parser for one candidate's session file. */
+	private candidateStats(agent: RunningSubagent, candidate: VerifiedCandidateDisplay): RunningSubagent {
+		let byIndex = this.verifiedCandidateStats.get(agent.verifiedRunDir as string);
+		if (!byIndex) {
+			byIndex = new Map();
+			this.verifiedCandidateStats.set(agent.verifiedRunDir as string, byIndex);
+		}
+		let stats = byIndex.get(candidate.index);
+		if (!stats) {
+			stats = {
+				id: `${agent.id}-w${candidate.index}`,
+				name: agent.name,
+				agent: agent.agent,
+				task: agent.task,
+				title: agent.title,
+				mode: "background",
+				executionState: "running",
+				deliveryState: "detached",
+				parentClosePolicy: "continue",
+				blocking: false,
+				async: true,
+				startTime: agent.startTime,
+				sessionFile: candidate.sessionFile,
+				modelContextWindow: agent.modelContextWindow,
+			};
+			byIndex.set(candidate.index, stats);
+		}
+		this.refreshRunningSubagentState(stats);
+		return stats;
 	}
 
 	startRefresh(): void {
@@ -340,6 +387,15 @@ export class SubagentWidgetManager {
 				const isLast = i === visibleAgents.length - 1;
 				const connector = isLast ? "└─" : "├─";
 				const childConnector = isLast ? "   " : "│  ";
+
+				const display = agent.verifiedRunDir ? readVerifiedRunDisplay(agent.verifiedRunDir) : null;
+				if (display) {
+					lines.push(
+						...this.renderVerifiedGroup(theme, spinner, agent, display, connector, childConnector, visibleAgents.length),
+					);
+					continue;
+				}
+
 				const stats: string[] = [];
 
 				const toolUses = agent.toolUses ?? 0;
@@ -379,6 +435,79 @@ export class SubagentWidgetManager {
 		}
 
 		return lines.map((line) => truncateToWidth(line, Math.max(1, width - 4)));
+	}
+
+	/**
+	 * One row per candidate under a single logical child. The group keeps the
+	 * widget budget: its rows share the lines the other visible agents leave,
+	 * and overflow folds into the same Alt+S hint the agent list uses.
+	 */
+	private renderVerifiedGroup(
+		theme: WidgetThemeLike,
+		spinner: string,
+		agent: RunningSubagent,
+		display: NonNullable<ReturnType<typeof readVerifiedRunDisplay>>,
+		connector: string,
+		childConnector: string,
+		visibleAgentCount: number,
+	): string[] {
+		const phase =
+			display.state === "provisioning"
+				? "starting"
+				: display.state === "verifying"
+					? "verifying"
+					: display.state;
+		const header =
+			theme.fg("dim", connector) +
+			` ${theme.fg("accent", spinner)} ${theme.bold(agent.name)} ${renderAgentBadge(theme, agent)}` +
+			` ${theme.fg("dim", "·")} ${theme.fg("dim", `${display.candidateCount} candidates · ${phase}`)}`;
+		const lines = [header];
+
+		// The group shares the widget budget with the other visible agents.
+		const linesForOthers = (visibleAgentCount - 1) * LINES_PER_AGENT;
+		const baseRows = Math.max(1, MAX_WIDGET_LINES - 2 - linesForOthers);
+
+		const rows: Array<{ label: string; detail: string[]; dim: boolean }> = [];
+		for (const candidate of display.candidates) {
+			const stats = this.candidateStats(agent, candidate);
+			const detail: string[] = [];
+			const state = candidate.settled
+				? candidate.exitCode === null || candidate.exitCode === 0
+					? "done"
+					: `exit ${candidate.exitCode}`
+				: (stats.activity ?? "starting…");
+			detail.push(state);
+			const toolUses = stats.toolUses ?? 0;
+			if (toolUses > 0) detail.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
+			if (stats.contextLabel) detail.push(stats.contextLabel);
+			rows.push({
+				label: `candidate ${candidate.index}`,
+				detail,
+				dim: candidate.settled,
+			});
+		}
+		if (display.state === "verifying") {
+			rows.push({ label: "verifier", detail: [`ranking ${display.candidateCount} traces…`], dim: false });
+		}
+
+		const visibleRows = rows.slice(0, rows.length > baseRows ? baseRows - 1 : baseRows);
+		for (let i = 0; i < visibleRows.length; i++) {
+			const row = visibleRows[i]!;
+			const isLastRow = i === visibleRows.length - 1 && visibleRows.length === rows.length;
+			const rowConnector = isLastRow ? "└─" : "├─";
+			const tone = row.dim ? "muted" : "dim";
+			lines.push(
+				theme.fg("dim", childConnector) +
+					theme.fg("dim", `  ${rowConnector}`) +
+					` ${theme.fg(tone, row.label)} ${theme.fg("dim", `· ${row.detail.join(" · ")}`)}`,
+			);
+		}
+		const hiddenRows = rows.length - visibleRows.length;
+		if (hiddenRows > 0) {
+			const noun = hiddenRows === 1 ? "candidate" : "candidates";
+			lines.push(theme.fg("muted", `${childConnector}  ... (+${hiddenRows} more ${noun} — Alt+S to show all)`));
+		}
+		return lines;
 	}
 
 	private renderWidgetNow(): void {
