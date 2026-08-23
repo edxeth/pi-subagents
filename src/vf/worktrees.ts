@@ -100,7 +100,16 @@ function gitText(args: string[], cwd: string): string {
  * not, because they are never captured by candidate snapshots).
  */
 export function preflightWorktreeSource(cwd: string): WorktreePreflight {
-	if (!gitOk(["rev-parse", "--is-inside-work-tree"], cwd)) {
+	const inside = gitRaw(["rev-parse", "--is-inside-work-tree"], cwd);
+	if (inside.error) {
+		const code = (inside.error as NodeJS.ErrnoException).code;
+		throw new WorktreeError(
+			code === "ENOENT"
+				? "git executable not found on PATH — verified fan-out requires git (Linux/macOS only)."
+				: `git could not start: ${inside.error.message}`,
+		);
+	}
+	if (inside.status !== 0) {
 		throw new WorktreeError(
 			`verified fan-out requires a Git repository, but ${cwd} is not inside one; ` +
 				"dirty or non-Git sources fail closed before any candidate spend",

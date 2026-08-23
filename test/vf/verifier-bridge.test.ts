@@ -7,6 +7,7 @@ import {
 	defaultVerifierCachePath,
 	previewVerifierCriteria,
 	runVerifierSelect,
+	runVerifierProbe,
 	VerifierBridgeError,
 } from "../../src/vf/verifier/bridge.ts";
 import {
@@ -254,6 +255,31 @@ describe("verifier bridge (NDJSON one-shot)", () => {
 			assert.match(error.message, /DEEPSEEK_API_KEY/);
 			return true;
 		},
+		);
+	});
+
+	it("probe fails with the same typed credentials error before any client is built", async () => {
+		// Found live: the probe built the library client before the backend
+		// check, so a missing key surfaced as a raw Python traceback
+		// (verifier-failed) instead of the clean credentials failure.
+		await assert.rejects(
+			runVerifierProbe(
+				{
+					model: "deepseek-v4-flash",
+					thinking: null,
+					criteriaPath,
+					env: {},
+					mockVerifier: null,
+				},
+				options(),
+			),
+			(error: unknown) => {
+				assert.ok(error instanceof VerifierBridgeError);
+				assert.strictEqual(error.kind, "credentials");
+				assert.match(error.message, /no verifier backend configured/);
+				assert.match(error.message, /DEEPSEEK_API_KEY/);
+				return true;
+			},
 		);
 	});
 

@@ -35,6 +35,26 @@ function makeRepo(outer: string): { repoRoot: string; baseCommit: string } {
 }
 
 describe("worktree preflight gate", () => {
+	it("names the real cause when git is not on PATH", () => {
+		const plainDir = createTestDir();
+		const savedPath = process.env.PATH;
+		process.env.PATH = join(plainDir, "no-git-here");
+		try {
+			assert.throws(
+				() => preflightWorktreeSource(plainDir),
+				(error: unknown) => {
+					assert.ok(error instanceof WorktreeError);
+					// A missing executable must not masquerade as "not a repo".
+					assert.match(error.message, /git executable not found on PATH/);
+					assert.doesNotMatch(error.message, /not inside one/);
+					return true;
+				},
+			);
+		} finally {
+			process.env.PATH = savedPath;
+		}
+	});
+
 	it("fails closed outside a git repository", () => {
 		const plainDir = createTestDir();
 		assert.throws(

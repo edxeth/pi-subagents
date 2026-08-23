@@ -416,15 +416,23 @@ def run_probe(req: dict) -> None:
         client = build_mock_client(req["mock"])
         fgr.create_client = lambda: client
     else:
-        client = fgr.create_client()
+        # The backend-configured check must run BEFORE the client is built:
+        # create_client itself raises MissingAPIKeyError for a keyless env,
+        # which would surface as a raw traceback instead of exit-credentials.
+        check_credentials(req)
+        try:
+            client = fgr.create_client()
+        except Exception as exc:
+            name = type(exc).__name__
+            if name == "MissingAPIKeyError":
+                fail("credentials", f"verifier probe needs credentials: {exc}", EXIT_CREDENTIALS)
+            fail("verifier-error", f"verifier client could not be created: {exc}", EXIT_VERIFIER)
 
     print(
         f"verifier-bridge: capability probe model={req['model']} "
         f"criteria={req['criteria_path']}",
         file=sys.stderr,
     )
-    check_credentials(req)
-
     good_trace, bad_trace = canary_traces(req["mock"])
     prompt = fgr.build_prompt(CANARY_PROBLEM, good_trace, bad_trace, criteria[0], note)
     llm_verifier.USAGE.reset()
