@@ -358,7 +358,8 @@ describe("verified fan-out widget rows", () => {
 		const lines = widget.renderForTest().map(stripAnsi);
 
 		assert.ok(lines.length <= 10, `widget must stay within budget: ${lines.length}`);
-		assert.match(lines.at(-1) ?? "", /\(\+\d+ more candidates — Alt\+S to show all\)/);
+		assert.match(lines.join("\n"), /\(\+\d+ more candidates\)/);
+		assert.equal(lines.at(-1), "... — Alt+S to show all", "one hint for the whole widget");
 		assert.match(lines.join("\n"), /candidate 1 ·/);
 	});
 
@@ -371,6 +372,37 @@ describe("verified fan-out widget rows", () => {
 		assert.match(lines, /Child 9 \[scout\]/);
 		assert.match(lines, /2 candidates · running/);
 		assert.match(lines, /candidate 2 ·/);
+	});
+
+	it("renders a mixed batch: ordinary agents and verified groups side by side", () => {
+		const { runDir } = buildVerifiedRun({
+			state: "verifying",
+			candidates: [
+				{ settled: true, usage: { totalTokens: 9100 } },
+				{ usage: { totalTokens: 4200 } },
+				{ usage: { totalTokens: 6600 } },
+			],
+		});
+		const ordinaryA = makeRunningSubagent(1);
+		ordinaryA.activity = "searching 3 patterns…";
+		const ordinaryB = makeRunningSubagent(2);
+		const widget = new SubagentWidgetManager(() => [ordinaryA, verifiedAgent(runDir), ordinaryB]);
+		const lines = widget.renderForTest().map(stripAnsi);
+
+		assert.match(lines.join("\n"), /● Agents · 3 running/);
+		assert.match(lines.join("\n"), /Child 1 \[scout\]/);
+		assert.match(lines.join("\n"), /3 candidates · verifying/);
+		assert.match(lines.join("\n"), /candidate 1 · done · 9\.1K\/372K ctx/);
+		assert.match(lines.join("\n"), /verifier · ranking 3 traces…/);
+		// Two ordinary agents (3 lines each) plus the 5-line group exceed the
+		// budget: Child 2 folds into the single trailing hint.
+		assert.doesNotMatch(lines.join("\n"), /Child 2 \[scout\]/);
+		assert.equal(
+			lines.filter((line) => line.includes("Alt+S")).length,
+			1,
+			"exactly one Alt+S hint for the whole widget",
+		);
+		assert.equal(lines.at(-1), "... (+1 more subagent — Alt+S to show all)");
 	});
 
 	it("keeps the widget budget with several concurrent verified runs", () => {

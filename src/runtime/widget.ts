@@ -381,10 +381,11 @@ export class SubagentWidgetManager {
 		const ordinaryLines = displays.filter((display) => display === null).length * LINES_PER_AGENT;
 		const verifiedGroupBudget = Math.max(
 			visibleAgents.length * 2,
-			MAX_WIDGET_LINES - 1 - (hiddenCount > 0 ? 1 : 0) - ordinaryLines,
+			MAX_WIDGET_LINES - 1 - 1 - ordinaryLines,
 		);
 		let verifiedGroupsLeft = displays.filter((display) => display !== null).length;
 		let verifiedBudgetUsed = 0;
+		let candidatesTruncated = false;
 
 		// Show running subagents section
 		if (agents.length > 0) {
@@ -410,7 +411,9 @@ export class SubagentWidgetManager {
 						Math.floor((verifiedGroupBudget - verifiedBudgetUsed) / verifiedGroupsLeft),
 					);
 					verifiedGroupsLeft--;
-					const groupLines = this.renderVerifiedGroup(theme, spinner, agent, display, connector, childConnector, groupBudget);
+					const group = this.renderVerifiedGroup(theme, spinner, agent, display, connector, childConnector, groupBudget);
+					candidatesTruncated ||= group.truncated;
+					const groupLines = group.lines;
 					verifiedBudgetUsed += groupLines.length;
 					lines.push(...groupLines);
 					continue;
@@ -450,6 +453,9 @@ export class SubagentWidgetManager {
 			if (hiddenCount > 0) {
 				const noun = hiddenCount === 1 ? "subagent" : "subagents";
 				lines.push(theme.fg("muted", `... (+${hiddenCount} more ${noun} — Alt+S to show all)`));
+			} else if (candidatesTruncated) {
+				// One hint for the whole widget, never per group.
+				lines.push(theme.fg("muted", "... — Alt+S to show all"));
 			}
 		}
 
@@ -469,7 +475,7 @@ export class SubagentWidgetManager {
 		connector: string,
 		childConnector: string,
 		linesLeft: number,
-	): string[] {
+	): { lines: string[]; truncated: boolean } {
 		const phase =
 			display.state === "provisioning"
 				? "starting"
@@ -523,9 +529,9 @@ export class SubagentWidgetManager {
 		const hiddenRows = rows.length - visibleRows.length;
 		if (hiddenRows > 0) {
 			const noun = hiddenRows === 1 ? "candidate" : "candidates";
-			lines.push(theme.fg("muted", `${childConnector}  ... (+${hiddenRows} more ${noun} — Alt+S to show all)`));
+			lines.push(theme.fg("muted", `${childConnector}  ... (+${hiddenRows} more ${noun})`));
 		}
-		return lines;
+		return { lines, truncated: hiddenRows > 0 };
 	}
 
 	private renderWidgetNow(): void {
