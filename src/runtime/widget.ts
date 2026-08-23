@@ -370,6 +370,21 @@ export class SubagentWidgetManager {
 		const lines: string[] = [];
 		const maxVisibleAgents = Math.floor((MAX_WIDGET_LINES - 2) / LINES_PER_AGENT);
 		const visibleAgents = agents.length > maxVisibleAgents ? agents.slice(0, maxVisibleAgents) : agents;
+		const hiddenCount = agents.length - visibleAgents.length;
+		// Verified groups render one row per candidate, so their lines must be
+		// accounted against the same cap as ordinary agents. Ordinary agents
+		// take a fixed LINES_PER_AGENT each; the verified groups share what is
+		// left, so several concurrent runs cannot overflow the widget.
+		const displays = visibleAgents.map((agent) =>
+			agent.verifiedRunDir ? readVerifiedRunDisplay(agent.verifiedRunDir) : null,
+		);
+		const ordinaryLines = displays.filter((display) => display === null).length * LINES_PER_AGENT;
+		const verifiedGroupBudget = Math.max(
+			visibleAgents.length * 2,
+			MAX_WIDGET_LINES - 1 - (hiddenCount > 0 ? 1 : 0) - ordinaryLines,
+		);
+		let verifiedGroupsLeft = displays.filter((display) => display !== null).length;
+		let verifiedBudgetUsed = 0;
 
 		// Show running subagents section
 		if (agents.length > 0) {
@@ -388,11 +403,16 @@ export class SubagentWidgetManager {
 				const connector = isLast ? "└─" : "├─";
 				const childConnector = isLast ? "   " : "│  ";
 
-				const display = agent.verifiedRunDir ? readVerifiedRunDisplay(agent.verifiedRunDir) : null;
+				const display = displays[i];
 				if (display) {
-					lines.push(
-						...this.renderVerifiedGroup(theme, spinner, agent, display, connector, childConnector, visibleAgents.length),
+					const groupBudget = Math.max(
+						2,
+						Math.floor((verifiedGroupBudget - verifiedBudgetUsed) / verifiedGroupsLeft),
 					);
+					verifiedGroupsLeft--;
+					const groupLines = this.renderVerifiedGroup(theme, spinner, agent, display, connector, childConnector, groupBudget);
+					verifiedBudgetUsed += groupLines.length;
+					lines.push(...groupLines);
 					continue;
 				}
 
@@ -427,7 +447,6 @@ export class SubagentWidgetManager {
 				lines.push(theme.fg("dim", childConnector) + theme.fg("dim", `  ${activity}`));
 			}
 
-			const hiddenCount = agents.length - visibleAgents.length;
 			if (hiddenCount > 0) {
 				const noun = hiddenCount === 1 ? "subagent" : "subagents";
 				lines.push(theme.fg("muted", `... (+${hiddenCount} more ${noun} — Alt+S to show all)`));
@@ -449,7 +468,7 @@ export class SubagentWidgetManager {
 		display: NonNullable<ReturnType<typeof readVerifiedRunDisplay>>,
 		connector: string,
 		childConnector: string,
-		visibleAgentCount: number,
+		linesLeft: number,
 	): string[] {
 		const phase =
 			display.state === "provisioning"
@@ -464,8 +483,7 @@ export class SubagentWidgetManager {
 		const lines = [header];
 
 		// The group shares the widget budget with the other visible agents.
-		const linesForOthers = (visibleAgentCount - 1) * LINES_PER_AGENT;
-		const baseRows = Math.max(1, MAX_WIDGET_LINES - 2 - linesForOthers);
+		const baseRows = Math.max(1, linesLeft - 1);
 
 		const rows: Array<{ label: string; detail: string[]; dim: boolean }> = [];
 		for (const candidate of display.candidates) {

@@ -372,4 +372,20 @@ describe("verified fan-out widget rows", () => {
 		assert.match(lines, /2 candidates · running/);
 		assert.match(lines, /candidate 2 ·/);
 	});
+
+	it("keeps the widget budget with several concurrent verified runs", () => {
+		const runDirs = [1, 2, 3].map((group) =>
+			buildVerifiedRun({
+				state: "verifying",
+				candidates: [{ settled: true }, { settled: true }, { settled: true }],
+			}).runDir,
+		);
+		const agents = runDirs.map((runDir) => verifiedAgent(runDir));
+		const widget = new SubagentWidgetManager(() => agents);
+		const lines = widget.renderForTest().map(stripAnsi);
+
+		assert.ok(lines.length <= 10, `widget must stay within budget: ${lines.length}\n${lines.join("\n")}`);
+		assert.match(lines.join("\n"), /candidate 1 · done/);
+		assert.match(lines.at(-1) ?? "", /\(\+1 more subagent — Alt\+S to show all\)/);
+	});
 });
