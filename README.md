@@ -447,7 +447,7 @@ llm-as-a-verifier-criteria: code-change
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `llm-as-a-verifier` | `false` | `true`/`false` only. Any other value (including an integer) fails agent loading. |
-| `llm-as-a-verifier-candidates` | `3` | Integer `>= 2`. May also come from `PI_SUBAGENT_LLM_VERIFIER_CANDIDATES`. |
+| `llm-as-a-verifier-candidates` | `3` | Integer `>= 2`; the upper bound is the spawn-width ceiling (16). May also come from `PI_SUBAGENT_LLM_VERIFIER_CANDIDATES`. |
 | `llm-as-a-verifier-model` | verifier profile | `provider/model[:thinking]` verifier override for this agent. |
 | `llm-as-a-verifier-criteria` | `generic` | Built-in rubric name (`generic`, `code-change`, `research`) or a path, resolved against the launch cwd. |
 
@@ -480,7 +480,7 @@ Criteria text goes into the verifier's scoring prompt only — candidates never 
 
 Setting `llm-as-a-verifier` on a definition attests that the agent is safe to run N times concurrently against the same task. Worktrees isolate files — nothing more. Each candidate gets `COMPOSE_PROJECT_NAME` and a distinct `PORT_OFFSET`, but fixed host ports, `container_name`, shared volumes, deploys, and migrations remain the definition author's responsibility; the extension does not sandbox them.
 
-Worktree directories are removed after a successful selection+apply; each candidate's snapshot stays on an internal branch (`vf/<runid>/w<i>`) for audit and runner-up recovery. Runs live under the artifact root and survive closing or reloading the parent session; finished candidate sessions are never resumable (see [Resuming child sessions](#resuming-child-sessions)).
+Worktree directories are removed after a successful selection+apply; each candidate's snapshot stays on an internal branch (`vf/<runid>/w<i>`) for audit and runner-up recovery. Runs live under the artifact root and survive closing or reloading the parent session; finished candidate sessions are never resumable (see [Resuming child sessions](#resuming-child-sessions)). `parent-close-policy` is ignored for verified fan-out agents: candidates belong to the detached supervisor, not the parent process, and the run deliberately outlives the session that started it. The next Pi session opened in the project picks up any undelivered result exactly once. To stop a run, kill the child (`subagent_kill`) instead of closing the parent.
 
 ## Ambient awareness
 
