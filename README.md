@@ -453,6 +453,17 @@ llm-as-a-verifier-criteria: code-change
 
 Model and criteria are independent: setting one never suppresses the other. The candidate count consumes N spawn slots, reserved atomically before any worktree or verifier spend.
 
+### Mixing with ordinary agents
+
+A verified agent mixes with ordinary agents in the same session. Each launch is independent, and one batch call can hold both kinds. To the parent, a verified launch is one ordinary child:
+
+- `wait`, `steer`, batch calls, and `subagent_kill` behave the same as for any background child. `subagent_kill` cancels the whole run.
+- A sync launch blocks the tool call until the run ends. An async launch returns `started`, and one result arrives later.
+- Candidates are always headless background workers. Even an interactive or spawning definition runs its candidates background, auto-exit, and non-spawning.
+- The running-children widget shows one line for the whole run. Candidates and the verifier never get their own panes or widget rows.
+
+Parallel Pi sessions in one project are safe. Each result is delivered exactly once: sessions claim it through a lock file in the run directory, and the loser sees only a note that another session already delivered it. Spawn slots are counted per session, so two sessions can oversubscribe the machine — worktree isolation still holds, but keep the total candidate count within what the machine can run.
+
 ### What a run does
 
 1. Pre-flight fails closed before any spend: unresolvable criteria, an invalid verifier profile, or a non-Git or dirty source tree aborts the launch.
