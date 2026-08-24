@@ -13,11 +13,10 @@
 
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 const args = process.argv.slice(2);
-const compose = process.env.COMPOSE_PROJECT_NAME ?? "";
-const slot = /-w(\d+)$/.exec(compose)?.[1] ?? "";
+const slot = /-w(\d+)$/.exec(basename(process.cwd()))?.[1] ?? "";
 const session = process.env.PI_SUBAGENT_SESSION ?? "";
 const captureDir = process.env.VF_E2E_CAPTURE_DIR ?? "";
 const brokenSlot = process.env.VF_E2E_BROKEN_SLOT ?? "";
@@ -28,7 +27,7 @@ const taskArg = args.find((arg) => arg.startsWith("@")) ?? null;
 if (captureDir) {
 	writeFileSync(
 		join(captureDir, `argv-${process.pid}.json`),
-		JSON.stringify({ argv: args, compose, slot, session, modelArg, taskArg }, null, 2),
+		JSON.stringify({ argv: args, cwd: process.cwd(), slot, session, modelArg, taskArg }, null, 2),
 	);
 }
 

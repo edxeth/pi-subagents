@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getAgentConfigDir } from "../agents/definitions.ts";
 
 /**
  * Criteria resolution for verified fan-out (ticket 10).
@@ -27,6 +28,14 @@ export class VerifierCriteriaError extends Error {
 /** Directory of packaged rubrics shipped with the extension. */
 export function getPackagedCriteriaDir(): string {
 	return fileURLToPath(new URL("./criteria/", import.meta.url));
+}
+
+/** Criteria-file locations a bare name is tried in, project first. */
+export function getVerifierCriteriaDirs(baseCwd: string): { project: string; global: string } {
+	return {
+		project: join(baseCwd, ".pi", "agents", "criteria"),
+		global: join(getAgentConfigDir(), "agents", "criteria"),
+	};
 }
 
 export interface ResolvedVerifierCriteria {
@@ -71,11 +80,30 @@ export function resolveVerifierCriteria(raw: string | undefined, baseCwd: string
 		assertReadableCriteriaFile(path, "(default: generic)");
 		return { kind: "builtin", name, path, default: true };
 	}
-	if ((BUILTIN_VERIFIER_CRITERIA_NAMES as readonly string[]).includes(value)) {
-		const name = value as BuiltinVerifierCriteriaName;
-		const path = join(getPackagedCriteriaDir(), `${name}.md`);
-		assertReadableCriteriaFile(path, value);
-		return { kind: "builtin", name, path, default: false };
+	// A bare name (no "/", no "."): a criteria file, resolved exactly like a
+	// verifier profile — project .pi/agents/criteria/<name>.md over the global
+	// agents/criteria/<name>.md. It even shadows a built-in rubric name.
+	if (!value.includes("/") && !value.includes(".")) {
+		const dirs = getVerifierCriteriaDirs(baseCwd);
+		const tried = [join(dirs.project, `${value}.md`), join(dirs.global, `${value}.md`)];
+		for (const path of tried) {
+			if (existsSync(path)) {
+				assertReadableCriteriaFile(path, value);
+				return { kind: "path", path, default: false };
+			}
+		}
+		const isBuiltin = (BUILTIN_VERIFIER_CRITERIA_NAMES as readonly string[]).includes(value);
+		if (isBuiltin) {
+			const name = value as BuiltinVerifierCriteriaName;
+			const path = join(getPackagedCriteriaDir(), `${name}.md`);
+			assertReadableCriteriaFile(path, value);
+			return { kind: "builtin", name, path, default: false };
+		}
+		throw new VerifierCriteriaError(
+			`llm-as-a-verifier-criteria ${JSON.stringify(raw)} matches no criteria file (tried ${tried.join(", ")}) ` +
+				`and no built-in rubric (${BUILTIN_VERIFIER_CRITERIA_NAMES.join(", ")}). ` +
+				"A value with \"/\" or a file extension is resolved as a path against the launch cwd.",
+		);
 	}
 	const path = isAbsolute(value) ? value : resolve(baseCwd, value);
 	assertReadableCriteriaFile(path, value);

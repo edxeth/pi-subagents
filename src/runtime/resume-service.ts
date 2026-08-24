@@ -215,9 +215,9 @@ export async function resumeSubagentSession(
 	const verifiedRunDir = process.env.PI_SUBAGENT_VF_RUN_DIR;
 	if (verifiedRunDir && verifiedRunDir.trim()) {
 		throw new Error(
-			`Session ${input.sessionFile} belongs to a verified fan-out run that is finalized (run dir ${verifiedRunDir}); ` +
-				"the candidate's worktree workspace was removed after selection, so the session cannot be resumed. " +
-				"Start a fresh launch of the agent instead.",
+			`Session ${input.sessionFile} was one finished attempt of an llm-as-a-verifier run; ` +
+				"its worktree was removed after selection, so it cannot be resumed. " +
+				"Start a new launch of the agent for follow-up work.",
 		);
 	}
 	const widthLimit = getSpawnWidthLimit();

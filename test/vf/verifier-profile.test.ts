@@ -2,7 +2,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import { assert, createTestDir, join } from "../support/index.ts";
 import {
-	LIBRARY_DEFAULT_VERIFIER_MODEL,
 	normalizeVerifierModelRef,
 	parseVerifierProfileSource,
 	resolveVerifierModel,
@@ -15,6 +14,9 @@ const EMPTY_ENV: NodeJS.ProcessEnv = {};
 function withProfileDirs(setup: {
 	project?: string;
 	global?: string;
+	modelsJson?: Record<string, unknown>;
+	modelsStore?: Record<string, unknown>;
+	auth?: Record<string, unknown>;
 }): { baseCwd: string; configDir: string } {
 	const dir = createTestDir();
 	const baseCwd = join(dir, "project");
@@ -29,46 +31,43 @@ function withProfileDirs(setup: {
 		mkdirSync(join(configDir, "agents", "verifiers"), { recursive: true });
 		writeFileSync(join(configDir, "agents", "verifiers", "default.md"), setup.global);
 	}
+	if (setup.modelsJson) writeFileSync(join(configDir, "models.json"), JSON.stringify(setup.modelsJson));
+	if (setup.modelsStore) writeFileSync(join(configDir, "models-store.json"), JSON.stringify(setup.modelsStore));
+	if (setup.auth) writeFileSync(join(configDir, "auth.json"), JSON.stringify(setup.auth));
 	process.env.PI_CODING_AGENT_DIR = configDir;
 	return { baseCwd, configDir };
 }
 
+function writeProfile(
+	roots: { baseCwd: string; configDir: string },
+	scope: "project" | "global",
+	name: string,
+	content: string,
+): void {
+	const dir = scope === "project" ? join(roots.baseCwd, ".pi", "agents", "verifiers") : join(roots.configDir, "agents", "verifiers");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(dir, `${name}.md`), content);
+}
+
+afterEach(() => {
+	delete process.env.PI_CODING_AGENT_DIR;
+});
+
 describe("verifier profile resolution", () => {
-	afterEach(() => {
-		delete process.env.PI_CODING_AGENT_DIR;
-	});
-
-	it("ships a bundled default profile so the boolean alone works", () => {
-		const { baseCwd } = withProfileDirs({});
-		const profile = resolveVerifierProfile("default", baseCwd);
-		assert.equal(profile.source, "bundled");
-		assert.equal(profile.model, "deepseek-v4-flash");
-		assert.deepEqual(profile.env, {});
-	});
-
 	it("resolves the project profile over the global one", () => {
-		const { baseCwd } = withProfileDirs({
-			project: "---\nmodel: proj-model\n---\n",
-			global: "---\nmodel: global-model\n---\n",
+		const roots = withProfileDirs({
+			project: "---\nmodel: deepseek/proj-model\n---\n",
+			global: "---\nmodel: deepseek/global-model\n---\n",
 		});
-		const profile = resolveVerifierProfile("default", baseCwd);
-		assert.equal(profile.source, "project");
-		assert.equal(profile.model, "proj-model");
-	});
-
-	it("falls back to the global profile when no project profile exists", () => {
-		const { baseCwd } = withProfileDirs({ global: "---\nmodel: global-model\n---\n" });
-		const profile = resolveVerifierProfile("default", baseCwd);
-		assert.equal(profile.source, "global");
-		assert.equal(profile.model, "global-model");
+		assert.equal(resolveVerifierProfile("default", roots.baseCwd).model, "proj-model");
 	});
 
 	it("fails closed for an unknown profile name with the searched paths", () => {
-		const { baseCwd } = withProfileDirs({});
-		assert.throws(() => resolveVerifierProfile("other", baseCwd), (error: Error) => {
+		const roots = withProfileDirs({});
+		assert.throws(() => resolveVerifierProfile("nope", roots.baseCwd), (error: Error) => {
 			assert.ok(error instanceof VerifierProfileError);
-			assert.match(error.message, /other\.md/);
-			assert.match(error.message, /verifiers/);
+			assert.match(error.message, /"nope" was not found/);
+			assert.match(error.message, /nope\.md/);
 			return true;
 		});
 	});
@@ -77,130 +76,217 @@ describe("verifier profile resolution", () => {
 describe("verifier profile strictness (profile, not agent)", () => {
 	it("accepts only model, thinking, and env", () => {
 		assert.throws(
-			() => parseVerifierProfileSource("t", "---\nmodel: m\ntools: read\n---\n", "project", "p.md"),
-			/"tools".*must not have/s,
+			() => parseVerifierProfileSource("x", "---\nmodel: m\ntools: bash\n---\n", "project", "x.md"),
+			/unknown field\(s\) tools/,
 		);
 		assert.throws(
-			() => parseVerifierProfileSource("t", "---\nmodel: m\ncwd: /tmp\n---\n", "project", "p.md"),
-			/"cwd".*must not have/s,
-		);
-		assert.throws(
-			() => parseVerifierProfileSource("t", "---\nmodel: m\nsession-mode: standalone\n---\n", "project", "p.md"),
-			/"session-mode".*must not have/s,
+			() => parseVerifierProfileSource("x", "---\nmodel: m\nspawning: \"true\"\n---\n", "project", "x.md"),
+			/unknown field\(s\) spawning/,
 		);
 	});
 
-	it("requires a model and a frontmatter block", () => {
-		assert.throws(() => parseVerifierProfileSource("t", "---\nthinking: high\n---\n", "project", "p.md"), /model/);
-		assert.throws(() => parseVerifierProfileSource("t", "no frontmatter here\n", "project", "p.md"), /frontmatter/);
-	});
-
-	it("parses the env block and rejects malformed lines", () => {
-		const profile = parseVerifierProfileSource(
-			"t",
-			"---\nmodel: m\nenv: |\n  DEEPSEEK_API_KEY=sk-x\n  # comment\n---\n",
+	it("requires a model and parses env + thinking + provider refs", () => {
+		assert.throws(() => parseVerifierProfileSource("x", "---\nthinking: low\n---\n", "project", "x.md"), /must set model/);
+		const parsed = parseVerifierProfileSource(
+			"x",
+			"---\nmodel: deepseek/m:high\nthinking: low\nenv: |\n  OPENAI_BASE_URL=http://e/v1\n---\n",
 			"project",
-			"p.md",
+			"x.md",
 		);
-		assert.deepEqual(profile.env, { DEEPSEEK_API_KEY: "sk-x" });
-		assert.throws(
-			() => parseVerifierProfileSource("t", "---\nmodel: m\nenv: |\n  NOSEPARATOR\n---\n", "project", "p.md"),
-			/invalid env block.*Missing '='/,
-		);
-	});
-
-	it("validates thinking values from the field and the model suffix", () => {
-		assert.throws(
-			() => parseVerifierProfileSource("t", "---\nmodel: m\nthinking: medium\n---\n", "project", "p.md"),
-			/thinking must be one of/,
-		);
-		assert.throws(() => parseVerifierProfileSource("t", "---\nmodel: m:turbo\n---\n", "project", "p.md"), /:thinking/);
-		assert.throws(
-			() =>
-				parseVerifierProfileSource("t", "---\nmodel: m:high\nthinking: low\n---\n", "project", "p.md"),
-			/sets thinking twice with different values/,
-		);
-		const agree = parseVerifierProfileSource("t", "---\nmodel: m:high\nthinking: high\n---\n", "project", "p.md");
-		assert.equal(agree.thinking, "high");
+		assert.equal(parsed.model, "m");
+		assert.equal(parsed.provider, "deepseek");
+		assert.equal(parsed.thinking, "low"); // explicit thinking wins over the ref suffix
+		assert.deepEqual(parsed.env, { OPENAI_BASE_URL: "http://e/v1" });
 	});
 });
 
 describe("verifier model ref normalization", () => {
-	it("strips the provider prefix so select() gets the plain id", () => {
-	const ref = normalizeVerifierModelRef("deepseek/deepseek-v4-flash");
-		assert.equal(ref.modelId, "deepseek-v4-flash");
-		assert.equal(ref.provider, "deepseek");
-		assert.equal(ref.thinking, null);
-	});
-
-	it("translates a :thinking suffix to the library reasoning setting", () => {
-		const ref = normalizeVerifierModelRef("zai/glm-5.3:max");
-		assert.equal(ref.modelId, "glm-5.3");
-		assert.equal(ref.thinking, "max");
-		assert.equal(ref.normalizedRef, "zai/glm-5.3:max");
-	});
-
-	it("accepts a bare model id and rejects malformed refs", () => {
-		assert.equal(normalizeVerifierModelRef("deepseek-v4-flash").modelId, "deepseek-v4-flash");
-		assert.throws(() => normalizeVerifierModelRef("a/b/c"), /provider\/model or model/);
-		assert.throws(() => normalizeVerifierModelRef("provider/"), /empty provider or model id/);
-		assert.throws(() => normalizeVerifierModelRef(""), /empty/);
+	it("keeps the shared grammar strict", () => {
+		assert.equal(normalizeVerifierModelRef("deepseek/m").normalizedRef, "deepseek/m");
+		assert.equal(normalizeVerifierModelRef("deepseek/m:high").modelId, "m");
+		assert.throws(() => normalizeVerifierModelRef("a/b/c"), /must be provider\/model/);
+		assert.throws(() => normalizeVerifierModelRef("nonsense/"), /empty provider or model id/);
 	});
 });
 
-describe("verifier model precedence", () => {
-	afterEach(() => {
-		delete process.env.PI_CODING_AGENT_DIR;
+describe("verifier model selection (deterministic doors)", () => {
+	it("omission with no default profile fails closed without file instructions", () => {
+		const roots = withProfileDirs({});
+		assert.throws(() => resolveVerifierModel({ baseCwd: roots.baseCwd, env: EMPTY_ENV }), (error: Error) => {
+			assert.ok(error instanceof VerifierProfileError);
+			assert.match(error.message, /verifier model is not configured/);
+			assert.doesNotMatch(error.message, /create|\.md|verifiers\//);
+			return true;
+		});
+		// Exported doors cannot rescue an unconfigured verifier.
+		assert.throws(
+			() => resolveVerifierModel({ baseCwd: roots.baseCwd, env: { DEEPSEEK_API_KEY: "sk" } }),
+			/verifier model is not configured/,
+		);
 	});
 
-	it("uses the -model override over the default profile, inheriting its env", () => {
-		const { baseCwd } = withProfileDirs({
-			project: "---\nmodel: profile-model\nenv: |\n  DEEPSEEK_API_KEY=sk-profile\n---\n",
+	it("a malformed default profile propagates its real error, not 'not configured'", () => {
+		const roots = withProfileDirs({ project: "---\nthinking: low\n---\n" }); // no model
+		assert.throws(
+			() => resolveVerifierModel({ baseCwd: roots.baseCwd, env: EMPTY_ENV }),
+			/must set model/,
+		);
+	});
+
+	it("a profile env block is the complete door and beats shell exports", () => {
+		const roots = withProfileDirs({
+			project: "---\nmodel: qwen3-32b\nenv: |\n  OPENAI_BASE_URL=http://lab:8000/v1\n  OPENAI_API_KEY=k\n---\n",
+		});
+		const resolved = resolveVerifierModel({
+			baseCwd: roots.baseCwd,
+			env: { OPENAI_BASE_URL: "https://shell.example/v1", OPENAI_API_KEY: "sk-shell", DEEPSEEK_API_KEY: "sk" },
+		});
+		assert.deepEqual(resolved.env, { OPENAI_BASE_URL: "http://lab:8000/v1", OPENAI_API_KEY: "k" });
+	});
+
+	it("a key without a URL is an incomplete door, and two families are ambiguous", () => {
+		const keyOnly = withProfileDirs({
+			project: "---\nmodel: qwen3-32b\nenv: |\n  OPENAI_API_KEY=k\n---\n",
+		});
+		assert.throws(() => resolveVerifierModel({ baseCwd: keyOnly.baseCwd, env: EMPTY_ENV }), /without OPENAI_BASE_URL/);
+
+		const both = withProfileDirs({
+			project: "---\nmodel: deepseek/m\nenv: |\n  OPENAI_BASE_URL=http://a/v1\n  DEEPSEEK_API_KEY=sk\n---\n",
+		});
+		assert.throws(() => resolveVerifierModel({ baseCwd: both.baseCwd, env: EMPTY_ENV }), /more than one backend door/);
+	});
+
+	it("a profile model without a provider never guesses one from the id", () => {
+		const roots = withProfileDirs({ project: "---\nmodel: gemini-2.5-flash\n---\n" });
+		assert.throws(
+			() => resolveVerifierModel({ baseCwd: roots.baseCwd, env: { VERTEX_API_KEY: "vtx" } }),
+			/names the model without a provider/,
+		);
+		// With the provider named, the same export opens the right door.
+		const named = withProfileDirs({ project: "---\nmodel: gemini/gemini-2.5-flash\n---\n" });
+		assert.deepEqual(
+			resolveVerifierModel({ baseCwd: named.baseCwd, env: { VERTEX_API_KEY: "vtx", DEEPSEEK_API_KEY: "sk" } }).env,
+			{ VERTEX_API_KEY: "vtx" },
+		);
+	});
+
+	it("a direct ref binds to its provider and never inherits profile env", () => {
+		const roots = withProfileDirs({
+			project: "---\nmodel: qwen3-32b\nenv: |\n  OPENAI_BASE_URL=http://other/v1\n  OPENAI_API_KEY=k\n---\n",
+			modelsStore: {
+				deepseek: { models: [{ id: "deepseek-v4-flash", baseUrl: "https://api.deepseek.com", provider: "deepseek" }] },
+			},
+			auth: { deepseek: { key: "sk-auth" } },
 		});
 		const resolved = resolveVerifierModel({
 			override: "deepseek/deepseek-v4-flash:high",
-			baseCwd,
-			env: EMPTY_ENV,
+			baseCwd: roots.baseCwd,
+			env: { OPENAI_BASE_URL: "https://unrelated.example/v1", OPENAI_API_KEY: "x" },
 		});
 		assert.equal(resolved.model, "deepseek-v4-flash");
 		assert.equal(resolved.thinking, "high");
-		assert.equal(resolved.profile.source, "project");
-		assert.deepEqual(resolved.env, { DEEPSEEK_API_KEY: "sk-profile" });
+		assert.deepEqual(resolved.env, { OPENAI_BASE_URL: "https://api.deepseek.com", OPENAI_API_KEY: "sk-auth" });
+		// An exported DEEPSEEK key beats the pi config.
+		assert.deepEqual(
+			resolveVerifierModel({
+				override: "deepseek/deepseek-v4-flash",
+				baseCwd: roots.baseCwd,
+				env: { DEEPSEEK_API_KEY: "sk-mine" },
+			}).env,
+			{ DEEPSEEK_API_KEY: "sk-mine" },
+		);
 	});
 
-	it("uses the resolved default profile model when no override is set", () => {
-		const { baseCwd } = withProfileDirs({ project: "---\nmodel: proj-model\n---\n" });
-		const resolved = resolveVerifierModel({ baseCwd, env: { DEEPSEEK_API_KEY: "sk" } });
-		assert.equal(resolved.model, "proj-model");
-		assert.equal(resolved.thinking, null);
+	it("a fixed-provider ref never falls through to an unrelated generic export", () => {
+		const roots = withProfileDirs({}); // pi knows no deepseek here
+		assert.throws(
+			() =>
+				resolveVerifierModel({
+					override: "deepseek/deepseek-v4-flash",
+					baseCwd: roots.baseCwd,
+					env: { OPENAI_BASE_URL: "https://unrelated.example/v1", OPENAI_API_KEY: "x" },
+				}),
+			(error: Error) => {
+				assert.ok(error instanceof VerifierProfileError);
+				assert.match(error.message, /provider "deepseek"/);
+				assert.match(error.message, /DEEPSEEK_API_KEY/);
+				return true;
+			},
+		);
 	});
 
-	it("resolves without inspecting credentials — the capability gate owns that failure", () => {
-		// Model resolution is credential-agnostic on purpose: which env var a
-		// backend needs is the library's contract, surfaced pre-spend by the
-		// bridge probe (runner exit `credentials`), never inferred in TS from
-		// the model name. A launch must proceed with an empty environment.
-		const { baseCwd } = withProfileDirs({});
-		const resolved = resolveVerifierModel({ baseCwd, env: EMPTY_ENV });
-		assert.equal(resolved.model, "deepseek-v4-flash");
-		assert.equal("credential" in resolved, false, "resolution must not infer credential names");
-	});
-
-	it("keeps profile env pinning as the only credential surface", () => {
-		const { baseCwd } = withProfileDirs({});
-		const viaProcess = resolveVerifierModel({ baseCwd, env: { DEEPSEEK_API_KEY: "sk" } });
-		assert.equal(viaProcess.model, "deepseek-v4-flash");
-
-		const viaEndpoint = resolveVerifierModel({
-			override: "vllm/qwen-logprob",
-			baseCwd,
-			env: { OPENAI_BASE_URL: "http://localhost:8000/v1" },
+	it("resolves the exact model's endpoint and never borrows another model's URL", () => {
+		const roots = withProfileDirs({
+			modelsJson: {
+				providers: {
+					acme: {
+						baseUrl: "https://provider-default.example/v1",
+						apiKey: "provider-key",
+						models: [{ id: "model-a", baseUrl: "https://a.example/v1" }],
+					},
+					opencode: { models: [{ id: "free", baseUrl: "https://free.example/v1" }] },
+				},
+			},
+			modelsStore: {
+				opencode: { models: [{ id: "other", baseUrl: "https://other.example/v1" }] },
+			},
 		});
-		assert.equal(viaEndpoint.model, "qwen-logprob");
-		assert.deepEqual(viaEndpoint.env, {});
+		// Exact models.json model entry wins over the provider default.
+		assert.deepEqual(
+			resolveVerifierModel({ override: "acme/model-a", baseCwd: roots.baseCwd, env: EMPTY_ENV }).env,
+			{ OPENAI_BASE_URL: "https://a.example/v1", OPENAI_API_KEY: "provider-key" },
+		);
+		// No exact entry: provider-level default.
+		assert.deepEqual(
+			resolveVerifierModel({ override: "acme/model-z", baseCwd: roots.baseCwd, env: EMPTY_ENV }).env,
+			{ OPENAI_BASE_URL: "https://provider-default.example/v1", OPENAI_API_KEY: "provider-key" },
+		);
+		// models.json exact model, no provider URL, store has only a DIFFERENT
+		// model: use the models.json one, never the store's other-model URL.
+		assert.deepEqual(
+			resolveVerifierModel({ override: "opencode/free", baseCwd: roots.baseCwd, env: EMPTY_ENV }).env,
+			{ OPENAI_BASE_URL: "https://free.example/v1" },
+		);
+		// Unknown model on a known provider with no fallback URL: fail closed.
+		assert.throws(
+			() => resolveVerifierModel({ override: "opencode/missing", baseCwd: roots.baseCwd, env: EMPTY_ENV }),
+			/no usable endpoint/,
+		);
 	});
 
-	it("exports the library default model for the bridge fallback", () => {
-		assert.equal(LIBRARY_DEFAULT_VERIFIER_MODEL, "gemini-2.5-flash");
+	it("an unknown provider uses the exported generic door; nothing exported fails closed", () => {
+		const roots = withProfileDirs({});
+		assert.deepEqual(
+			resolveVerifierModel({
+				override: "vllm/qwen-logprob",
+				baseCwd: roots.baseCwd,
+				env: { OPENAI_BASE_URL: "http://localhost:8000/v1" },
+			}).env,
+			{ OPENAI_BASE_URL: "http://localhost:8000/v1" }, // keyless local server is valid
+		);
+		assert.throws(
+			() => resolveVerifierModel({ override: "madeup/foo", baseCwd: roots.baseCwd, env: EMPTY_ENV }),
+			/no usable endpoint/,
+		);
+	});
+
+	it("$ENV and !command apiKeys are not passed through raw; the auth-store key is used instead", () => {
+		const roots = withProfileDirs({
+			modelsJson: { providers: { acme: { baseUrl: "https://acme/v1", apiKey: "$ACME_SECRET" } } },
+			auth: { acme: { key: "sk-authstore" } },
+		});
+		assert.deepEqual(
+			resolveVerifierModel({ override: "acme/anything", baseCwd: roots.baseCwd, env: EMPTY_ENV }).env,
+			{ OPENAI_BASE_URL: "https://acme/v1", OPENAI_API_KEY: "sk-authstore" },
+		);
+	});
+
+	it("a bare value names a profile (project over global)", () => {
+		const roots = withProfileDirs({ global: "---\nmodel: deepseek/global-fast\n---\n" });
+		writeProfile(roots, "project", "fast", "---\nmodel: deepseek/proj-fast\nthinking: low\n---\n");
+		const resolved = resolveVerifierModel({ override: "fast", baseCwd: roots.baseCwd, env: { DEEPSEEK_API_KEY: "sk" } });
+		assert.equal(resolved.model, "proj-fast");
+		assert.equal(resolved.thinking, "low");
+		assert.deepEqual(resolved.env, { DEEPSEEK_API_KEY: "sk" });
 	});
 });

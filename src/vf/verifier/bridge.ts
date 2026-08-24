@@ -2,6 +2,25 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { ensureVerifierRuntime, RUNNER_SCRIPT_PATH, VerifierRuntimeError } from "./venv.ts";
 
+/** The library's control vars: stripped from the inherited environment so
+ * only the door composed by resolveVerifierModel (and the request's thinking
+ * setting) reaches the runner — ambient shell state cannot change the backend,
+ * reasoning effort, or token budget. */
+const VERIFIER_INTERFACE_VARS = [
+	"OPENAI_BASE_URL",
+	"OPENAI_API_KEY",
+	"DEEPSEEK_API_KEY",
+	"VERTEX_API_KEY",
+	"DEEPSEEK_EFFORT",
+	"DEEPSEEK_MAX_TOKENS",
+] as const;
+
+export function verifierBridgeBaseEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const env = { ...base };
+	for (const name of VERIFIER_INTERFACE_VARS) delete env[name];
+	return env;
+}
+
 /**
  * NDJSON one-shot bridge to the official `llm-verifier` library.
  *
@@ -223,7 +242,7 @@ async function runRunnerProcess(request: object, options: RunBridgeOptions): Pro
 	try {
 		child = spawn(python, [RUNNER_SCRIPT_PATH], {
 			stdio: ["pipe", "pipe", "pipe"],
-			env: options.baseEnv ?? process.env,
+			env: verifierBridgeBaseEnv(options.baseEnv ?? process.env),
 			cwd: options.cwd,
 			detached: true,
 		});

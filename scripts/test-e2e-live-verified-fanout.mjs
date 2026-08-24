@@ -157,6 +157,7 @@ writeFileSync(
 		"llm-as-a-verifier: true",
 		"llm-as-a-verifier-candidates: 3",
 		"llm-as-a-verifier-criteria: code-change",
+		"llm-as-a-verifier-model: deepseek/deepseek-v4-flash",
 		"---",
 		"You are a careful code-fixing worker. Reproduce failures before editing, keep changes minimal, and verify with the project's own test command before reporting.",
 		"",
@@ -240,10 +241,10 @@ assert(manifest.result?.ok === true, "run result must be ok");
 assert(result.exitCode === 0, `routed result exit code ${result.exitCode}: ${result.errorMessage}`);
 
 // The single logical result carries the verification footer.
-assert(/\[verified fan-out [^\]]+: winner w[12] of 3 candidates/.test(result.summary), `footer winner line: ${result.summary.slice(-400)}`);
-assert(/criteria root_cause, code_review, verification/.test(result.summary), "footer shows the code-change criteria ids");
+assert(/\[llm-as-a-verifier [^\]]+: winner w[12] of 3 attempts/.test(result.summary), `footer winner line: ${result.summary.slice(-400)}`);
+assert(/criteria root_cause\+code_review\+verification/.test(result.summary), "footer shows the code-change criteria ids");
 assert(/verifier deepseek-v4-flash \(\d+ calls, \d+ in \/ \d+ out tokens\)/.test(result.summary), "footer shows verifier usage");
-assert(/applied and staged/.test(result.summary), "footer reports the winner as applied and staged");
+assert(/staged — inspect/.test(result.summary), "footer reports the winner as staged with inspect command");
 
 // The deliberately-broken candidate must rank LAST against live candidates.
 assert(selection, "selection recorded");

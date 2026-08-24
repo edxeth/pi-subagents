@@ -158,11 +158,11 @@ export async function selectWinner(
 	if (distinct.length < 2) {
 		const equivalenceNote =
 			collapsed.length > 0
-				? ` The ${distinct.length + collapsed.length} completed candidates collapsed to ${distinct.length} distinct outcome(s) with identical git tree and report hashes - they are treated as equivalent candidates, not as a backend failure`
+				? ` All ${distinct.length + collapsed.length} finished attempts made the same code and report.`
 				: "";
 		throw new SettleAbort(
 			"insufficient-distinct-candidates",
-			`run ${manifest.runId} settled with ${distinct.length} distinct completed candidate(s); at least two are required, so the whole run fails and nothing is applied.${equivalenceNote}.`,
+			`run ${manifest.runId} failed: only ${distinct.length} different finished attempt(s); at least two are required, so nothing was applied.${equivalenceNote}`,
 		);
 	}
 	const response = await runVerifierSelect({

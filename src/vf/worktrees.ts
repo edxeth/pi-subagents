@@ -81,7 +81,7 @@ function gitText(args: string[], cwd: string): string {
 		const code = (r.error as NodeJS.ErrnoException).code;
 		if (code === "ENOENT") {
 			throw new WorktreeError(
-				"git executable not found on PATH — verified fan-out requires git (Linux/macOS only).",
+				"git executable not found on PATH — llm-as-a-verifier requires git (Linux/macOS only).",
 			);
 		}
 		throw new WorktreeError(`git ${args[0]} could not start: ${r.error.message}`);
@@ -105,20 +105,19 @@ export function preflightWorktreeSource(cwd: string): WorktreePreflight {
 		const code = (inside.error as NodeJS.ErrnoException).code;
 		throw new WorktreeError(
 			code === "ENOENT"
-				? "git executable not found on PATH — verified fan-out requires git (Linux/macOS only)."
+				? "git executable not found on PATH — llm-as-a-verifier requires git (Linux/macOS only)."
 				: `git could not start: ${inside.error.message}`,
 		);
 	}
 	if (inside.status !== 0) {
 		throw new WorktreeError(
-			`verified fan-out requires a Git repository, but ${cwd} is not inside one; ` +
-				"dirty or non-Git sources fail closed before any candidate spend",
+			`llm-as-a-verifier requires a Git repository, but ${cwd} is not inside one.`,
 		);
 	}
 	const repoRoot = gitText(["rev-parse", "--show-toplevel"], cwd).trim();
 	if (!gitOk(["rev-parse", "--verify", "HEAD"], repoRoot)) {
 		throw new WorktreeError(
-			`verified fan-out requires a repository with at least one commit; ${repoRoot} has an unborn HEAD`,
+			`llm-as-a-verifier requires a repository with at least one commit; ${repoRoot} has none.`,
 		);
 	}
 	const baseCommit = gitText(["rev-parse", "HEAD"], repoRoot).trim();
@@ -128,8 +127,7 @@ export function preflightWorktreeSource(cwd: string): WorktreePreflight {
 		const shown = lines.slice(0, 5).map((line) => `  ${line}`);
 		const more = lines.length > 5 ? `\n  (and ${lines.length - 5} more)` : "";
 		throw new WorktreeError(
-			`verified fan-out requires a clean source tree, but ${repoRoot} is dirty:\n${shown.join("\n")}${more}\n` +
-				"Commit or stash the changes first; dirty sources fail closed before any candidate spend.",
+			`llm-as-a-verifier requires a clean source tree, but ${repoRoot} is dirty:\n${shown.join("\n")}${more}`,
 		);
 	}
 	return { repoRoot, baseCommit };

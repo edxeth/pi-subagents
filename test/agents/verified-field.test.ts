@@ -85,9 +85,9 @@ describe("llm-as-a-verifier field", () => {
 
 		const reminder = renderAgentListReminderForTest(entries);
 		const plainBlock = reminder.match(/- `plain`: Do(?:.|\n)*?(?=\n\n- `|<\/subagent-roster>)/)?.[0] ?? "";
-		assert.match(reminder, /- `tester`: Does verified work\n(?:[^\n]*\n)* {2}verified-fan-out: true/);
+		assert.match(reminder, /- `tester`: Does verified work\n(?:[^\n]*\n)* {2}llm-as-a-verifier: true/);
 		assert.ok(!plainBlock.includes("verified-fan-out"), `plain block must not carry the marker:\n${plainBlock}`);
-		assert.match(reminder, /`verified-fan-out: true` means one launch/);
+		assert.match(reminder, /`llm-as-a-verifier: true` means one launch/);
 		assert.ok(JSON.stringify(getAgentListSignatureForTest(entries)).includes("llmAsVerifier"));
 
 		writeRosterAgents(false);

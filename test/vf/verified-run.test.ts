@@ -186,6 +186,13 @@ describe("verified fan-out orchestrator (one logical child)", () => {
 		fixtureRoot = parent;
 		mkdirSync(join(repo, ".pi", "agents"), { recursive: true });
 		writeFileSync(join(repo, ".pi", "agents", "vf-worker.md"), `---\n${agentFrontmatter}---\nAgent body.\n`);
+		// The verifier model is an explicit pre-runtime choice: a default
+		// profile with its own single door family, deterministic in tests.
+		mkdirSync(join(repo, ".pi", "agents", "verifiers"), { recursive: true });
+		writeFileSync(
+			join(repo, ".pi", "agents", "verifiers", "default.md"),
+			"---\nmodel: deepseek/deepseek-v4-flash\nenv: |\n  DEEPSEEK_API_KEY=test-verifier-key\n---\n",
+		);
 		// The agent definition must be part of the clean base: an untracked
 		// .pi/ would (correctly) fail the dirty-tree gate.
 		run(repo, "add", "-A");
@@ -238,7 +245,6 @@ describe("verified fan-out orchestrator (one logical child)", () => {
 		for (const candidate of manifest.request.candidates) {
 			assert.equal(candidate.env.PI_SUBAGENT_SPAWN_BUDGET, "0");
 			assert.match(candidate.env.PI_DENY_TOOLS ?? "", /subagent/);
-			assert.match(candidate.env.COMPOSE_PROJECT_NAME ?? "", new RegExp(`-w${candidate.index}$`));
 		}
 		assert.equal(getLiveSlotCount(), 3, "N candidates hold N spawn slots");
 		const result = await running.completionPromise!;

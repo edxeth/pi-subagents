@@ -8,6 +8,7 @@ import {
 	previewVerifierCriteria,
 	runVerifierSelect,
 	runVerifierProbe,
+	verifierBridgeBaseEnv,
 	VerifierBridgeError,
 } from "../../src/vf/verifier/bridge.ts";
 import {
@@ -133,6 +134,29 @@ describe("verifier bridge (NDJSON one-shot)", () => {
 		} finally {
 			if (saved === undefined) delete process.env.PI_SUBAGENT_LLM_VERIFIER_VENV;
 			else process.env.PI_SUBAGENT_LLM_VERIFIER_VENV = saved;
+		}
+	});
+
+	it("strips the library control vars from the inherited environment", () => {
+		const env = verifierBridgeBaseEnv({
+			PATH: "/usr/bin",
+			OPENAI_BASE_URL: "https://openrouter.ai/api/v1",
+			OPENAI_API_KEY: "sk-or",
+			DEEPSEEK_API_KEY: "sk-ds",
+			VERTEX_API_KEY: "vtx",
+			DEEPSEEK_EFFORT: "max",
+			DEEPSEEK_MAX_TOKENS: "1",
+		});
+		assert.equal(env.PATH, "/usr/bin");
+		for (const name of [
+			"OPENAI_BASE_URL",
+			"OPENAI_API_KEY",
+			"DEEPSEEK_API_KEY",
+			"VERTEX_API_KEY",
+			"DEEPSEEK_EFFORT",
+			"DEEPSEEK_MAX_TOKENS",
+		]) {
+			assert.equal(name in env, false, name);
 		}
 	});
 
@@ -276,7 +300,7 @@ describe("verifier bridge (NDJSON one-shot)", () => {
 			(error: unknown) => {
 				assert.ok(error instanceof VerifierBridgeError);
 				assert.strictEqual(error.kind, "credentials");
-				assert.match(error.message, /no verifier backend configured/);
+				assert.match(error.message, /no verifier credentials/);
 				assert.match(error.message, /DEEPSEEK_API_KEY/);
 				return true;
 			},

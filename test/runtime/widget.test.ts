@@ -329,9 +329,9 @@ describe("verified fan-out widget rows", () => {
 		const widget = new SubagentWidgetManager(() => [verifiedAgent(runDir)]);
 		const lines = widget.renderForTest().map(stripAnsi).join("\n");
 
-		assert.match(lines, /vf-demo \[vf-worker\] · 2 candidates · running/);
-		assert.match(lines, /candidate 1 · done/);
-		assert.match(lines, /candidate 2 ·/);
+		assert.match(lines, /vf-demo \[vf-worker\] · 2 attempts · running/);
+		assert.match(lines, /attempt 1 · done/);
+		assert.match(lines, /attempt 2 ·/);
 		assert.match(lines, /7\.4K\/372K ctx/);
 		assert.match(lines, /working on the fix/);
 	});
@@ -344,9 +344,9 @@ describe("verified fan-out widget rows", () => {
 		const widget = new SubagentWidgetManager(() => [verifiedAgent(runDir)]);
 		const lines = widget.renderForTest().map(stripAnsi).join("\n");
 
-		assert.match(lines, /3 candidates · verifying/);
+		assert.match(lines, /3 attempts · verifying/);
 		assert.match(lines, /verifier · ranking 3 traces/);
-		assert.match(lines, /candidate 3 · done/);
+		assert.match(lines, /attempt 3 · done/);
 	});
 
 	it("truncates candidate rows within the widget budget with an overflow hint", () => {
@@ -358,9 +358,9 @@ describe("verified fan-out widget rows", () => {
 		const lines = widget.renderForTest().map(stripAnsi);
 
 		assert.ok(lines.length <= 10, `widget must stay within budget: ${lines.length}`);
-		assert.match(lines.join("\n"), /\(\+\d+ more candidates\)/);
+		assert.match(lines.join("\n"), /\(\+\d+ more attempts\)/);
 		assert.equal(lines.at(-1), "... — Alt+S to show all", "one hint for the whole widget");
-		assert.match(lines.join("\n"), /candidate 1 ·/);
+		assert.match(lines.join("\n"), /attempt 1 ·/);
 	});
 
 	it("renders a verified group next to an ordinary agent", () => {
@@ -370,8 +370,8 @@ describe("verified fan-out widget rows", () => {
 		const lines = widget.renderForTest().map(stripAnsi).join("\n");
 
 		assert.match(lines, /Child 9 \[scout\]/);
-		assert.match(lines, /2 candidates · running/);
-		assert.match(lines, /candidate 2 ·/);
+		assert.match(lines, /2 attempts · running/);
+		assert.match(lines, /attempt 2 ·/);
 	});
 
 	it("renders a mixed batch: ordinary agents and verified groups side by side", () => {
@@ -391,8 +391,8 @@ describe("verified fan-out widget rows", () => {
 
 		assert.match(lines.join("\n"), /● Agents · 3 running/);
 		assert.match(lines.join("\n"), /Child 1 \[scout\]/);
-		assert.match(lines.join("\n"), /3 candidates · verifying/);
-		assert.match(lines.join("\n"), /candidate 1 · done · 9\.1K\/372K ctx/);
+		assert.match(lines.join("\n"), /3 attempts · verifying/);
+		assert.match(lines.join("\n"), /attempt 1 · done · 9\.1K\/372K ctx/);
 		assert.match(lines.join("\n"), /verifier · ranking 3 traces…/);
 		// Two ordinary agents (3 lines each) plus the 5-line group exceed the
 		// budget: Child 2 folds into the single trailing hint.
@@ -417,7 +417,7 @@ describe("verified fan-out widget rows", () => {
 		const lines = widget.renderForTest().map(stripAnsi);
 
 		assert.ok(lines.length <= 10, `widget must stay within budget: ${lines.length}\n${lines.join("\n")}`);
-		assert.match(lines.join("\n"), /candidate 1 · done/);
+		assert.match(lines.join("\n"), /attempt 1 · done/);
 		assert.match(lines.at(-1) ?? "", /\(\+1 more subagent — Alt\+S to show all\)/);
 	});
 });

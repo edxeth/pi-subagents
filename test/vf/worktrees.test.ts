@@ -113,7 +113,7 @@ describe("worktree preflight gate", () => {
 			() => preflightWorktreeSource(repoRoot),
 			(error: unknown) => {
 				assert.ok(error instanceof WorktreeError);
-				assert.match(error.message, /unborn HEAD/);
+				assert.match(error.message, /at least one commit/);
 				return true;
 			},
 		);

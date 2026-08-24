@@ -304,8 +304,8 @@ def check_credentials(req: dict) -> None:
         return
     fail(
         "credentials",
-        "no verifier backend configured: set OPENAI_BASE_URL, DEEPSEEK_API_KEY, or VERTEX_API_KEY "
-        "(via the verifier profile env block or the launching process)",
+        "no verifier credentials: set DEEPSEEK_API_KEY, OPENAI_BASE_URL, or VERTEX_API_KEY "
+        "(in the verifier profile env block or your environment)",
         EXIT_CREDENTIALS,
     )
 

@@ -247,6 +247,6 @@ describe("capability gate + degenerate halt (live supervisor)", () => {
 		const manifest = await waitForVerifiedRunResult(runDir, { timeoutMs: RUN_TIMEOUT });
 		assert.equal(manifest.state, "failed");
 		assert.equal(manifest.result?.failure?.code, "insufficient-distinct-candidates");
-		assert.match(manifest.result?.failure?.message ?? "", /equivalent candidates, not as a backend failure/);
+		assert.match(manifest.result?.failure?.message ?? "", /made the same code and report/);
 	});
 });

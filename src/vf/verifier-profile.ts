@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEnvString } from "../launch/env.ts";
 import { getAgentConfigDir } from "../agents/definitions.ts";
-import { EFFORT_ALIASES, LIBRARY_REASONING_EFFORTS, normalizeVerifierModelRef } from "./model-ref.ts";
-import type { LibraryReasoningEffort, NormalizedVerifierModelRef } from "./model-ref.ts";
+import { normalizeVerifierModelRef } from "./model-ref.ts";
+import type { LibraryReasoningEffort } from "./model-ref.ts";
 
 // Re-exported for callers of the profile module; the ref grammar itself lives
 // in model-ref.ts so agent-definition parsing can validate refs without a
@@ -14,15 +14,12 @@ export { normalizeVerifierModelRef, LIBRARY_REASONING_EFFORTS } from "./model-re
  * Verifier profiles (`agents/verifiers/<name>.md`).
  *
  * A verifier profile is a scoring PROFILE, not an agent: it names the model
- * that scores candidate traces and the credentials the scoring bridge needs.
- * It is never launched as a child session and accepts no tools, skills,
+ * that scores candidate traces and may pin the credentials the scoring bridge
+ * needs. It is never launched as a child session and accepts no tools, skills,
  * spawning, session-mode, or cwd fields.
  */
 
-/** Model id the `llm-verifier` library uses when none is passed. */
-export const LIBRARY_DEFAULT_VERIFIER_MODEL = "gemini-2.5-flash";
-
-export type VerifierProfileSource = "project" | "global" | "bundled";
+export type VerifierProfileSource = "project" | "global";
 
 export class VerifierProfileError extends Error {
 	constructor(message: string) {
@@ -34,27 +31,23 @@ export class VerifierProfileError extends Error {
 export interface VerifierProfile {
 	name: string;
 	source: VerifierProfileSource;
-	/** File the profile was read from; synthetic for the bundled profile. */
+	/** File the profile was read from. */
 	path: string;
 	/** Plain library model id (provider prefix / `:thinking` stripped). */
 	model: string;
-	modelRef: NormalizedVerifierModelRef;
 	thinking: LibraryReasoningEffort | null;
+	/** Provider named by a `provider/model` ref, when the profile used one. */
+	provider: string | null;
 	env: Record<string, string>;
 }
 
-/** The bundled profile that makes `llm-as-a-verifier: true` work out of the box. */
-const BUNDLED_DEFAULT_PROFILE_SOURCE = `---
-model: deepseek-v4-flash
-env:
-  # Credentials come from the launching process env (DEEPSEEK_API_KEY=...).
-  # Set them here instead if you prefer keeping the key in the profile:
-  # DEEPSEEK_API_KEY=sk-...
----
-Bundled default verifier profile: DeepSeek deepseek-v4-flash, credentials
-from the environment. Override with .pi/agents/verifiers/default.md (project)
-or ~/.pi/agent/agents/verifiers/default.md (global).
-`;
+/** Everything a launch needs to run the verifier: model, effort, and the
+ * complete set of library env vars — exactly one backend door. */
+export interface ResolvedVerifierModel {
+	model: string;
+	thinking: LibraryReasoningEffort | null;
+	env: Record<string, string>;
+}
 
 export function getVerifierProfileDirs(baseCwd: string): { project: string; global: string } {
 	return {
@@ -64,7 +57,6 @@ export function getVerifierProfileDirs(baseCwd: string): { project: string; glob
 }
 
 interface ParsedFrontmatter {
-	/** Top-level keys in declaration order. */
 	keys: string[];
 	values: Map<string, string | undefined>;
 	envBlock: string | undefined;
@@ -81,24 +73,23 @@ function parseFrontmatter(content: string): ParsedFrontmatter {
 		const line = lines[index];
 		if (!line.trim() || line.trim().startsWith("#")) continue;
 		if (/^\s/.test(line)) continue; // block continuation
-		const keyMatch = line.match(/^([A-Za-z0-9_-]+):(.*)$/);
-		if (!keyMatch) continue;
-		const key = keyMatch[1];
-		const inline = keyMatch[2].trim();
-		keys.push(key);
-		if (inline === "|") {
+		if (/^env:\s*(\|.*)?$/.test(line)) {
 			const block: string[] = [];
-			for (let i = index + 1; i < lines.length; i++) {
-				const blockLine = lines[i];
-				if (blockLine.trim() && !/^[ \t]/.test(blockLine)) break;
-				block.push(blockLine.replace(/^[ \t]{1,2}/, ""));
+			for (let next = index + 1; next < lines.length; next++) {
+				if (lines[next].startsWith("  ") || lines[next].startsWith("\t")) block.push(lines[next]);
+				else break;
 			}
-			const blockText = block.join("\n").trim();
-			if (key === "env") envBlock = blockText;
-			else values.set(key, blockText);
+			envBlock = block.map((l) => l.replace(/^(\t| )/, "")).join("\n");
+			index += block.length;
 			continue;
 		}
-		values.set(key, inline || undefined);
+		const split = line.indexOf(":");
+		if (split === -1) continue;
+		const key = line.slice(0, split).trim();
+		if (!key) continue;
+		if (keys.includes(key)) continue;
+		keys.push(key);
+		values.set(key, line.slice(split + 1).trim() || undefined);
 	}
 	return { keys, values, envBlock };
 }
@@ -112,58 +103,53 @@ export function parseVerifierProfileSource(
 	path: string,
 ): VerifierProfile {
 	const { keys, values, envBlock } = parseFrontmatter(content);
-	if (keys.length === 0) {
+	const unknown = keys.filter((key) => !ALLOWED_PROFILE_KEYS.has(key));
+	if (unknown.length > 0) {
 		throw new VerifierProfileError(
-			`Verifier profile ${path} has no frontmatter. Expected a --- block with model (required), thinking (optional), and env (optional).`,
-		);
-	}
-	const disallowed = keys.filter((key) => !ALLOWED_PROFILE_KEYS.has(key));
-	if (disallowed.length > 0) {
-		throw new VerifierProfileError(
-			`Verifier profile ${path} has field(s) ${disallowed
-				.map((key) => `"${key}"`)
-				.join(", ")} that a verifier profile must not have. Allowed fields: model (required), thinking (optional), env (optional block). A verifier is a scoring profile, not an agent.`,
+			`verifier profile ${path} has unknown field(s) ${unknown.join(", ")}; allowed: model, thinking, env.`,
 		);
 	}
 	const modelRaw = values.get("model");
-	if (!modelRaw) {
-		throw new VerifierProfileError(`Verifier profile ${path} is missing the required "model" field.`);
-	}
-	const modelRef = normalizeVerifierModelRef(modelRaw);
+	if (!modelRaw) throw new VerifierProfileError(`verifier profile ${path} must set model.`);
 	const thinkingRaw = values.get("thinking");
-	const fieldThinking = thinkingRaw ? parseEffort("thinking", thinkingRaw, path) : null;
-	if (fieldThinking !== null && modelRef.thinking !== null && fieldThinking !== modelRef.thinking) {
-		throw new VerifierProfileError(
-			`Verifier profile ${path} sets thinking twice with different values: model suffix ":${modelRef.thinking}" vs field "${fieldThinking}". Remove one.`,
-		);
-	}
-	let env: Record<string, string> = {};
-	if (envBlock !== undefined && envBlock !== "") {
-		try {
-			env = parseEnvString(envBlock);
-		} catch (error) {
-			throw new VerifierProfileError(`Verifier profile ${path} has an invalid env block: ${(error as Error).message}`);
+	let thinking: LibraryReasoningEffort | null = null;
+	if (thinkingRaw) {
+		const map: Record<string, LibraryReasoningEffort> = {
+			off: "off",
+			disabled: "off",
+			none: "off",
+			low: "low",
+			high: "high",
+			max: "max",
+		};
+		thinking = map[thinkingRaw.toLowerCase()] ?? null;
+		if (!thinking) {
+			throw new VerifierProfileError(
+				`verifier profile ${path}: thinking must be one of off, low, high, max (got ${JSON.stringify(thinkingRaw)}).`,
+			);
 		}
 	}
-	return {
-		name,
-		source,
-		path,
-		model: modelRef.modelId,
-		modelRef,
-		thinking: fieldThinking ?? modelRef.thinking,
-		env,
-	};
+	let provider: string | null = null;
+	let model = modelRaw;
+	if (modelRaw.includes("/")) {
+		try {
+			const ref = normalizeVerifierModelRef(modelRaw);
+			provider = ref.provider;
+			model = ref.modelId;
+			thinking = thinking ?? ref.thinking;
+		} catch (error) {
+			throw new VerifierProfileError(`verifier profile ${path}: ${(error as Error).message}`);
+		}
+	}
+	const env = envBlock ? parseEnvString(envBlock) : {};
+	return { name, source, path, model, thinking, provider, env };
 }
 
-function parseEffort(field: string, raw: string, path: string): LibraryReasoningEffort {
-	const effort = EFFORT_ALIASES[raw.trim().toLowerCase()];
-	if (!effort) {
-		throw new VerifierProfileError(
-			`Verifier profile ${path}: ${field} must be one of ${LIBRARY_REASONING_EFFORTS.join(", ")} (got ${JSON.stringify(raw)}).`,
-		);
+class VerifierProfileNotFoundError extends VerifierProfileError {
+	constructor(message: string) {
+		super(message);
+		this.name = "VerifierProfileNotFoundError";
 	}
-	return effort;
 }
 
 export function resolveVerifierProfile(name: string, baseCwd: string): VerifierProfile {
@@ -177,53 +163,188 @@ export function resolveVerifierProfile(name: string, baseCwd: string): VerifierP
 	if (existsSync(globalPath)) {
 		return parseVerifierProfileSource(name, readFileSync(globalPath, "utf8"), "global", globalPath);
 	}
-	if (name === "default") {
-		return parseVerifierProfileSource(name, BUNDLED_DEFAULT_PROFILE_SOURCE, "bundled", "(bundled: verifiers/default.md)");
-	}
-	throw new VerifierProfileError(
+	throw new VerifierProfileNotFoundError(
 		`Verifier profile "${name}" was not found. Looked for ${projectPath} and ${globalPath}. A verifier profile is a model+credentials file with model (required), thinking (optional), and env (optional).`,
 	);
 }
 
-export interface ResolvedVerifierModel {
-	/** Plain library model id — the exact string `select(model=...)` receives. */
-	model: string;
-	modelRef: NormalizedVerifierModelRef;
-	/** Profile the credentials were inherited from. */
-	profile: { name: string; source: VerifierProfileSource; path: string };
-	/** Reasoning effort for the bridge to apply (library setting `DEEPSEEK_EFFORT`). */
-	thinking: LibraryReasoningEffort | null;
-	/** Env vars the profile pins; merged over the process env for the bridge process. */
-	env: Record<string, string>;
+/** The library's env-var "doors" — exactly one complete door may be open. */
+const GENERIC_DOOR_VARS = ["OPENAI_BASE_URL", "OPENAI_API_KEY"] as const;
+const DOOR_FAMILIES = [GENERIC_DOOR_VARS, ["DEEPSEEK_API_KEY"], ["VERTEX_API_KEY"]] as const;
+
+/** A profile env block pins at most one door family, and a generic door
+ * without its URL is incomplete (a key alone routes nowhere). */
+function assertCompleteProfileDoor(env: Record<string, string>, profilePath: string): boolean {
+	const families = DOOR_FAMILIES.filter((family) => family.some((name) => env[name]));
+	if (families.length > 1) {
+		throw new VerifierProfileError(
+			`verifier profile ${profilePath} sets more than one backend door (${families.map((f) => f[0]).join(", ")}); keep exactly one so the choice is unambiguous.`,
+		);
+	}
+	if (env.OPENAI_API_KEY && !env.OPENAI_BASE_URL) {
+		throw new VerifierProfileError(
+			`verifier profile ${profilePath} sets OPENAI_API_KEY without OPENAI_BASE_URL; a key alone does not name an endpoint.`,
+		);
+	}
+	return families.length === 1;
+}
+
+interface PiModelEndpoint {
+	baseUrl: string;
+	apiKey?: string;
+}
+
+function readJson(path: string): Record<string, unknown> | null {
+	try {
+		return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+	} catch {
+		return null;
+	}
+}
+
+function asString(value: unknown): string | undefined {
+	return typeof value === "string" && value ? value : undefined;
+}
+
+/** Literal, usable api key: pi's config allows `$ENV` and `!command` values
+ * that only pi itself can resolve — those are not passed through raw. */
+function literalKey(value: unknown): string | undefined {
+	const key = asString(value);
+	return key && !key.startsWith("$") && !key.startsWith("!") ? key : undefined;
+}
+
+/** The exact effective endpoint for provider/model from the user's own pi
+ * config: models.json (exact-model entry, then provider default), then the
+ * /login store's entry for that exact model. Never borrows another model's
+ * URL. Key: models.json value, else the auth store. */
+function piEndpointFor(provider: string, modelId: string): PiModelEndpoint | null {
+	const configDir = getAgentConfigDir();
+	const modelsJson = readJson(join(configDir, "models.json"));
+	const providers = (modelsJson?.providers ?? {}) as Record<
+		string,
+		{ baseUrl?: unknown; apiKey?: unknown; models?: Array<{ id?: unknown; baseUrl?: unknown; apiKey?: unknown }> }
+	>;
+	const def = providers[provider];
+	if (def) {
+		const exact = (def.models ?? []).find((m) => asString(m.id) === modelId && asString(m.baseUrl));
+		if (exact) {
+			return { baseUrl: asString(exact.baseUrl)!, apiKey: literalKey(exact.apiKey) ?? literalKey(def.apiKey) };
+		}
+		const providerUrl = asString(def.baseUrl);
+		if (providerUrl) return { baseUrl: providerUrl, apiKey: literalKey(def.apiKey) };
+	}
+	const store = readJson(join(configDir, "models-store.json"));
+	const entry = ((store?.[provider] as { models?: Array<{ id?: unknown; baseUrl?: unknown }> } | undefined)?.models ?? []).find(
+		(m) => asString(m.id) === modelId && asString(m.baseUrl),
+	);
+	if (entry) return { baseUrl: asString(entry.baseUrl)! };
+	return null;
+}
+
+function authStoreKey(providerName: string): string {
+	const auth = readJson(join(getAgentConfigDir(), "auth.json"));
+	const key = (auth?.[providerName] as { key?: unknown } | undefined)?.key;
+	return asString(key) ?? "";
 }
 
 /**
- * Resolve the verifier model for a launch. Precedence:
- * `llm-as-a-verifier-model` override → `verifiers/default.md` profile →
- * library default. A `-model`-only override still inherits the default
- * profile's `env` block for credentials. Resolution is credential-agnostic:
- * which env var a backend needs is the library's contract — the bridge probe
- * surfaces it (typed `credentials` failure) before any candidate spend, so no
- * env-var name is ever inferred here from the model name.
+ * One deterministic door for the chosen provider/model. Order:
+ *   1. the profile's own env block (validated complete, max one family)
+ *   2. the matching provider-specific export (DEEPSEEK_API_KEY / VERTEX_API_KEY)
+ *   3. the exact provider/model endpoint in pi's own config
+ *   4. the exported generic door (OPENAI_BASE_URL, key optional) — only for
+ *      providers pi does not know (self-hosted, custom)
+ *   5. otherwise a fail-closed error naming what is missing
+ * The fixed providers (deepseek, gemini) never route through a generic
+ * export, and a provider is never inferred from the model id.
+ */
+function selectDoor(options: {
+	provider: string | null;
+	modelId: string;
+	profileEnv: Record<string, string>;
+	profilePath: string;
+	processEnv: NodeJS.ProcessEnv;
+}): Record<string, string> {
+	const { provider, modelId, profileEnv, profilePath, processEnv } = options;
+	if (assertCompleteProfileDoor(profileEnv, profilePath)) return {};
+	if (!provider) {
+		throw new VerifierProfileError(
+			`verifier profile ${profilePath} names the model without a provider; write model: provider/${modelId}, or give the profile an env block with OPENAI_BASE_URL (and key if the endpoint needs one).`,
+		);
+	}
+	const specific = provider === "deepseek" ? "DEEPSEEK_API_KEY" : provider === "gemini" ? "VERTEX_API_KEY" : null;
+	if (specific && processEnv[specific]) return { [specific]: processEnv[specific] as string };
+	const ep = piEndpointFor(provider, modelId);
+	if (ep) {
+		const key = ep.apiKey ?? authStoreKey(provider);
+		return { OPENAI_BASE_URL: ep.baseUrl, ...(key ? { OPENAI_API_KEY: key } : {}) };
+	}
+	if (!specific && processEnv.OPENAI_BASE_URL) {
+		return {
+			OPENAI_BASE_URL: processEnv.OPENAI_BASE_URL,
+			...(processEnv.OPENAI_API_KEY ? { OPENAI_API_KEY: processEnv.OPENAI_API_KEY } : {}),
+		};
+	}
+	const wanted = specific ?? "OPENAI_BASE_URL (and OPENAI_API_KEY if the endpoint needs one)";
+	throw new VerifierProfileError(
+		`verifier model "${modelId}" (provider "${provider}") has no usable endpoint: pi's models.json and models-store.json have no entry for it and ${wanted} is not set. ` +
+			`Add the provider to pi (/login or models.json), export ${specific ?? "OPENAI_BASE_URL"}, or give ${profilePath} an env block with OPENAI_BASE_URL.`,
+	);
+}
+
+/**
+ * Resolve the verifier for a launch. Grammar:
+ *  - `provider/model[:thinking]` — a direct, binding model choice.
+ *  - a bare value — a verifier profile (`verifiers/<name>.md`).
+ *  - omitted — the `default` profile; with no field and no default profile
+ *    the launch fails closed (a user setup decision — the error states the
+ *    fact, never file-creation instructions).
  */
 export function resolveVerifierModel(options: {
 	override?: string | undefined;
 	baseCwd: string;
 	env?: NodeJS.ProcessEnv;
 }): ResolvedVerifierModel {
+	const override = options.override?.trim();
 	const processEnv = options.env ?? process.env;
-	const profile = resolveVerifierProfile("default", options.baseCwd);
-	const effectiveEnv = { ...processEnv, ...profile.env };
-	const modelRef = options.override ? normalizeVerifierModelRef(options.override) : profile.modelRef;
-	// The bundled/project/global default always names a model, so the library
-	// default is a safety net, not a reachable branch.
-	const model = modelRef.modelId || LIBRARY_DEFAULT_VERIFIER_MODEL;
-	const thinking = options.override ? modelRef.thinking : profile.thinking;
+	if (override && override.includes("/")) {
+		const ref = normalizeVerifierModelRef(override);
+		return {
+			model: ref.modelId,
+			thinking: ref.thinking,
+			env: selectDoor({
+				provider: ref.provider,
+				modelId: ref.modelId,
+				profileEnv: {},
+				profilePath: "the agent file",
+				processEnv,
+			}),
+		};
+	}
+	const profileName = override ?? "default";
+	let profile: VerifierProfile;
+	try {
+		profile = resolveVerifierProfile(profileName, options.baseCwd);
+	} catch (error) {
+		if (!override && error instanceof VerifierProfileNotFoundError) {
+			throw new VerifierProfileError(
+				"the verifier model is not configured for this agent — a user setup decision.",
+			);
+		}
+		throw error;
+	}
 	return {
-		model,
-		modelRef: { ...modelRef, modelId: model },
-		profile: { name: profile.name, source: profile.source, path: profile.path },
-		thinking: thinking ?? null,
-		env: profile.env,
+		model: profile.model,
+		thinking: profile.thinking,
+		env: {
+			...selectDoor({
+				provider: profile.provider,
+				modelId: profile.model,
+				profileEnv: profile.env,
+				profilePath: profile.path,
+				processEnv,
+			}),
+			...profile.env,
+		},
 	};
 }

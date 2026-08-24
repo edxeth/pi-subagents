@@ -22,7 +22,7 @@ import { dirname, join } from "node:path";
 const session = process.env.PI_SUBAGENT_SESSION ?? "";
 const captureDir = process.env.TEST_CAPTURE_DIR ?? "";
 const markerMap = process.env.TEST_MARKER_MAP ? JSON.parse(process.env.TEST_MARKER_MAP) : {};
-const slot = /-w(\\d+)$/.exec(process.env.COMPOSE_PROJECT_NAME ?? "");
+const slot = /-w(\\d+)$/.exec((process.cwd().split("/").pop() ?? ""));
 const marker = process.env.TEST_MARKER ?? (slot ? markerMap[slot[1]] ?? "" : "");
 const before = Number(process.env.TEST_DELAY_BEFORE_MS ?? "0");
 const after = Number(process.env.TEST_DELAY_AFTER_MS ?? "0");
@@ -34,7 +34,7 @@ if (captureDir) {
 			{
 				argv: process.argv,
 				marker,
-				compose: process.env.COMPOSE_PROJECT_NAME ?? "",
+				cwd: process.cwd(),
 				portOffset: process.env.PORT_OFFSET ?? "",
 				session,
 				denyTools: process.env.PI_DENY_TOOLS ?? "",

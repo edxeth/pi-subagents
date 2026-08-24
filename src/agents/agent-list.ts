@@ -156,9 +156,9 @@ function renderVerifiedFanOutLine(entry: AgentListEntry): string | undefined {
 	// The roster is advisory, so a bad env value surfaces inline here; the
 	// same error fails the actual launch closed at pre-flight.
 	try {
-		return `  verified-fan-out: true (${resolveVerifierCandidateCount(entry.llmAsVerifierCandidates)} candidates)`;
+		return `  llm-as-a-verifier: true (${resolveVerifierCandidateCount(entry.llmAsVerifierCandidates)} attempts)`;
 	} catch (error) {
-		return `  verified-fan-out: true (${(error as Error).message})`;
+		return `  llm-as-a-verifier: true (${(error as Error).message})`;
 	}
 }
 
@@ -245,7 +245,7 @@ export function renderAgentListReminder(entries: AgentListEntry[]): string {
 			: []),
 		...(hasVerifiedFanOut
 			? [
-					"- `verified-fan-out: true` means one launch of this agent runs several fresh candidate attempts of the same task and an LLM verifier ranks them; you still receive exactly one result for the launch. Do not launch it again for the same task while a run is open.",
+					"- `llm-as-a-verifier: true` means one launch runs several independent attempts of the task and an LLM verifier picks the best one; you receive exactly one result. Wait for that result before you launch this agent again. It needs a clean Git tree — the launch fails immediately otherwise.",
 				]
 			: []),
 		"- If the user names an agent that is not listed, say it was not found and stop; do not suggest a different listed agent.",

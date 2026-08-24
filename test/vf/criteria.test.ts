@@ -58,6 +58,42 @@ describe("verifier criteria resolution (ticket 10)", () => {
 	assert.equal(absolute.path, join(dir, "nested", "abs.md"));
 	});
 
+	it("resolves a bare name to a criteria file: project over global over built-in", () => {
+		const savedDir = process.env.PI_CODING_AGENT_DIR;
+		const globalDir = join(dir, "config");
+		mkdirSync(join(globalDir, "agents", "criteria"), { recursive: true });
+		writeFileSync(join(globalDir, "agents", "criteria", "fix-focus.md"), "# R\n\n## Criteria\n\n### A {#a}\n\nGlobal.\n");
+		process.env.PI_CODING_AGENT_DIR = globalDir;
+
+		// No project file: the global criteria dir serves the bare name.
+		const globalHit = resolveVerifierCriteria("fix-focus", dir);
+		assert.equal(globalHit.kind, "path");
+		assert.equal(globalHit.path, join(globalDir, "agents", "criteria", "fix-focus.md"));
+
+		// A project file with the same name wins over the global one.
+		mkdirSync(join(dir, ".pi", "agents", "criteria"), { recursive: true });
+		writeFileSync(join(dir, ".pi", "agents", "criteria", "fix-focus.md"), "# R\n\n## Criteria\n\n### A {#a}\n\nProject.\n");
+		const projectHit = resolveVerifierCriteria("fix-focus", dir);
+		assert.equal(projectHit.path, join(dir, ".pi", "agents", "criteria", "fix-focus.md"));
+
+		// A project file even shadows a built-in name.
+		writeFileSync(join(dir, ".pi", "agents", "criteria", "generic.md"), "# R\n\n## Criteria\n\n### A {#a}\n\nMine.\n");
+		const shadow = resolveVerifierCriteria("generic", dir);
+		assert.equal(shadow.kind, "path");
+		assert.equal(shadow.path, join(dir, ".pi", "agents", "criteria", "generic.md"));
+
+		// Unknown bare name fails closed naming every tried location.
+		assert.throws(() => resolveVerifierCriteria("nope", dir), (error: Error) => {
+			assert.ok(error instanceof VerifierCriteriaError);
+			assert.match(error.message, /nope\.md/);
+			assert.match(error.message, /generic, code-change, research/);
+			return true;
+		});
+
+		if (savedDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = savedDir;
+	});
+
 	it("fails closed on an unresolvable criteria file before any spend", () => {
 	assert.throws(() => resolveVerifierCriteria("missing.md", dir), (error: Error) => {
 		assert.ok(error instanceof VerifierCriteriaError);
@@ -65,13 +101,15 @@ describe("verifier criteria resolution (ticket 10)", () => {
 		assert.ok(error.message.includes("generic"), `message lists built-in names: ${error.message}`);
 		return true;
 	});
-	// A directory is not a criteria file.
-	assert.throws(() => resolveVerifierCriteria("nested", dir), /is not a file/);
+	// A bare name that matches nothing fails closed listing the tried locations.
+	assert.throws(() => resolveVerifierCriteria("nested", dir), /matches no criteria file/);
+	// A path value (contains "/" or ".") still resolves against the cwd.
+	assert.throws(() => resolveVerifierCriteria("nested/rubric.md", dir), /does not resolve to an existing file/);
 	// An empty file would only explode inside the paid verifier call.
 	writeFileSync(join(dir, "empty.md"), "");
 	assert.throws(() => resolveVerifierCriteria("empty.md", dir), /empty/);
-	// A near-miss built-in name is treated as a path, and the error says so.
-	assert.throws(() => resolveVerifierCriteria("code_change", dir), /generic/);
+	// A near-miss built-in name lists the real built-ins in its error.
+	assert.throws(() => resolveVerifierCriteria("code_change", dir), /generic, code-change, research/);
 	});
 
 	it("defaults to the packaged generic rubric when no value is set", () => {
@@ -127,8 +165,12 @@ describe("verifier criteria resolution (ticket 10)", () => {
 
 	it("packaged rubrics pass the real library criteria preview (no API key)", async () => {
 	assert.ok(python, "venv must be provisioned before previewing");
+	// A clean cwd: other tests in this suite legitimately shadow built-in names
+	// with project criteria files, which must not reroute this preview check.
+	const cleanCwd = join(dir, "no-project-files");
+	mkdirSync(cleanCwd, { recursive: true });
 	for (const name of BUILTIN_VERIFIER_CRITERIA_NAMES) {
-		const { path } = resolveVerifierCriteria(name, dir);
+		const { path } = resolveVerifierCriteria(name, cleanCwd);
 		const preview = await previewVerifierCriteria(path, {
 			python,
 			cwd: dir,

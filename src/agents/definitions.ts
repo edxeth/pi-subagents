@@ -314,7 +314,7 @@ function parseLlmAsVerifierModel(
 ): string | null | undefined {
 	if (!present) return undefined;
 	if (raw === undefined || !raw.trim()) {
-		throw new Error(`llm-as-a-verifier-model must be provider/model[:thinking] (got ${JSON.stringify(raw ?? "")}) in ${path}.`);
+		throw new Error(`llm-as-a-verifier-model must be a verifier profile name or provider/model[:thinking] (got ${JSON.stringify(raw ?? "")}) in ${path}.`);
 	}
 	try {
 		return normalizeVerifierModelRef(raw).normalizedRef;

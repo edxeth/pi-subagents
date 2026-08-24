@@ -2,7 +2,7 @@ import { getArtifactProjectName, getArtifactStorageRoot } from "../../artifact-s
 import type { AgentDefaults } from "../../agents/definitions.ts";
 import { buildParentEnvSnapshot } from "../../launch/child-env.ts";
 import { buildBackgroundLaunchPlan } from "../../launch/background.ts";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import type { SubagentLaunchContext } from "../../launch/prep.ts";
 import { runningSubagents } from "../../runtime/state.ts";
 import {
@@ -15,7 +15,9 @@ import {
 import { SPAWNING_TOOL_NAMES } from "../../tools/tool-names.ts";
 import type { RunningSubagent, SubagentParamsInput, SubagentResult } from "../../types.ts";
 import { resolveVerifiedFanOutLaunch } from "../criteria.ts";
-import { resolveVerifierModel } from "../verifier-profile.ts";
+import { resolveVerifierModel, VerifierProfileError } from "../verifier-profile.ts";
+import { VerifierCriteriaError } from "../criteria.ts";
+import { WorktreeError } from "../worktrees.ts";
 import { candidateWorktreeBranchName, candidateWorktreeDirName, preflightWorktreeSource } from "../worktrees.ts";
 import { newRunId } from "../supervisor/run-client.ts";
 import { startVerifiedRun, verifiedRunDirFor, waitForVerifiedRunResult } from "./client.ts";
@@ -58,13 +60,6 @@ function denyCandidateSpawning(env: Record<string, string>): void {
 	env.PI_DENY_TOOLS = [...denied].join(",");
 }
 
-function candidateLaunchEnv(repoBasename: string, runId: string, index: number): Record<string, string> {
-	return {
-		COMPOSE_PROJECT_NAME: `${repoBasename}-vf-${runId}-w${index}`,
-		PORT_OFFSET: String((index - 1) * 100),
-	};
-}
-
 export interface VerifiedFanOutLaunch {
 	running: RunningSubagent;
 	runId: string;
@@ -77,26 +72,44 @@ export async function launchVerifiedFanOut(
 	ctx: SubagentLaunchContext,
 	options: { signal?: AbortSignal; awaited?: boolean; slotsPreReserved?: boolean } = {},
 ): Promise<VerifiedFanOutLaunch> {
-	const fanout = resolveVerifiedFanOutLaunch(
-		{
-			llmAsVerifierCandidates: agentDefs.llmAsVerifierCandidates,
-			llmAsVerifierModel: agentDefs.llmAsVerifierModel ?? undefined,
-			llmAsVerifierCriteria: agentDefs.llmAsVerifierCriteria,
-		},
-		ctx.cwd,
-	);
-	const verifier = resolveVerifierModel({ override: fanout.modelOverride ?? undefined, baseCwd: ctx.cwd });
-	if (agentDefs.noSession) {
-		throw new VerifiedLaunchError(
-			`Agent ${params.agent} uses no-session sessions; verified fan-out candidates need durable session files so their transcripts can be flattened and ranked.`,
-			"no-session-unsupported",
+	let fanout: ReturnType<typeof resolveVerifiedFanOutLaunch>;
+	let verifier: ReturnType<typeof resolveVerifierModel>;
+	let preflight: ReturnType<typeof preflightWorktreeSource>;
+	try {
+		fanout = resolveVerifiedFanOutLaunch(
+			{
+				llmAsVerifierCandidates: agentDefs.llmAsVerifierCandidates,
+				llmAsVerifierModel: agentDefs.llmAsVerifierModel ?? undefined,
+				llmAsVerifierCriteria: agentDefs.llmAsVerifierCriteria,
+			},
+			ctx.cwd,
 		);
+		verifier = resolveVerifierModel({ override: fanout.modelOverride ?? undefined, baseCwd: ctx.cwd });
+		if (agentDefs.noSession) {
+			throw new VerifiedLaunchError(
+				`Agent ${params.agent} sets no-session: true; llm-as-a-verifier needs saved session files to rank each attempt.`,
+				"no-session-unsupported",
+			);
+		}
+		preflight = preflightWorktreeSource(ctx.cwd);
+	} catch (error) {
+		// Pre-flight rejections are configuration facts, not transient failures:
+		// relaunching without a change cannot succeed, and fixing them usually
+		// means committing/stashing the parent's own work or a user decision.
+		if (
+			error instanceof VerifiedLaunchError ||
+			error instanceof WorktreeError ||
+			error instanceof VerifierProfileError ||
+			error instanceof VerifierCriteriaError
+		) {
+			error.message +=
+				" No attempt was launched and nothing was paid. Relaunching will fail the same way. Ask the user how to proceed; do not commit, stash, or edit agent or config files on your own.";
+		}
+		throw error;
 	}
-	const preflight = preflightWorktreeSource(ctx.cwd);
 	const runId = newRunId();
 	const runDir = verifiedRunDirFor(verifiedRunsBaseDir(ctx.cwd), runId);
 	const repoParent = dirname(preflight.repoRoot);
-	const repoBasename = basename(preflight.repoRoot);
 
 	// Slot accounting: the fan-out's N candidates consume N spawn slots,
 	// reserved before any worktree creation or verifier spend. The subagent
@@ -105,8 +118,7 @@ export async function launchVerifiedFanOut(
 	const limit = getSpawnWidthLimit();
 	if (!options.slotsPreReserved && !tryAcquireSlots(fanout.candidates, limit)) {
 		throw new VerifiedLaunchError(
-			`Verified fan-out needs ${fanout.candidates} spawn slots (spawn width limit ${limit}); ` +
-				`wait for running subagents to finish or lower llm-as-a-verifier-candidates.`,
+			`llm-as-a-verifier needs ${fanout.candidates} subagent slots (limit ${limit}); running subagents hold them.`,
 			"spawn_width",
 		);
 	}
@@ -138,7 +150,6 @@ export async function launchVerifiedFanOut(
 				...params,
 				background: true,
 				forcedCwd: worktree,
-				launchEnv: candidateLaunchEnv(repoBasename, runId, index),
 			};
 			const plan = await buildBackgroundLaunchPlan(candidateParams, candidateCtx, {
 				frozenTaskArg,
@@ -293,7 +304,7 @@ function deliverOnce(
 	const claim = claimVerifiedRunDelivery(runDir);
 	const result = verifiedRunToSubagentResult(manifest, runDir, params, startTime);
 	if (!claim.claimed) {
-		result.summary = `[verified fan-out ${manifest.runId} result already delivered by another session (pid ${claim.claimedByPid})]`;
+		result.summary = `[llm-as-a-verifier ${manifest.runId}: run complete; result delivered by another session (pid ${claim.claimedByPid}) — report and ranking in ${runDir}]`;
 	}
 	return result;
 }
@@ -310,7 +321,7 @@ export function verifiedRunToSubagentResult(
 		return {
 			name: params.name,
 			task: params.task,
-			summary: `Verified fan-out run ${manifest.runId} is ${manifest.state} with no recorded result.`,
+			summary: `llm-as-a-verifier run ${manifest.runId} is ${manifest.state} with no recorded result.`,
 			exitCode: 1,
 			elapsed,
 			errorMessage: `run ${manifest.state} without a result`,
@@ -334,7 +345,7 @@ export function verifiedRunToSubagentResult(
 	return {
 		name: params.name,
 		task: params.task,
-		summary: result.failure?.message ?? `Verified fan-out run ${manifest.runId} failed.`,
+		summary: result.failure?.message ?? `llm-as-a-verifier run ${manifest.runId} failed.`,
 		exitCode: 1,
 		elapsed,
 		errorMessage: result.failure ? `${result.failure.code}: ${result.failure.message}` : "run failed",
@@ -343,22 +354,23 @@ export function verifiedRunToSubagentResult(
 
 /**
  * Compact verification footer (ticket 08): everything needed to audit the
- * selection — N, winner id, criteria, score, verifier token usage, artifact
- * path — plus the exact review/revert commands for the applied winner.
+ * selection — N, winner id, rank, criteria, verifier token usage, artifact
+ * path — plus the inspect/undo commands for the applied winner. The rank is
+ * the verifier's relative preference between attempts, not a grade.
  */
 function verificationFooter(manifest: VerifiedRunManifest, runDir: string): string {
 	const selection = manifest.result!.selection!;
 	const apply = manifest.result!.apply;
 	const usage = selection.usage;
 	const applyLine = apply?.applied
-		? `winner changes applied and staged — review \`git diff --staged\`, revert \`git reset --hard ${manifest.request.baseCommit}\``
+		? `winner changes staged — inspect \`git diff --staged\`; undo only if the user asks: \`git reset --hard ${manifest.request.baseCommit}\``
 		: apply
-			? `winner NOT applied (${apply.code}); winner retained on branch \`${selection.winnerBranch}\``
-			: `winner retained on branch \`${selection.winnerBranch}\``;
+			? `winner not applied (${apply.code}); kept on branch \`${selection.winnerBranch}\``
+			: `winner kept on branch \`${selection.winnerBranch}\``;
 	return (
-		`\n\n[verified fan-out ${manifest.runId}: winner w${selection.winnerIndex} of ` +
-		`${manifest.request.candidateCount} candidates (${selection.distinctCandidates} distinct), ` +
-		`score ${selection.winnerScore.toFixed(3)}, criteria ${selection.criteria.join(", ")}, ` +
+		`\n\n[llm-as-a-verifier ${manifest.runId}: winner w${selection.winnerIndex} of ` +
+		`${manifest.request.candidateCount} attempts (${selection.distinctCandidates} distinct), ` +
+		`rank ${selection.winnerScore.toFixed(3)}, criteria ${selection.criteria.join("+")}, ` +
 		`verifier ${selection.model} (${usage.calls} calls, ${usage.inputTokens} in / ${usage.outputTokens} out tokens)\n` +
 		`${applyLine}; artifacts ${runDir}]`
 	);

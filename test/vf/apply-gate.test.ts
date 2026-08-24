@@ -108,10 +108,10 @@ describe("verified fan-out apply gate (live processes)", () => {
 		const result = verifiedRunToSubagentResult(manifest, runDir, { name: "vf-run", task: "do the thing" }, Date.now());
 		assert.equal(result.exitCode, 0);
 		assert.ok(result.summary.startsWith(selection.winnerReport), "summary leads with the winner report");
-		assert.equal(result.summary.match(/\[verified fan-out /g)?.length, 1, "exactly one footer block");
-		assert.match(result.summary, /winner w1 of 3 candidates \(3 distinct\)/);
-		assert.match(result.summary, /score 0\.\d+/);
-		assert.match(result.summary, /criteria alignment, evidence, completeness/);
+		assert.equal(result.summary.match(/\[llm-as-a-verifier /g)?.length, 1, "exactly one footer block");
+		assert.match(result.summary, /winner w1 of 3 attempts \(3 distinct\)/);
+		assert.match(result.summary, /rank 0\.\d+/);
+		assert.match(result.summary, /criteria alignment\+evidence\+completeness/);
 		assert.match(result.summary, /verifier deepseek-v4-flash \(\d+ calls, \d+ in \/ \d+ out tokens\)/);
 		assert.match(result.summary, /artifacts .*vf-runs/);
 		assert.match(result.summary, /git diff --staged/);
@@ -154,8 +154,8 @@ describe("verified fan-out apply gate (live processes)", () => {
 			"winner branch retained",
 		);
 		const result = verifiedRunToSubagentResult(manifest, runDir, { name: "vf-run", task: "t" }, Date.now());
-		assert.match(result.summary, /winner NOT applied \(source-drift\)/);
-		assert.match(result.summary, new RegExp(`winner retained on branch .?vf/${runId.replace(/^vf-/, "")}/w1`));
+		assert.match(result.summary, /winner not applied \(source-drift\)/);
+		assert.match(result.summary, new RegExp(`kept on branch .?vf/${runId.replace(/^vf-/, "")}/w1`));
 	});
 
 	it("refuses to resume a finalized run's candidate session with the precise error", async () => {
@@ -175,9 +175,9 @@ describe("verified fan-out apply gate (live processes)", () => {
 			await assert.rejects(
 				resumeSubagentSession({ sessionFile, task: "continue" }, {} as never),
 				(error: Error) => {
-					assert.match(error.message, /verified fan-out run that is finalized/);
 					assert.match(error.message, /cannot be resumed/);
-					assert.match(error.message, new RegExp(runDir.replaceAll("/", "\\/")));
+					assert.match(error.message, /worktree was removed after selection/);
+					assert.match(error.message, /Start a new launch/);
 					return true;
 				},
 			);

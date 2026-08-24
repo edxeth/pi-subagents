@@ -97,17 +97,17 @@ describe("llm-as-a-verifier field split (candidates/model/criteria)", () => {
 
 	it("renders the resolved candidate count in the roster line", () => {
 		writeRosterAgent("llm-as-a-verifier: true\nllm-as-a-verifier-candidates: 5");
-		assert.match(rosterTesterBlock(), /verified-fan-out: true \(5 candidates\)/);
+		assert.match(rosterTesterBlock(), /llm-as-a-verifier: true \(5 attempts\)/);
 
 		writeRosterAgent("llm-as-a-verifier: true");
-		assert.match(rosterTesterBlock(), /verified-fan-out: true \(3 candidates\)/);
+		assert.match(rosterTesterBlock(), /llm-as-a-verifier: true \(3 attempts\)/);
 
 		process.env[VERIFIER_CANDIDATES_ENV_VAR] = "4";
-		assert.match(rosterTesterBlock(), /verified-fan-out: true \(4 candidates\)/);
+		assert.match(rosterTesterBlock(), /llm-as-a-verifier: true \(4 attempts\)/);
 
 		process.env[VERIFIER_CANDIDATES_ENV_VAR] = "1";
 		const block = rosterTesterBlock();
-		assert.match(block, /verified-fan-out: true \(/);
+		assert.match(block, /llm-as-a-verifier: true \(/);
 		assert.match(block, new RegExp(VERIFIER_CANDIDATES_ENV_VAR));
 	});
 });

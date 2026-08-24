@@ -485,7 +485,7 @@ export class SubagentWidgetManager {
 		const header =
 			theme.fg("dim", connector) +
 			` ${theme.fg("accent", spinner)} ${theme.bold(agent.name)} ${renderAgentBadge(theme, agent)}` +
-			` ${theme.fg("dim", "·")} ${theme.fg("dim", `${display.candidateCount} candidates · ${phase}`)}`;
+			` ${theme.fg("dim", "·")} ${theme.fg("dim", `${display.candidateCount} attempts · ${phase}`)}`;
 		const lines = [header];
 
 		// The group shares the widget budget with the other visible agents.
@@ -505,7 +505,7 @@ export class SubagentWidgetManager {
 			if (toolUses > 0) detail.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
 			if (stats.contextLabel) detail.push(stats.contextLabel);
 			rows.push({
-				label: `candidate ${candidate.index}`,
+				label: `attempt ${candidate.index}`,
 				detail,
 				dim: candidate.settled,
 			});
@@ -528,7 +528,7 @@ export class SubagentWidgetManager {
 		}
 		const hiddenRows = rows.length - visibleRows.length;
 		if (hiddenRows > 0) {
-			const noun = hiddenRows === 1 ? "candidate" : "candidates";
+			const noun = hiddenRows === 1 ? "attempt" : "attempts";
 			lines.push(theme.fg("muted", `${childConnector}  ... (+${hiddenRows} more ${noun})`));
 		}
 		return { lines, truncated: hiddenRows > 0 };

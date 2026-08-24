@@ -172,6 +172,10 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `report-context-usage` | `true` | Add the child's final context use to the result that the parent receives. |
 | `timeout` | unset | Whole seconds for the whole run. Pi stops the child at this limit. Omit for no limit. |
 | `idle-timeout` | unset | Whole seconds without output from the child. Pi stops the child at this limit. Omit for no limit. |
+| `llm-as-a-verifier` | `false` | `true` turns every launch into a best-of-N run: several attempts in isolated git worktrees, an LLM verifier picks the best one, the parent gets one result. `true`/`false` only; any other value (including an integer) fails agent loading. See [LLM-as-a-verifier](#llm-as-a-verifier). |
+| `llm-as-a-verifier-candidates` | `3` | Number of attempts per launch. Integer `>= 2`; the upper bound is the spawn-width ceiling (16). |
+| `llm-as-a-verifier-model` | none — **required**: the launch fails and the agent is told to ask you until this field or a `verifiers/default.md` profile exists | Verifier profile name (`fast` → `verifiers/fast.md`) or a direct `provider/model[:thinking]` ref. Must be a logprob-capable backend. |
+| `llm-as-a-verifier-criteria` | `generic` | What the verifier judges by: a criteria file name (resolved like an agent name: `fix-focus` → `agents/criteria/fix-focus.md`, project over global), a built-in rubric (`generic`, `code-change`, `research`), or a path resolved against the launch cwd. |
 | `timeout-warn-threshold` | `false` | Reserve the remainder of the first threatened limit for reporting. At this percentage (`1%`–`99%`), the parent interrupts the active child and restarts the same session in report-only mode. `true` means `80%`. Decimals round down. Any other value turns the policy off. |
 | `on-timeout` | `report` | What the parent can do after a limit stops the child. `report` keeps `subagent_resume` available, and the new run gets the same limits. `block-resume` refuses the resume. Any other value fails to load. |
 | `spawning` | `false` | Let this child launch subagents of its own. `true` lets it launch any agent. A comma-separated list of agent names (for example `spawning: researcher, reviewer`) lets it launch only those agents. |
@@ -430,9 +434,9 @@ allowed-models: openai/gpt-5.5:low, nahcrof/glm-5.1:off, anthropic/claude-opus-4
 
 `model` is the default and is always allowed. `allowed-models` lists the other models Pi may use for this agent, so you do not need to repeat `model`. The `:thinking` suffix is optional: `provider/model:low` allows only that thinking level, while `provider/model` allows the model with whatever thinking level Pi resolves. If `allow-model-override: false`, Pi ignores launch-time and resume-time model choices as usual.
 
-## Verified fan-out (`llm-as-a-verifier`)
+## LLM-as-a-verifier
 
-Marking an agent definition with `llm-as-a-verifier: true` turns every launch of that definition into a best-of-N run: N fresh candidate sessions attempt the identical task, an LLM verifier ranks their transcripts, and the parent receives the winning candidate's report as one logical child result — not N results.
+This implements the [LLM-as-a-Verifier](https://github.com/llm-as-a-verifier/llm-as-a-verifier) technique ([paper](https://arxiv.org/abs/2607.05391), [Python library](https://pypi.org/project/llm-verifier/)): instead of one attempt at a hard task, the agent runs several attempts in parallel and a second, cheaper LLM picks the best one.
 
 ```yaml
 ---
@@ -444,54 +448,70 @@ llm-as-a-verifier-criteria: code-change
 ---
 ```
 
-| Field | Default | Meaning |
+### What happens on a launch
+
+1. Pi checks that the source tree is a clean Git repository, then gives every attempt its own [git worktree](https://git-scm.com/docs/git-worktree) — a private copy of the repo, isolating ordinary repo-relative file changes between attempts. It is not a sandbox: absolute paths outside the repo and external resources (network, databases, services) stay shared. All attempts get the identical task.
+2. When they finish, the verifier LLM reads what each attempt did and scores the attempts against a rubric. It needs at least two different results; if the attempts all produced the same thing, or the verifier cannot tell them apart, the run fails and nothing is applied to your tree.
+3. You get one result: the winner's report plus a short footer (winner, rubric, verifier model, token use, artifacts path). If the winner changed code, the change is applied to your working tree, staged but not committed.
+
+A run keeps going if you close or reload the parent session; the next Pi session in the project picks up the result. To stop a run early, kill the child with `subagent_kill`.
+
+Verifier cost is `(N + k(N-k) + C(k,2)) × |criteria| × n_evaluations` calls (N=3, k=2 pivots, 3 criteria, 4 evaluations = 72 calls). There is no live per-step scoring in this release.
+
+### The verifier model
+
+You choose the verifier up front — nothing is guessed. With no `llm-as-a-verifier-model` and no `verifiers/default.md`, the launch fails immediately — the agent is told to ask you rather than invent or edit setup files.
+
+- **`llm-as-a-verifier-model: provider/model[:thinking]`** — a direct, binding choice. The verifier calls that provider's endpoint.
+- **`llm-as-a-verifier-model: fast`** — a bare value names a profile file, `verifiers/fast.md` (project `.pi/agents/verifiers/` over global `~/.pi/agent/agents/verifiers/`).
+- **No field** — the `verifiers/default.md` profile applies, if you created one.
+
+A profile file holds `model`, optional `thinking`, and an optional `env` block:
+
+```yaml
+# .pi/agents/verifiers/lab.md
+---
+model: qwen3-32b:high
+env: |
+  OPENAI_BASE_URL=http://10.0.0.5:8000/v1
+  OPENAI_API_KEY=whatever-the-lab-uses
+---
+```
+
+#### Backends the verifier understands
+
+The upstream library speaks exactly one protocol — OpenAI Chat Completions with `logprobs` — and recognizes three credential "doors":
+
+| Door (env vars) | Verifier calls | Use it for |
 | --- | --- | --- |
-| `llm-as-a-verifier` | `false` | `true`/`false` only. Any other value (including an integer) fails agent loading. |
-| `llm-as-a-verifier-candidates` | `3` | Integer `>= 2`; the upper bound is the spawn-width ceiling (16). May also come from `PI_SUBAGENT_LLM_VERIFIER_CANDIDATES`. |
-| `llm-as-a-verifier-model` | verifier profile | `provider/model[:thinking]` verifier override for this agent. |
-| `llm-as-a-verifier-criteria` | `generic` | Built-in rubric name (`generic`, `code-change`, `research`) or a path, resolved against the launch cwd. |
+| `OPENAI_BASE_URL` (+ `OPENAI_API_KEY` if the endpoint needs one) | the URL you set | any OpenAI-compatible endpoint: OpenAI, DeepSeek's compatible API, or your own server (vLLM, SGLang, llama.cpp) for private inference — keyless local servers may omit the key |
+| `DEEPSEEK_API_KEY` | `api.deepseek.com` (fixed) | DeepSeek's official API |
+| `VERTEX_API_KEY` | Google Vertex (fixed) | Gemini — the plain Gemini API has no logprobs, Vertex does |
 
-Model and criteria are independent: setting one never suppresses the other. The candidate count consumes N spawn slots, reserved atomically before any worktree or verifier spend.
+Anthropic's Messages API and other non-OpenAI formats cannot be verifiers — the library has no client for them. Most proxies and aggregators strip logprobs.
 
-### Mixing with ordinary agents
+#### Precedence (deterministic, no ordering surprises)
 
-A verified agent mixes with ordinary agents in the same session. Each launch is independent, and one batch call can hold both kinds. To the parent, a verified launch is one ordinary child:
+For the provider/model you chose, the door is picked in this order — the first match wins and nothing else is consulted:
 
-- `wait`, `steer`, batch calls, and `subagent_kill` behave the same as for any background child. `subagent_kill` cancels the whole run.
-- A sync launch blocks the tool call until the run ends. An async launch returns `started`, and one result arrives later.
-- Candidates are always headless background workers. Even an interactive or spawning definition runs its candidates background, auto-exit, and non-spawning.
-- The running-children widget shows one line for the whole run. Candidates and the verifier never get their own panes or widget rows.
+1. the profile's own `env` block (a file you wrote beats your shell; two different doors in one profile = error)
+2. the matching provider-specific export (`DEEPSEEK_API_KEY` for deepseek, `VERTEX_API_KEY` for gemini)
+3. the provider's entry in Pi's own config — `models.json`, then `models-store.json` (what `/login` wrote), key from there or `auth.json`
+4. `OPENAI_BASE_URL`/`OPENAI_API_KEY` exports — only for providers Pi does not know (your own servers)
 
-Parallel Pi sessions in one project are safe. Each result is delivered exactly once: sessions claim it through a lock file in the run directory, and the loser sees only a note that another session already delivered it. Spawn slots are counted per session, so two sessions can oversubscribe the machine — worktree isolation still holds, but keep the total candidate count within what the machine can run.
+Anything else — a named provider with no resolvable endpoint, unrelated exports — fails the launch with an error naming exactly what to set. The verifier process never sees shell values for these four variables unless the resolver chose them.
 
-### What a run does
+#### Logprobs are verified, not assumed
 
-1. Pre-flight fails closed before any spend: unresolvable criteria, an invalid verifier profile, or a non-Git or dirty source tree aborts the launch.
-2. A capability probe verifies the verifier backend returns usable A–T score-token logprobs and that an obviously-good trace beats an obviously-bad one. Missing credentials fail here too — the bridge surfaces the library's own guidance naming the env var it wants — and a logprob-less proxy fails identically, all before any candidate is launched.
-3. N candidates spawn in isolated git worktrees — real worktrees created as siblings of your repo (`<repo>-vf-<runid>-w<i>`) at the recorded clean base — with byte-identical task prompts (`task-expansion: shell` is expanded once and frozen). Candidates are normalized to background, auto-exit, non-spawning sessions.
-4. When all candidates settle, each transcript is flattened into a trace, exact duplicates collapse, and the verifier ranks the distinct traces with logprob expectation (`llm-verifier` in a private pinned venv; `n_evaluations=4`, `pivots=2`, `seed=0`, `on_error="raise"`). At least two distinct completed candidates are required, otherwise the run fails and nothing is applied. A flat/degenerate score distribution halts the run — a winner is never fabricated.
-5. For mutating agents, the winner's snapshot is applied to your worktree via `git cherry-pick --no-commit` only while the source still exactly matches the recorded base, followed by `git diff --check` and an exact tree-equality check. Any drift, conflict, or mismatch resets the transaction and applies nothing; the winner stays recoverable on its internal branch.
-6. The parent receives the winner's report plus a compact verification footer: N, winner id, distinct count, criteria ids, score, verifier model, token usage, artifact path, and the exact review (`git diff --staged`) and revert (`git reset --hard <base>`) commands.
-
-Verifier cost is `(N + k(N-k) + C(k,2)) x |criteria| x n_evaluations` calls (N=3, k=2 pivots, 3 criteria, 4 evaluations = 72 calls) — there is no live per-step scoring in this release.
-
-### Verifier model requirements
-
-The verifier is a scoring profile, not an agent. Profiles live at `.pi/agents/verifiers/<name>.md` (project overrides global by name); a bundled default ships `deepseek-v4-flash` with credentials taken from the launching environment. A profile accepts only `model`, `thinking`, and an `env` block — it is never launched as a child session.
-
-The backend must expose token-level logprobs for the scoring tokens. DeepSeek's official API (`deepseek-v4-flash`) is the tested default and needs `DEEPSEEK_API_KEY`; CLIProxyAPI/Codex-subscription and aggregator front-ends that strip logprobs fail the capability probe on purpose. Set `llm-as-a-verifier-model: provider/model[:thinking]` on an agent to use a different logprob-capable backend.
+Before anything is paid for, Pi sends one small request to the resolved backend and checks it actually returns usable logprobs. Pick a provider without them (an aggregator, a misconfigured proxy, a non-OpenAI format) and the launch stops there, in one cheap request, with that error.
 
 ### Criteria
 
-Three rubrics ship with the extension (`generic`, `code-change`, `research`), each with narrow criteria plus explicit ignore clauses and the upstream ground-truth note: do not trust the agent's self-assessment. A definition's `llm-as-a-verifier-criteria` value (built-in name or path, resolved to an absolute file at launch) takes precedence over the packaged `generic` fallback.
+`llm-as-a-verifier-criteria` picks what the verifier judges by. A bare name resolves to a criteria file, exactly like verifier profiles: `.pi/agents/criteria/<name>.md` (project) over `~/.pi/agent/agents/criteria/<name>.md` (global) — a project file can even shadow a built-in. The built-in rubrics are `generic` (default), `code-change`, and `research`. A value containing `/` or a file extension is a path, resolved against the launch cwd. Preview any file without an API key: `python -m llm_verifier <file>`.
 
-Criteria text goes into the verifier's scoring prompt only — candidates never see it. Criteria are stable per agent type, not regenerated per task; the per-field override is an escape hatch for unusual task shapes, not the norm. The scoring prompt template itself is fixed by the library and is not user-editable. You can preview any criteria file without an API key through the managed venv (`python -m llm_verifier <file>`).
+### Safety
 
-### Worktrees and the concurrent-safety attestation
-
-Setting `llm-as-a-verifier` on a definition attests that the agent is safe to run N times concurrently against the same task. Worktrees isolate files — nothing more. Each candidate gets `COMPOSE_PROJECT_NAME` and a distinct `PORT_OFFSET`, but fixed host ports, `container_name`, shared volumes, deploys, and migrations remain the definition author's responsibility; the extension does not sandbox them.
-
-Worktree directories are removed after a successful selection+apply; each candidate's snapshot stays on an internal branch (`vf/<runid>/w<i>`) for audit and runner-up recovery. Runs live under the artifact root and survive closing or reloading the parent session; finished candidate sessions are never resumable (see [Resuming child sessions](#resuming-child-sessions)). `parent-close-policy` is ignored for verified fan-out agents: candidates belong to the detached supervisor, not the parent process, and the run deliberately outlives the session that started it. The next Pi session opened in the project picks up any undelivered result exactly once. To stop a run, kill the child (`subagent_kill`) instead of closing the parent.
+Worktrees isolate files, nothing else. Anything the attempts share beyond files — ports, databases, deploys, migrations — is the agent author's responsibility. Only mark an agent `llm-as-a-verifier: true` when several copies of it can run at once.
 
 ## Ambient awareness
 
@@ -623,7 +643,7 @@ Use `caller_ping` when the child needs the parent. The child sends a message up,
 
 Resume tries to preserve the original launch shape: mode, model, prompt style, cwd, tools, extensions, and lifecycle settings. A resumed child should continue as the same child, even if the agent file changed after the first launch.
 
-One exception: candidate sessions of a `llm-as-a-verifier` fan-out are never resumable. Their run is finalized after selection and their isolated worktree workspace is removed, so `subagent_resume` refuses with a dedicated error; start a fresh launch of the agent instead.
+One exception: attempt sessions of an `llm-as-a-verifier` launch are never resumable — their worktree copy is removed after the winner is picked. `subagent_resume` refuses with a dedicated error; launch the agent again instead.
 
 ## Child output
 
@@ -898,8 +918,8 @@ Runtime internals you may see while debugging:
 - `PI_SUBAGENT_SESSION`
 - `PI_SUBAGENT_SURFACE`
 - `PI_SUBAGENT_AUTO_EXIT`
-- `PI_SUBAGENT_LLM_VERIFIER_VENV` (verified fan-out: pre-provisioned `llm-verifier` venv root)
-- `PI_SUBAGENT_SUPERVISOR_RUNTIME` (verified fan-out: command that runs the detached supervisor `.ts` entry)
+- `PI_SUBAGENT_LLM_VERIFIER_VENV` (llm-as-a-verifier: pre-provisioned `llm-verifier` venv root)
+- `PI_SUBAGENT_SUPERVISOR_RUNTIME` (llm-as-a-verifier: command that runs the detached supervisor `.ts` entry)
 
 Live test knobs:
 
@@ -907,7 +927,7 @@ Live test knobs:
 - `PI_SUBAGENT_LIVE_MODEL`
 - `PI_SUBAGENT_KEEP_E2E_TMP`
 - `PI_SUBAGENT_LIVE_LOCK_PATH`
-- `PI_SUBAGENT_ALLOW_VERIFIED_E2E` (verified fan-out live e2e; also needs `DEEPSEEK_API_KEY`)
+- `PI_SUBAGENT_ALLOW_VERIFIED_E2E` (llm-as-a-verifier live e2e; also needs `DEEPSEEK_API_KEY`)
 - `PI_SUBAGENT_PROVIDER_RECOVERY_DELAYS_MS` — override the provider-error recovery backoff windows (comma-separated ms, e.g. `10000,11000,12000`) so a live Pi process can exercise the wait → nudge → kill path without waiting the full 30/60/90s. Values below 10000ms are clamped so recovery does not race Pi's own default auto-retry backoff. Defaults to the production `30000,60000,90000`.
 
 ## Herdr placement
