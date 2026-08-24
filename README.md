@@ -495,8 +495,8 @@ Anthropic's Messages API and other non-OpenAI formats cannot be verifiers — th
 For the provider/model you chose, the door is picked in this order — the first match wins and nothing else is consulted:
 
 1. the profile's own `env` block (a file you wrote beats your shell; two different doors in one profile = error)
-2. the matching provider-specific export (`DEEPSEEK_API_KEY` for deepseek, `VERTEX_API_KEY` for gemini)
-3. the provider's entry in Pi's own config — `models.json`, then `models-store.json` (what `/login` wrote), key from there or `auth.json`
+2. the provider's entry in Pi's own config — `models.json`, then `models-store.json` (what `/login` wrote). A pi-defined endpoint always wins, including a custom deepseek/gemini one; the key comes from your matching provider-specific export if set (`DEEPSEEK_API_KEY`, `VERTEX_API_KEY`), else the config/auth store
+3. the matching provider-specific export alone — the library's fixed official endpoint for deepseek/gemini when pi defines none
 4. `OPENAI_BASE_URL`/`OPENAI_API_KEY` exports — only for providers Pi does not know (your own servers)
 
 Anything else — a named provider with no resolvable endpoint, unrelated exports — fails the launch with an error naming exactly what to set. The verifier process never sees shell values for these four variables unless the resolver chose them.

@@ -186,14 +186,32 @@ describe("verifier model selection (deterministic doors)", () => {
 		assert.equal(resolved.model, "deepseek-v4-flash");
 		assert.equal(resolved.thinking, "high");
 		assert.deepEqual(resolved.env, { OPENAI_BASE_URL: "https://api.deepseek.com", OPENAI_API_KEY: "sk-auth" });
-		// An exported DEEPSEEK key beats the pi config.
+		// An exported DEEPSEEK key beats the pi config KEY: same endpoint,
+		// the user's key, through the generic door.
 		assert.deepEqual(
 			resolveVerifierModel({
 				override: "deepseek/deepseek-v4-flash",
 				baseCwd: roots.baseCwd,
 				env: { DEEPSEEK_API_KEY: "sk-mine" },
 			}).env,
-			{ DEEPSEEK_API_KEY: "sk-mine" },
+			{ OPENAI_BASE_URL: "https://api.deepseek.com", OPENAI_API_KEY: "sk-mine" },
+		);
+	});
+
+	it("a pi-defined endpoint beats the provider-specific export; the export supplies the key", () => {
+		// A custom deepseek endpoint defined in pi's config must win over the
+		// shell DEEPSEEK_API_KEY: the export is a KEY source, never an endpoint
+		// override that would silently route back to the official API.
+		const roots = withProfileDirs({
+			modelsJson: { providers: { deepseek: { baseUrl: "https://my-deepseek-proxy.example/v1" } } },
+		});
+		assert.deepEqual(
+			resolveVerifierModel({
+				override: "deepseek/deepseek-v4-flash",
+				baseCwd: roots.baseCwd,
+				env: { DEEPSEEK_API_KEY: "sk-mine" },
+			}).env,
+			{ OPENAI_BASE_URL: "https://my-deepseek-proxy.example/v1", OPENAI_API_KEY: "sk-mine" },
 		);
 	});
 

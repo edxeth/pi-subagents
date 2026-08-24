@@ -273,12 +273,16 @@ function selectDoor(options: {
 		);
 	}
 	const specific = provider === "deepseek" ? "DEEPSEEK_API_KEY" : provider === "gemini" ? "VERTEX_API_KEY" : null;
-	if (specific && processEnv[specific]) return { [specific]: processEnv[specific] as string };
+	// A pi-defined endpoint (custom deepseek/gemini proxy included) outranks the
+	// provider-specific export: the export is a KEY source, never an endpoint
+	// override that would silently route back to the official API.
 	const ep = piEndpointFor(provider, modelId);
 	if (ep) {
-		const key = ep.apiKey ?? authStoreKey(provider);
+		const exported = specific ? (processEnv[specific] as string | undefined) : undefined;
+		const key = exported ?? ep.apiKey ?? authStoreKey(provider);
 		return { OPENAI_BASE_URL: ep.baseUrl, ...(key ? { OPENAI_API_KEY: key } : {}) };
 	}
+	if (specific && processEnv[specific]) return { [specific]: processEnv[specific] as string };
 	if (!specific && processEnv.OPENAI_BASE_URL) {
 		return {
 			OPENAI_BASE_URL: processEnv.OPENAI_BASE_URL,
