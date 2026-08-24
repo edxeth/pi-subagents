@@ -174,8 +174,8 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `idle-timeout` | unset | Whole seconds without output from the child. Pi stops the child at this limit. Omit for no limit. |
 | `llm-as-a-verifier` | `false` | `true` turns every launch into a best-of-N run: several attempts in isolated git worktrees, an LLM verifier picks the best one, the parent gets one result. `true`/`false` only; any other value (including an integer) fails agent loading. See [LLM-as-a-verifier](#llm-as-a-verifier). |
 | `llm-as-a-verifier-candidates` | `3` | Number of attempts per launch. Integer `>= 2`; the upper bound is the spawn-width ceiling (16). |
-| `llm-as-a-verifier-model` | none — **required**: the launch fails and the agent is told to ask you until this field or a `verifiers/default.md` profile exists | Verifier profile name (`fast` → `verifiers/fast.md`) or a direct `provider/model[:thinking]` ref. Must be a logprob-capable backend. |
-| `llm-as-a-verifier-criteria` | `generic` | What the verifier judges by: a criteria file name (resolved like an agent name: `fix-focus` → `agents/criteria/fix-focus.md`, project over global), a built-in rubric (`generic`, `code-change`, `research`), or a path resolved against the launch cwd. |
+| `llm-as-a-verifier-model` | none — **required** | The verifier model: `provider/model[:thinking]` (example: `deepseek/deepseek-v4-flash:high`) or a profile name (example: `fast` loads `verifiers/fast.md`). The backend must return API logprobs. |
+| `llm-as-a-verifier-criteria` | `generic` | What the verifier judges by: a built-in name (`generic`, `code-change`, `research`), your own criteria file by name (`fix-focus` loads `.pi/agents/criteria/fix-focus.md`), or a path. |
 | `timeout-warn-threshold` | `false` | Reserve the remainder of the first threatened limit for reporting. At this percentage (`1%`–`99%`), the parent interrupts the active child and restarts the same session in report-only mode. `true` means `80%`. Decimals round down. Any other value turns the policy off. |
 | `on-timeout` | `report` | What the parent can do after a limit stops the child. `report` keeps `subagent_resume` available, and the new run gets the same limits. `block-resume` refuses the resume. Any other value fails to load. |
 | `spawning` | `false` | Let this child launch subagents of its own. `true` lets it launch any agent. A comma-separated list of agent names (for example `spawning: researcher, reviewer`) lets it launch only those agents. |
@@ -436,7 +436,7 @@ allowed-models: openai/gpt-5.5:low, nahcrof/glm-5.1:off, anthropic/claude-opus-4
 
 ## LLM-as-a-verifier
 
-This implements the [LLM-as-a-Verifier](https://github.com/llm-as-a-verifier/llm-as-a-verifier) technique ([paper](https://arxiv.org/abs/2607.05391), [Python library](https://pypi.org/project/llm-verifier/)): instead of one attempt at a hard task, the agent runs several attempts in parallel and a second, cheaper LLM picks the best one.
+This implements the [LLM-as-a-Verifier](https://github.com/llm-as-a-verifier/llm-as-a-verifier) technique ([paper](https://arxiv.org/abs/2607.05391), [Python library](https://pypi.org/project/llm-verifier/)): the agent runs several attempts at the task in parallel, and a second LLM picks the best one.
 
 ```yaml
 ---
@@ -444,74 +444,65 @@ description: Best-of-N implementation worker
 model: zai/glm-5-turbo:high
 llm-as-a-verifier: true
 llm-as-a-verifier-candidates: 3
+llm-as-a-verifier-model: deepseek/deepseek-v4-flash
 llm-as-a-verifier-criteria: code-change
 ---
 ```
 
 ### What happens on a launch
 
-1. Pi checks that the source tree is a clean Git repository, then gives every attempt its own [git worktree](https://git-scm.com/docs/git-worktree) — a private copy of the repo, isolating ordinary repo-relative file changes between attempts. It is not a sandbox: absolute paths outside the repo and external resources (network, databases, services) stay shared. All attempts get the identical task.
-2. When they finish, the verifier LLM reads what each attempt did and scores the attempts against a rubric. It needs at least two different results; if the attempts all produced the same thing, or the verifier cannot tell them apart, the run fails and nothing is applied to your tree.
-3. You get one result: the winner's report plus a short footer (winner, rubric, verifier model, token use, artifacts path). If the winner changed code, the change is applied to your working tree, staged but not committed.
+1. Pi checks that the source tree is a clean Git repository. Then each attempt gets its own [git worktree](https://git-scm.com/docs/git-worktree). A worktree is a private copy of the repo. It separates the file changes of each attempt. It is not a sandbox: paths outside the repo, the network, and shared services stay shared. All attempts get the same task.
+2. When the attempts finish, the verifier LLM reads what each attempt did. It scores the attempts against the criteria file. At least two attempts must give different results. If all attempts give the same result, or the verifier cannot tell them apart, the run fails. Nothing is applied to your tree.
+3. You get one result: the report of the winning attempt, plus a short footer. If the winner changed code, the change is staged in your working tree. It is not committed. Inspect it with `git diff --staged`. If your tree changed during the run, nothing is applied, and the winner stays on a Git branch that the footer names.
 
-A run keeps going if you close or reload the parent session; the next Pi session in the project picks up the result. To stop a run early, kill the child with `subagent_kill`.
+A run continues if you close or reload the parent session. The next Pi session in the project picks up the result. To stop a run early, kill the child with `subagent_kill`.
 
-Verifier cost is `(N + k(N-k) + C(k,2)) × |criteria| × n_evaluations` calls (N=3, k=2 pivots, 3 criteria, 4 evaluations = 72 calls). There is no live per-step scoring in this release.
+The verifier makes many small API calls: a 3-attempt run with the `code-change` criteria makes about 72 calls. Budget accordingly.
 
 ### The verifier model
 
-You choose the verifier up front — nothing is guessed. With no `llm-as-a-verifier-model` and no `verifiers/default.md`, the launch fails immediately — the agent is told to ask you rather than invent or edit setup files.
+You must set `llm-as-a-verifier-model`. If you do not, the launch fails and the agent asks you what to use. The agent does not pick a model for you and does not edit your files.
 
-- **`llm-as-a-verifier-model: provider/model[:thinking]`** — a direct, binding choice. The verifier calls that provider's endpoint.
-- **`llm-as-a-verifier-model: fast`** — a bare value names a profile file, `verifiers/fast.md` (project `.pi/agents/verifiers/` over global `~/.pi/agent/agents/verifiers/`).
-- **No field** — the `verifiers/default.md` profile applies, if you created one.
+You write one of two forms:
 
-A profile file holds `model`, optional `thinking`, and an optional `env` block:
+- **`llm-as-a-verifier-model: provider/model`** — pick the model directly. Example: `deepseek/deepseek-v4-flash`. Add `:high` for more reasoning, `:low` for less: `deepseek/deepseek-v4-flash:high`.
+- **`llm-as-a-verifier-model: name`** — pick a profile file. Example: `fast` loads `.pi/agents/verifiers/fast.md` from your project, or the same file under your global Pi directory. A profile holds the same things you would write in the field, plus an env block for a custom server:
 
 ```yaml
 # .pi/agents/verifiers/lab.md
 ---
-model: qwen3-32b:high
+model: qwen3-32b
 env: |
   OPENAI_BASE_URL=http://10.0.0.5:8000/v1
   OPENAI_API_KEY=whatever-the-lab-uses
 ---
 ```
 
-#### Backends the verifier understands
+Where the URL and key come from, in order:
 
-The upstream library speaks exactly one protocol — OpenAI Chat Completions with `logprobs` — and recognizes three credential "doors":
+1. The env block of the profile, if you used one.
+2. The provider entry in your Pi config: `models.json`, then `models-store.json` (what `/login` wrote). The key comes from your exported `DEEPSEEK_API_KEY` or `VERTEX_API_KEY` if you have one, else from the Pi config.
+3. Your exported `DEEPSEEK_API_KEY` or `VERTEX_API_KEY` alone. The library then calls the official DeepSeek or Google Vertex endpoint.
+4. Your exported `OPENAI_BASE_URL` (and `OPENAI_API_KEY` if the server needs one). This serves providers that Pi does not know, such as your own vLLM or llama.cpp server.
 
-| Door (env vars) | Verifier calls | Use it for |
-| --- | --- | --- |
-| `OPENAI_BASE_URL` (+ `OPENAI_API_KEY` if the endpoint needs one) | the URL you set | any OpenAI-compatible endpoint: OpenAI, DeepSeek's compatible API, or your own server (vLLM, SGLang, llama.cpp) for private inference — keyless local servers may omit the key |
-| `DEEPSEEK_API_KEY` | `api.deepseek.com` (fixed) | DeepSeek's official API |
-| `VERTEX_API_KEY` | Google Vertex (fixed) | Gemini — the plain Gemini API has no logprobs, Vertex does |
+One rule holds everywhere: a provider named in the field always uses its own URL. A stray `OPENAI_BASE_URL` in your shell never redirects a deepseek or gemini choice. If nothing names a working URL, the launch fails with an error that says what to set.
 
-Anthropic's Messages API and other non-OpenAI formats cannot be verifiers — the library has no client for them. Most proxies and aggregators strip logprobs.
+#### Which backends work
 
-#### Precedence (deterministic, no ordering surprises)
+The library speaks one format: the OpenAI Chat Completions API with `logprobs` (the [OpenAI `logprobs` field](https://platform.openai.com/docs/api-reference/chat/object)). The verifier reads these numbers to score attempts.
 
-For the provider/model you chose, the door is picked in this order — the first match wins and nothing else is consulted:
+- Works: OpenAI, DeepSeek, Google Vertex (Gemini), and any self-hosted OpenAI-compatible server (vLLM, SGLang, llama.cpp).
+- Does not work: Anthropic and other non-OpenAI formats (no library client), and most proxies and aggregators (they strip the logprobs field).
 
-1. the profile's own `env` block (a file you wrote beats your shell; two different doors in one profile = error)
-2. the provider's entry in Pi's own config — `models.json`, then `models-store.json` (what `/login` wrote). A pi-defined endpoint always wins, including a custom deepseek/gemini one; the key comes from your matching provider-specific export if set (`DEEPSEEK_API_KEY`, `VERTEX_API_KEY`), else the config/auth store
-3. the matching provider-specific export alone — the library's fixed official endpoint for deepseek/gemini when pi defines none
-4. `OPENAI_BASE_URL`/`OPENAI_API_KEY` exports — only for providers Pi does not know (your own servers)
-
-Anything else — a named provider with no resolvable endpoint, unrelated exports — fails the launch with an error naming exactly what to set. The verifier process never sees shell values for these four variables unless the resolver chose them.
-
-#### Logprobs are verified, not assumed
-
-Before anything is paid for, Pi sends one small request to the resolved backend and checks it actually returns usable logprobs. Pick a provider without them (an aggregator, a misconfigured proxy, a non-OpenAI format) and the launch stops there, in one cheap request, with that error.
+Before anything is paid for, Pi sends one small request to the backend you chose. If the backend does not return usable logprobs, the launch stops there. That one request is the only cost of a wrong pick.
 
 ### Criteria
 
-`llm-as-a-verifier-criteria` picks what the verifier judges by. A bare name resolves to a criteria file, exactly like verifier profiles: `.pi/agents/criteria/<name>.md` (project) over `~/.pi/agent/agents/criteria/<name>.md` (global) — a project file can even shadow a built-in. The built-in rubrics are `generic` (default), `code-change`, and `research`. A value containing `/` or a file extension is a path, resolved against the launch cwd. Preview any file without an API key: `python -m llm_verifier <file>`.
+`llm-as-a-verifier-criteria` sets what the verifier judges by. Three files ship with the extension: `generic` (the default), `code-change`, and `research`.
 
-### Safety
-
-Worktrees isolate files, nothing else. Anything the attempts share beyond files — ports, databases, deploys, migrations — is the agent author's responsibility. Only mark an agent `llm-as-a-verifier: true` when several copies of it can run at once.
+- **Built-in name** — `generic`, `code-change`, or `research`.
+- **Your own file** — a bare name loads `.pi/agents/criteria/<name>.md` from your project, or the same file under your global Pi directory. A project file with a built-in name replaces that built-in.
+- **Path** — a value with a `/` in it is a path, relative to the launch directory.
 
 ## Ambient awareness
 
