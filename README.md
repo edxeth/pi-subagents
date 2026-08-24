@@ -172,9 +172,9 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `report-context-usage` | `true` | Add the child's final context use to the result that the parent receives. |
 | `timeout` | unset | Whole seconds for the whole run. Pi stops the child at this limit. Omit for no limit. |
 | `idle-timeout` | unset | Whole seconds without output from the child. Pi stops the child at this limit. Omit for no limit. |
-| `llm-as-a-verifier` | `false` | `true` turns every launch into a best-of-N run: several attempts in isolated git worktrees, an LLM verifier picks the best one, the parent gets one result. `true`/`false` only; any other value (including an integer) fails agent loading. See [LLM-as-a-verifier](#llm-as-a-verifier). |
+| `llm-as-a-verifier` | `false` | `true` turns every launch into a best-of-N run: several attempts in isolated git worktrees, an LLM verifier picks the best one, the parent gets one result. See [LLM-as-a-verifier](#llm-as-a-verifier). |
 | `llm-as-a-verifier-candidates` | `3` | Number of attempts per launch. Integer `>= 2`; the upper bound is the spawn-width ceiling (16). |
-| `llm-as-a-verifier-model` | none — **required** | The verifier model: `provider/model[:thinking]` (example: `deepseek/deepseek-v4-flash:high`) or a profile name (example: `fast` loads `verifiers/fast.md`). The backend must return API logprobs. |
+| `llm-as-a-verifier-model` | none — **required** | The verifier model: `provider/model[:thinking]` (example: `deepseek/deepseek-v4-flash:high`) or a profile name (example: `fast` loads `.pi/agents/verifiers/fast.md`). The backend must return API logprobs. |
 | `llm-as-a-verifier-criteria` | `generic` | What the verifier judges by: a built-in name (`generic`, `code-change`, `research`), your own criteria file by name (`fix-focus` loads `.pi/agents/criteria/fix-focus.md`), or a path. |
 | `timeout-warn-threshold` | `false` | Reserve the remainder of the first threatened limit for reporting. At this percentage (`1%`–`99%`), the parent interrupts the active child and restarts the same session in report-only mode. `true` means `80%`. Decimals round down. Any other value turns the policy off. |
 | `on-timeout` | `report` | What the parent can do after a limit stops the child. `report` keeps `subagent_resume` available, and the new run gets the same limits. `block-resume` refuses the resume. Any other value fails to load. |
@@ -455,7 +455,7 @@ llm-as-a-verifier-criteria: code-change
 2. When the attempts finish, the verifier LLM reads what each attempt did. It scores the attempts against the criteria file. At least two attempts must give different results. If all attempts give the same result, or the verifier cannot tell them apart, the run fails. Nothing is applied to your tree.
 3. You get one result: the report of the winning attempt, plus a short footer. If the winner changed code, the change is staged in your working tree. It is not committed. Inspect it with `git diff --staged`. If your tree changed during the run, nothing is applied, and the winner stays on a Git branch that the footer names.
 
-A run continues if you close or reload the parent session. The next Pi session in the project picks up the result. To stop a run early, kill the child with `subagent_kill`.
+A run continues if you close or reload the parent session. The next Pi session you start in the same project picks up the result. To stop a run early, kill the child with `subagent_kill`.
 
 The verifier makes many small API calls: a 3-attempt run with the `code-change` criteria makes about 72 calls. Budget accordingly.
 
@@ -466,7 +466,7 @@ You must set `llm-as-a-verifier-model`. If you do not, the launch fails and the 
 You write one of two forms:
 
 - **`llm-as-a-verifier-model: provider/model`** — pick the model directly. Example: `deepseek/deepseek-v4-flash`. Add `:high` for more reasoning, `:low` for less: `deepseek/deepseek-v4-flash:high`.
-- **`llm-as-a-verifier-model: name`** — pick a profile file. Example: `fast` loads `.pi/agents/verifiers/fast.md` from your project, or the same file under your global Pi directory. A profile holds the same things you would write in the field, plus an env block for a custom server:
+- **`llm-as-a-verifier-model: name`** — pick a profile file. Example: `fast` loads `.pi/agents/verifiers/fast.md` from your project, or the same file under your global Pi directory. A profile holds the same things you would write in the field, plus an env block for a server you run yourself (vLLM, llama.cpp):
 
 ```yaml
 # .pi/agents/verifiers/lab.md
@@ -481,9 +481,9 @@ env: |
 Where the URL and key come from, in order:
 
 1. The env block of the profile, if you used one.
-2. The provider entry in your Pi config: `models.json`, then `models-store.json` (what `/login` wrote). The key comes from your exported `DEEPSEEK_API_KEY` or `VERTEX_API_KEY` if you have one, else from the Pi config.
+2. The provider entry in your Pi config: `models.json`, then `models-store.json` (what Pi's `/login` wrote).
 3. Your exported `DEEPSEEK_API_KEY` or `VERTEX_API_KEY` alone. The library then calls the official DeepSeek or Google Vertex endpoint.
-4. Your exported `OPENAI_BASE_URL` (and `OPENAI_API_KEY` if the server needs one). This serves providers that Pi does not know, such as your own vLLM or llama.cpp server.
+4. Your exported `OPENAI_BASE_URL` (and `OPENAI_API_KEY` if the server needs one). This serves providers that Pi does not know, such as your own vLLM or llama.cpp server for example.
 
 One rule holds everywhere: a provider named in the field always uses its own URL. A stray `OPENAI_BASE_URL` in your shell never redirects a deepseek or gemini choice. If nothing names a working URL, the launch fails with an error that says what to set.
 
@@ -498,9 +498,8 @@ Before anything is paid for, Pi sends one small request to the backend you chose
 
 ### Criteria
 
-`llm-as-a-verifier-criteria` sets what the verifier judges by. Three files ship with the extension: `generic` (the default), `code-change`, and `research`.
+`llm-as-a-verifier-criteria` sets what the verifier judges by. Three built-in templates ship with the extension: `generic` (the default), `code-change`, and `research`.
 
-- **Built-in name** — `generic`, `code-change`, or `research`.
 - **Your own file** — a bare name loads `.pi/agents/criteria/<name>.md` from your project, or the same file under your global Pi directory. A project file with a built-in name replaces that built-in.
 - **Path** — a value with a `/` in it is a path, relative to the launch directory.
 
