@@ -11,6 +11,7 @@ import "./vf/flatten.test.ts";
 import "./vf/criteria.test.ts";
 import "./vf/verifier-bridge.test.ts";
 import "./vf/verified-run.test.ts";
+import "./vf/delivery-protocol.test.ts";
 import "./vf/capability-gate.test.ts";
 import "./vf/apply-gate.test.ts";
 import "./tools/tool-policy.test.ts";

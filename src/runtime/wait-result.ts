@@ -89,6 +89,7 @@ function getSubagentWaitSuccessResult(cached: CompletedSubagentResult) {
 			contextWindow: cached.contextWindow,
 			summary: cached.summary,
 			sessionFile: cached.sessionFile,
+			...(cached.deliveryId ? { deliveryId: cached.deliveryId } : {}),
 			...getTimeoutResultDetails(cached),
 			...(cached.timeoutWrapUp ? { timeoutWrapUp: cached.timeoutWrapUp } : {}),
 			...(cached.errorMessage ? { errorMessage: cached.errorMessage } : {}),

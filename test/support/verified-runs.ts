@@ -110,6 +110,9 @@ export function buildSupervisedRun(
 		baseDir?: string;
 		/** Merged over the default verifier block (mock config, model, criteria). */
 		verifier?: Partial<VerifiedRunManifest["request"]["verifier"]>;
+		/** Recipient identity frozen at launch; defaults keep legacy behavior. */
+		parentSessionId?: string | null;
+		authorizedRecipients?: string[];
 	} = {},
 ): { runDir: string; runId: string } {
 	const baseDir = options.baseDir ?? createTestDir();
@@ -157,7 +160,8 @@ export function buildSupervisedRun(
 			PATH: process.env.PATH ?? "",
 			HOME: process.env.HOME ?? "",
 		},
-		parentSessionId: null,
+		parentSessionId: options.parentSessionId ?? null,
+		authorizedRecipients: options.authorizedRecipients,
 		createdAt: new Date().toISOString(),
 	};
 	const started = startVerifiedRun({ baseDir, runId, request });

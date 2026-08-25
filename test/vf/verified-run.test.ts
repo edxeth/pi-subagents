@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -13,9 +14,18 @@ import {
 import { launchVerifiedFanOut, VerifiedLaunchError, verifiedRunsBaseDir } from "../../src/vf/run/launch.ts";
 import { resolveSubagentCwd } from "../../src/launch/runtime-paths.ts";
 import { getPackagedCriteriaDir } from "../../src/vf/criteria.ts";
-import { readVerifiedRunManifest, verifiedRunFilePaths } from "../../src/vf/run/types.ts";
+import {
+	acquireVerifiedRunDeliveryLease,
+	readVerifiedRunManifest,
+	verifiedRunFilePaths,
+	verifiedRunResultGeneration,
+	writeVerifiedRunDeliveryReceipt,
+	writeVerifiedRunManifest,
+} from "../../src/vf/run/types.ts";
+import { resolveAuthorizedRecipients } from "../../src/vf/run/launch.ts";
 import { getLiveSlotCount, initializeSpawnWidthForSession, resetSpawnWidthForTest } from "../../src/runtime/spawn-width.ts";
-import { resetSubagentStateForTest, runningSubagents } from "../../src/runtime/wiring.ts";
+import { resetSubagentStateForTest, runningSubagents, stopRunningSubagent } from "../../src/runtime/wiring.ts";
+import { moduleAbortController } from "../../src/runtime/state.ts";
 import { assert, createTestDir, sleep } from "../support/index.ts";
 import {
 	buildSupervisedRun,
@@ -254,7 +264,18 @@ describe("verified fan-out orchestrator (one logical child)", () => {
 		assert.equal(getLiveSlotCount(), 0, "all N slots released at completion");
 		const finalManifest = readVerifiedRunManifest(runDir);
 		assert.equal(finalManifest.state, "completed");
-		assert.equal(existsSync(verifiedRunFilePaths(runDir).deliveryClaim), true, "delivery claimed exactly once");
+		assert.ok(result.deliveryId, "origin delivery carries a lease deliveryId");
+		assert.equal(result.deliveryId, `${runId}-g1`);
+		// Simulate Pi persisting the steer into the origin session file; the
+		// live watcher then converts the lease into a durable receipt.
+		writeFileSync(join(parent, "parent-session.jsonl"), `{"deliveryId":"${result.deliveryId}"}\n`);
+		let receiptSeen = false;
+		for (let i = 0; i < 60 && !receiptSeen; i += 1) {
+			await sleep(150);
+			receiptSeen = existsSync(verifiedRunFilePaths(runDir).deliveryReceipt);
+		}
+		assert.equal(receiptSeen, true, "receipt written after the deliveryId persisted in the origin session");
+		assert.equal(existsSync(verifiedRunFilePaths(runDir).deliveryClaim), false, "the live path no longer writes bare claims");
 		// Apply gate: worktrees removed, branch retained; the winner tree here
 		// equals the base (candidates wrote no change), so nothing is staged.
 		assert.equal(existsSync(finalManifest.result?.selection?.winnerWorktree ?? ""), false);
@@ -289,6 +310,34 @@ describe("verified fan-out orchestrator (one logical child)", () => {
 		assert.deepEqual(listVerifiedRuns(artifactRoot), [], "no run was started");
 		const siblings = readdirSync(parent).filter((name) => name.includes("-vf-"));
 		assert.deepEqual(siblings, [], "no worktrees created");
+		rmSync(artifactRoot, { recursive: true, force: true });
+	});
+
+	it("freezes authorized recipients (origin plus ancestors) into the launch request", async () => {
+		const { repo, parent, ctx } = setupProject(
+			"description: vf test agent\nllm-as-a-verifier: true\n",
+		);
+		// Lineage on disk: a top-level ancestor, and the launching session as
+		// its child (header parentSession points at the ancestor's file).
+		const ancestorFile = join(parent, "ancestor-session.jsonl");
+		const childFile = join(parent, "parent-session.jsonl"); // ctx points here
+		const header = (id: string, extra: Record<string, string> = {}) =>
+			`${JSON.stringify({ type: "session", version: 1, id, timestamp: "2026-08-25T00:00:00Z", cwd: repo, ...extra })}\n`;
+		writeFileSync(ancestorFile, header("session-ancestor"));
+		writeFileSync(childFile, header("session-child", { parentSession: ancestorFile }));
+		// The launching session's id must match its own header.
+		((ctx as { sessionManager: Record<string, unknown> }).sessionManager).getSessionId = () => "session-child";
+
+		const artifactRoot = createTestDir();
+		process.env.PI_ARTIFACT_PROJECT_ROOT = artifactRoot;
+		const { runDir } = await launchVerifiedFanOut(
+			{ name: "vf-run", title: "VF run", task: "freeze recipients", agent: "vf-worker" },
+			loadVfAgent(repo)!,
+			ctx as never,
+		);
+		const manifest = readVerifiedRunManifest(runDir);
+		assert.deepEqual(manifest.request.authorizedRecipients, ["session-child", "session-ancestor"]);
+		await cancelVerifiedRun(runDir, { timeoutMs: RUN_TIMEOUT });
 		rmSync(artifactRoot, { recursive: true, force: true });
 	});
 
@@ -439,63 +488,6 @@ describe("verified fan-out orchestrator (one logical child)", () => {
 		}
 		const result = await running.completionPromise!;
 		assert.equal(result.exitCode, 0);
-		rmSync(artifactRoot, { recursive: true, force: true });
-	});
-});
-
-describe("verified fan-out reattach", () => {
-	function captureSink() {
-		const messages: Array<{ content: string; details: Record<string, unknown> }> = [];
-		return {
-			messages,
-			sink: {
-				sendMessage: (message: { content: string; details?: Record<string, unknown> }) => {
-					messages.push({ content: message.content, details: message.details ?? {} });
-				},
-			},
-		};
-	}
-
-	it("delivers a finished run exactly once to a reattaching parent", async () => {
-		const { repo, fakePi, captureDir, parent } = setupFixture();
-		fixtureRoot = parent;
-		const artifactRoot = createTestDir();
-		process.env.PI_ARTIFACT_PROJECT_ROOT = artifactRoot;
-		const { runDir } = buildSupervisedRun(repo, fakePi, captureDir, [
-			{ marker: "VF-GOOD", change: "good change" },
-			{ marker: "VF-MID", change: "mid change" },
-		], { baseDir: verifiedRunsBaseDir(repo) });
-		await waitForVerifiedRunResult(runDir, { timeoutMs: RUN_TIMEOUT });
-		const { messages, sink } = captureSink();
-		const first = adoptVerifiedRuns(sink as never, repo);
-		assert.equal(first.find((entry) => entry.runDir === runDir)?.action, "delivered");
-		assert.equal(messages.length, 1);
-		assert.match(messages[0].content, /Final report for VF-GOOD/);
-		const second = adoptVerifiedRuns(sink as never, repo);
-		assert.equal(second.find((entry) => entry.runDir === runDir)?.action, "already-delivered");
-		assert.equal(messages.length, 1, "exactly-once delivery via the claim file");
-		rmSync(artifactRoot, { recursive: true, force: true });
-	});
-
-	it("watches a still-running run and steers the late result in (continued child)", async () => {
-		const { repo, fakePi, captureDir, parent } = setupFixture();
-		fixtureRoot = parent;
-		const artifactRoot = createTestDir();
-		process.env.PI_ARTIFACT_PROJECT_ROOT = artifactRoot;
-		const { runDir } = buildSupervisedRun(repo, fakePi, captureDir, [
-			{ marker: "VF-GOOD", beforeMs: 3_000, change: "good change" },
-			{ marker: "VF-MID", beforeMs: 3_000, change: "mid change" },
-		], { baseDir: verifiedRunsBaseDir(repo) });
-		await waitForState(runDir, "running");
-		const { messages, sink } = captureSink();
-		const adopted = adoptVerifiedRuns(sink as never, repo);
-		assert.equal(adopted.find((entry) => entry.runDir === runDir)?.action, "watching");
-		assert.equal(messages.length, 0, "nothing delivered while candidates still run");
-		await waitForVerifiedRunResult(runDir, { timeoutMs: RUN_TIMEOUT });
-		await sleep(1_000); // let the adopt watcher poll the terminal state
-		assert.equal(messages.length, 1);
-		assert.match(messages[0].content, /Final report for VF-GOOD/);
-		assert.equal(getLiveSlotCount(), 0, "adopted watcher released its slots");
 		rmSync(artifactRoot, { recursive: true, force: true });
 	});
 });

@@ -4,7 +4,7 @@ import { afterEach, describe, it } from "node:test";
 import { getPackagedCriteriaDir } from "../../src/vf/criteria.ts";
 import { candidateWorktreeBranchName } from "../../src/vf/worktrees.ts";
 import { retryVerifiedRunVerification, waitForVerifiedRunResult } from "../../src/vf/run/client.ts";
-import { verifiedRunFilePaths } from "../../src/vf/run/types.ts";
+import { acquireVerifiedRunDeliveryLease, verifiedRunFilePaths } from "../../src/vf/run/types.ts";
 import {
 	defaultVerifierCachePath,
 	runVerifierProbe,
@@ -184,7 +184,7 @@ describe("capability gate + degenerate halt (live supervisor)", () => {
 	it("retries verification over preserved traces, purges the poisoned cache, and selects a winner", async () => {
 		const { repo, fakePi, captureDir, parent } = setupFixture();
 		fixtureRoot = parent;
-		const { runDir } = buildSupervisedRun(
+		const { runDir, runId } = buildSupervisedRun(
 			repo,
 			fakePi,
 			captureDir,
@@ -200,10 +200,16 @@ describe("capability gate + degenerate halt (live supervisor)", () => {
 		// A prior delivery claim must not swallow the retry outcome.
 		const paths = verifiedRunFilePaths(runDir);
 		writeFileSync(paths.deliveryClaim, `${JSON.stringify({ pid: -1, claimedAt: "2026-08-22T00:00:00Z" })}\n`);
+		// The failure itself may already have been delivered: its receipt and
+		// lease must not block the retry's new deliverable result either.
+		writeFileSync(paths.deliveryReceipt, `${JSON.stringify({ sessionId: "session-origin", deliveryId: `${runId}-g1`, digest: "x", deliveredAt: "2026-08-22T00:00:00Z" })}\n`);
+		writeFileSync(paths.deliveryLease, `${JSON.stringify({ sessionId: "session-origin", pid: -1, generation: 1, deliveryId: `${runId}-g1`, acquiredAt: "2026-08-22T00:00:00Z" })}\n`);
 		retryVerifiedRunVerification(runDir, {
 			verifier: { mockVerifier: { goodMarker: "VF-GOOD", midMarker: "VF-MID" } },
 		});
 		assert.equal(existsSync(paths.deliveryClaim), false, "delivery re-armed for the retry outcome");
+		assert.equal(existsSync(paths.deliveryReceipt), false, "receipt purged: the retry rotates the deliverable");
+		assert.equal(existsSync(paths.deliveryLease), false, "stale lease purged with its generation");
 		const retried = await waitForVerifiedRunResult(runDir, { timeoutMs: RUN_TIMEOUT });
 		assert.equal(retried.state, "completed", retried.result?.failure?.message);
 		assert.equal(retried.result?.ok, true);
@@ -218,6 +224,10 @@ describe("capability gate + degenerate halt (live supervisor)", () => {
 		}
 		// A completed run has nothing left to retry.
 		assert.throws(() => retryVerifiedRunVerification(runDir), /already completed/);
+		// The rotated result delivers under a new generation-scoped id.
+		const lease = acquireVerifiedRunDeliveryLease(runDir, { sessionId: "session-origin" });
+		assert.equal(lease.acquired, true);
+		assert.equal(lease.deliveryId, `${runId}-g2`);
 	});
 
 	it("reports identical candidates as equivalent, not as a backend failure", async () => {

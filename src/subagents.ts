@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
 import type { AgentListEntry } from "./agents/agent-list.ts";
 import {
 	getAgentListEntries as getAgentListEntriesFromDefinitions,
@@ -162,15 +163,39 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		resetSubagentBatchStopRequest();
 		applySubagentLineage(ctx);
 		attachWidgetContext(ctx);
-		try {
-			// Verified fan-outs outlive their parent session: deliver finished
-			// results exactly once and re-watch live runs (detached supervisors
-			// keep candidates running across quit/reload/replacement).
-			adoptVerifiedRuns(pi, ctx.cwd, { updateWidget: () => widgetManager.update() });
-		} catch {
+		// Verified fan-outs outlive their parent session: deliver finished
+		// results exactly once to their authorized recipient and re-watch live
+		// runs (detached supervisors keep candidates running across
+		// quit/reload/replacement).
+		const sessionFile = ctx.sessionManager.getSessionFile?.() ?? "";
+		adoptVerifiedRuns(pi, ctx.cwd, {
+			sessionId: ctx.sessionManager.getSessionId?.() ?? "",
+			// In print mode a startup steer must not trigger a model turn: the
+			// `-p` process has its own single prompt to run, and triggering a
+			// second turn at session start crashes some extensions' stale
+			// captured contexts.
+			triggerTurn: ctx.mode !== "print",
+			confirmPersisted: sessionFile
+				? async (deliveryId) => {
+						// The send is async in Pi; poll our own transcript until the
+						// deliveryId entry lands, then the receipt may be written.
+						const deadline = Date.now() + 5_000;
+						while (Date.now() < deadline) {
+							try {
+								if (readFileSync(sessionFile, "utf8").includes(deliveryId)) return true;
+							} catch {
+								// not flushed yet
+							}
+							await new Promise((resolve) => setTimeout(resolve, 150));
+						}
+						return false;
+					}
+				: undefined,
+			updateWidget: () => widgetManager.update(),
+		}).catch(() => {
 			// Adoption is best-effort at startup; a failure must never block
 			// the session from starting.
-		}
+		});
 
 		// Restrict active tools in orchestrator mode
 		if (ORCHESTRATOR_MODE) {

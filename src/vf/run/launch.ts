@@ -1,4 +1,5 @@
 import { getArtifactProjectName, getArtifactStorageRoot } from "../../artifact-storage.ts";
+import { readFileSync } from "node:fs";
 import type { AgentDefaults } from "../../agents/definitions.ts";
 import { buildParentEnvSnapshot } from "../../launch/child-env.ts";
 import { buildBackgroundLaunchPlan } from "../../launch/background.ts";
@@ -21,7 +22,12 @@ import { WorktreeError } from "../worktrees.ts";
 import { candidateWorktreeBranchName, candidateWorktreeDirName, preflightWorktreeSource } from "../worktrees.ts";
 import { newRunId } from "../supervisor/run-client.ts";
 import { startVerifiedRun, verifiedRunDirFor, waitForVerifiedRunResult } from "./client.ts";
-import { claimVerifiedRunDelivery } from "./types.ts";
+import {
+	acquireVerifiedRunDeliveryLease,
+	releaseVerifiedRunDeliveryLease,
+	verifiedRunResultGeneration,
+	writeVerifiedRunDeliveryReceipt,
+} from "./types.ts";
 import type { VerifiedCandidateSpec, VerifiedRunManifest, VerifiedRunRequest } from "./types.ts";
 
 /**
@@ -64,6 +70,53 @@ export interface VerifiedFanOutLaunch {
 	running: RunningSubagent;
 	runId: string;
 	runDir: string;
+}
+
+const MAX_LINEAGE_DEPTH = 8;
+
+function readSessionHeader(file: string): { type?: unknown; id?: unknown; parentSession?: unknown } | null {
+	try {
+		const header = JSON.parse(readFileSync(file, "utf8").split("\n", 1)[0] ?? "");
+		return typeof header === "object" && header !== null ? header : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Freeze the recipient set at launch: the origin session plus every ancestor
+ * reachable through session-file `parentSession` links. The walk fails
+ * closed — an unreadable or missing link stops it with what it has — and a
+ * visited set plus depth cap bound it. Delivery-time lineage discovery (with
+ * its stale paths and full-file reads) is exactly what this avoids.
+ */
+export function resolveAuthorizedRecipients(
+	originSessionFile: string | null | undefined,
+	originSessionId: string | null,
+): string[] {
+	if (!originSessionId) return [];
+	const recipients = [originSessionId];
+	const visited = new Set<string>();
+	let current = originSessionFile;
+	if (current) {
+		// Trust the origin file only when it is a session header naming this
+		// very origin; anything else is untrusted lineage and fails closed.
+		const originHeader = readSessionHeader(current);
+		if (!originHeader || originHeader.type !== "session" || originHeader.id !== originSessionId) {
+			return recipients;
+		}
+	}
+	for (let depth = 0; current && depth < MAX_LINEAGE_DEPTH; depth += 1) {
+		if (visited.has(current)) break;
+		visited.add(current);
+		const header = readSessionHeader(current);
+		if (!header || typeof header.parentSession !== "string" || header.parentSession === "") break;
+		const parentHeader = readSessionHeader(header.parentSession);
+		if (!parentHeader || parentHeader.type !== "session" || typeof parentHeader.id !== "string") break;
+		if (!recipients.includes(parentHeader.id)) recipients.push(parentHeader.id);
+		current = header.parentSession;
+	}
+	return recipients;
 }
 
 export async function launchVerifiedFanOut(
@@ -198,6 +251,7 @@ export async function launchVerifiedFanOut(
 		}
 
 		const mockVerifier = process.env[MOCK_VERIFIER_ENV];
+		const parentSessionId = ctx.sessionManager.getSessionId?.() ?? null;
 		const request: VerifiedRunRequest = {
 			kind: "verified-fanout",
 			name: params.name,
@@ -219,7 +273,11 @@ export async function launchVerifiedFanOut(
 				...(mockVerifier !== undefined ? { mockVerifier: JSON.parse(mockVerifier) } : {}),
 			},
 			env: baseEnv!,
-			parentSessionId: ctx.sessionManager.getSessionId?.() ?? null,
+			parentSessionId,
+			authorizedRecipients: resolveAuthorizedRecipients(
+				ctx.sessionManager.getSessionFile?.(),
+				parentSessionId,
+			),
 			createdAt: new Date().toISOString(),
 		};
 
@@ -259,6 +317,10 @@ export async function launchVerifiedFanOut(
 			waitForVerifiedOutcome(started.runDir, runId, params, startTime, {
 				signal: options.signal ?? watcherAbort.signal,
 				reservedSlots: fanout.candidates - 1,
+				origin: {
+					sessionId: parentSessionId,
+					sessionFile: ctx.sessionManager.getSessionFile?.() ?? null,
+				},
 			}),
 		);
 		claimSpawnWidthSlot(running);
@@ -276,17 +338,21 @@ async function waitForVerifiedOutcome(
 	runId: string,
 	params: SubagentParamsInput,
 	startTime: number,
-	options: { signal: AbortSignal; reservedSlots: number },
+	options: {
+		signal: AbortSignal;
+		reservedSlots: number;
+		origin: { sessionId: string | null; sessionFile: string | null | undefined };
+	},
 ): Promise<SubagentResult> {
 	try {
 		const manifest = await waitForVerifiedRunResult(runDir, { signal: options.signal });
-		return deliverOnce(manifest, runDir, params, startTime);
+		return deliverOnce(manifest, runDir, params, startTime, options.origin);
 	} catch (error) {
 		if (options.signal.aborted) {
 			// The wait stopped (kill or parent shutdown), not the run: give the
 			// cancel path a grace window to terminalize, then surface the state.
 			const settled = await waitForVerifiedRunResult(runDir, { timeoutMs: 10_000 }).catch(() => null);
-			if (settled) return deliverOnce(settled, runDir, params, startTime);
+			if (settled) return deliverOnce(settled, runDir, params, startTime, options.origin);
 		}
 		throw error;
 	} finally {
@@ -294,19 +360,77 @@ async function waitForVerifiedOutcome(
 	}
 }
 
-/** Claim the delivery exactly once; a run another session already delivered must not steer again. */
+/**
+ * Deliver the run's result under the lease/receipt handshake: acquire the
+ * delivery lease as the origin, tag the result with its deliveryId (the
+ * steer carries it), then convert the lease into a durable receipt once the
+ * deliveryId has persisted in the origin's own session file. A crash before
+ * that persistence leaves the lease reclaimable — never a stranded result.
+ */
 function deliverOnce(
 	manifest: VerifiedRunManifest,
 	runDir: string,
 	params: Pick<SubagentParamsInput, "name" | "task">,
 	startTime: number,
+	origin: { sessionId: string | null; sessionFile: string | null | undefined },
 ): SubagentResult {
-	const claim = claimVerifiedRunDelivery(runDir);
 	const result = verifiedRunToSubagentResult(manifest, runDir, params, startTime);
-	if (!claim.claimed) {
-		result.summary = `[llm-as-a-verifier ${manifest.runId}: run complete; result delivered by another session (pid ${claim.claimedByPid}) — report and ranking in ${runDir}]`;
+	const sessionId = origin.sessionId ?? manifest.request.parentSessionId;
+	if (!sessionId) return result;
+	const lease = acquireVerifiedRunDeliveryLease(runDir, {
+		sessionId,
+		expectedGeneration: verifiedRunResultGeneration(manifest),
+	});
+	if (!lease.acquired) {
+		result.summary = `[llm-as-a-verifier ${manifest.runId}: run complete; its report was already delivered — report and ranking in ${runDir}]`;
+		return result;
 	}
+	result.deliveryId = lease.deliveryId;
+	watchOriginDeliveryPersisted(runDir, lease.deliveryId, sessionId, origin.sessionFile ?? undefined);
 	return result;
+}
+
+/** Fire-and-forget on purpose: if this process dies before the steer
+ * persists, no receipt is written and the lease stays reclaimable. */
+function watchOriginDeliveryPersisted(
+	runDir: string,
+	deliveryId: string,
+	sessionId: string,
+	sessionFile: string | undefined,
+): void {
+	if (!sessionFile) {
+		// Nothing to probe (ephemeral parent): the steer is best-effort, and
+		// without a resumable file nobody can reclaim a receipt anyway.
+		return;
+	}
+	const deadline = Date.now() + 10_000;
+	const poll = (): void => {
+		let persisted = false;
+		try {
+			persisted = readFileSync(sessionFile, "utf8").includes(deliveryId);
+		} catch {
+			// not flushed yet
+		}
+		if (persisted) {
+			try {
+				writeVerifiedRunDeliveryReceipt(runDir, { sessionId, deliveryId });
+			} catch {
+				// lost the receipt race or the result rotated: the other
+				// writer proved delivery, or a retry owns the result now
+			}
+			return;
+		}
+		if (Date.now() < deadline) {
+			const next = setTimeout(poll, 200);
+			next.unref?.();
+			return;
+		}
+		// Persistence never confirmed: release our lease so another
+		// authorized session can retry instead of waiting for this pid to die.
+		releaseVerifiedRunDeliveryLease(runDir, { sessionId, deliveryId });
+	};
+	const first = setTimeout(poll, 200);
+	first.unref?.();
 }
 
 export function verifiedRunToSubagentResult(

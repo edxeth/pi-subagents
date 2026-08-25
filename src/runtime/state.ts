@@ -102,7 +102,7 @@ export function asSubagentToolResult(result: unknown): SubagentToolResult {
 	return result as SubagentToolResult;
 }
 
-export const moduleAbortController = initializeModuleReloadState();
+export let moduleAbortController = initializeModuleReloadState();
 export let stopAfterCurrentSubagentBatch = false;
 let currentSubagentBatchHasBlocking = false;
 
@@ -152,6 +152,8 @@ export function getWatcherSignal(_running: RunningSubagent, watcherAbort: AbortC
 
 export function resetRuntimeStateForTest(resetAmbient: () => void): void {
 	resetAmbient();
+	// A test may abort the module controller; the next test needs a live one.
+	moduleAbortController = initializeModuleReloadState();
 	for (const agent of runningSubagents.values()) {
 		clearSubagentShutdownTimer(agent);
 		agent.abortController?.abort();

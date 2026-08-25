@@ -67,6 +67,9 @@ export interface SubagentResult {
 	name: string;
 	task: string;
 	summary: string;
+	/** Verified fan-out delivery handshake id (`<runId>-g<generation>`); present
+	 * when this result carries a lease that must end in a delivery receipt. */
+	deliveryId?: string;
 	/** Origin of the summary text. Omitted legacy results are treated as subagent output. */
 	summarySource?: SubagentSummarySource;
 	sessionFile?: string;
@@ -182,6 +185,9 @@ export interface RunningSubagent {
 	verifiedRunDir?: string;
 	/** Verified fan-out: durable run id (manifest name). */
 	verifiedRunId?: string;
+	/** Verified fan-out: this session observes the run but is not an
+	 * authorized recipient, so it may not cancel the run. */
+	verifiedRunCancelDenied?: boolean;
 	zellijTarget?: { sessionName: string; parentPaneId: number };
 	surfaceClosePromise?: Promise<void>;
 }

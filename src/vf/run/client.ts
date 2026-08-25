@@ -11,7 +11,9 @@ import {
 	newVerifiedRunLeaseId,
 	readVerifiedRunManifest,
 	RETRYABLE_VERIFICATION_FAILURE_CODES,
+	takeVerifiedRunCareLease,
 	verifiedRunFilePaths,
+	verifiedRunResultGeneration,
 	writeVerifiedRunManifest,
 	type VerifiedRunManifest,
 } from "./types.ts";
@@ -64,7 +66,7 @@ export function startVerifiedRun(options: {
 	const leaseId = newVerifiedRunLeaseId();
 	const now = new Date().toISOString();
 	writeVerifiedRunManifest(runDir, {
-		version: 2,
+		version: 3,
 		runId: options.runId,
 		createdAt: now,
 		updatedAt: now,
@@ -99,6 +101,13 @@ export function respawnVerifiedSupervisor(runDir: string, options: { env?: NodeJ
 	}
 	if (manifest.lease && isPidAlive(manifest.lease.pid)) {
 		throw new Error(`Cannot respawn supervisor for run ${manifest.runId}: pid ${manifest.lease.pid} is still alive.`);
+	}
+	const care = takeVerifiedRunCareLease(runDir);
+	if (!care.taken) {
+		throw new Error(
+			`Cannot respawn supervisor for run ${manifest.runId}: pid ${care.holderPid} holds the care lease ` +
+				"(a concurrent session is already replacing this supervisor).",
+		);
 	}
 	spawnVerifiedSupervisor(runDir, manifest.leaseId, options.env);
 }
@@ -155,15 +164,20 @@ export function retryVerifiedRunVerification(
 	// the run; a retry must re-ask the backend, not replay the poison.
 	rmSync(defaultVerifierCachePath(runDir), { force: true });
 	const leaseId = newVerifiedRunLeaseId();
+	manifest.resultGeneration = verifiedRunResultGeneration(manifest) + 1;
 	manifest.state = "verifying";
 	manifest.result = null;
 	manifest.leaseId = leaseId;
 	manifest.lease = null;
 	writeVerifiedRunManifest(runDir, manifest);
-	// Each verification attempt's outcome is deliverable exactly once.
-	rmSync(verifiedRunFilePaths(runDir).deliveryClaim, { force: true });
+	// Each verification attempt's outcome is deliverable exactly once: the
+	// rotated generation invalidates old leases and receipts with it.
+	const paths = verifiedRunFilePaths(runDir);
+	rmSync(paths.deliveryClaim, { force: true });
+	rmSync(paths.deliveryLease, { force: true });
+	rmSync(paths.deliveryReceipt, { force: true });
 	spawnVerifiedSupervisor(runDir, leaseId, options.env);
-	return { runId: manifest.runId, runDir, leaseId, manifestPath: verifiedRunFilePaths(runDir).manifest };
+	return { runId: manifest.runId, runDir, leaseId, manifestPath: paths.manifest };
 }
 
 export interface VerifiedRunSnapshot {

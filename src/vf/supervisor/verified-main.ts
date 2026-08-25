@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { isPidAlive } from "./manifest.ts";
 import { createCandidateWorktrees, preflightWorktreeSource } from "../worktrees.ts";
@@ -88,6 +88,8 @@ manifest.lease = {
 };
 writeVerifiedRunManifest(runDir, manifest);
 log(runDir, `claimed run ${manifest.runId} (pid ${process.pid})`);
+// This run is owned now: release the care lease that serialized the respawn.
+rmSync(verifiedRunFilePaths(runDir).careLease, { force: true });
 
 /** Live child handles for candidates this process spawned (adoption uses group liveness only). */
 const children = new Map<number, ChildProcess>();
