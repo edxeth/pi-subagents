@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { normalizeVerifierModelRef } from "../vf/model-ref.ts";
 
 export interface AgentDefaults {
 	enabled?: boolean;
@@ -39,6 +40,27 @@ export interface AgentDefaults {
 	timeoutWarnThreshold?: string;
 	/** What the parent allows after a timeout kill. Defaults to `report`. */
 	onTimeout?: "report" | "block-resume";
+	/**
+	 * `llm-as-a-verifier` frontmatter flag. Marks every launch of this
+	 * definition as a verified fan-out (ticket 01 owns the boolean only; the
+	 * count/model/criteria siblings are parsed below (ticket 10).
+	 */
+	llmAsVerifier?: boolean;
+	/**
+	 * `llm-as-a-verifier-candidates`: candidate count for the fan-out
+	 * (integer >= 2; default resolved at pre-flight, env/3).
+	 */
+	llmAsVerifierCandidates?: number;
+	/**
+	 * `llm-as-a-verifier-model`: verifier override as a canonical
+	 * `provider/model[:thinking]` ref; null means the default verifier profile.
+	 */
+	llmAsVerifierModel?: string | null;
+	/**
+	 * `llm-as-a-verifier-criteria`: built-in rubric name or path, stored
+	 * verbatim; resolved to an absolute file at pre-flight.
+	 */
+	llmAsVerifierCriteria?: string;
 	contextWarnThreshold?: string;
 	contextWarnStep?: string;
 	reportContextUsage?: boolean;
@@ -109,6 +131,22 @@ function parseAgentDefinition(
 	const contextWarnThresholdRaw = get("context-warn-threshold");
 	const contextWarnStepRaw = get("context-warn-step");
 	const reportContextUsageRaw = get("report-context-usage");
+	const llmAsVerifier = parseLlmAsVerifier(get("llm-as-a-verifier"), hasKey("llm-as-a-verifier"), path);
+	const llmAsVerifierCandidates = parseLlmAsVerifierCandidates(
+		get("llm-as-a-verifier-candidates"),
+		hasKey("llm-as-a-verifier-candidates"),
+		path,
+	);
+	const llmAsVerifierModel = parseLlmAsVerifierModel(
+		get("llm-as-a-verifier-model"),
+		hasKey("llm-as-a-verifier-model"),
+		path,
+	);
+	const llmAsVerifierCriteria = parseLlmAsVerifierCriteria(
+		get("llm-as-a-verifier-criteria"),
+		hasKey("llm-as-a-verifier-criteria"),
+		path,
+	);
 	const spawnDepthRaw = get("spawn-depth");
 	const spawnWidthRaw = get("spawn-width");
 
@@ -166,6 +204,10 @@ function parseAgentDefinition(
 		...(idleTimeout !== undefined ? { idleTimeout } : {}),
 		timeoutWarnThreshold: timeoutWarnThresholdRaw,
 		onTimeout,
+		llmAsVerifier,
+		...(llmAsVerifierCandidates !== undefined ? { llmAsVerifierCandidates } : {}),
+		...(llmAsVerifierModel !== undefined ? { llmAsVerifierModel } : {}),
+		...(llmAsVerifierCriteria !== undefined ? { llmAsVerifierCriteria } : {}),
 		contextWarnThreshold: contextWarnThresholdRaw,
 		contextWarnStep: contextWarnStepRaw,
 		reportContextUsage: reportContextUsageRaw != null ? reportContextUsageRaw === "true" : undefined,
@@ -222,6 +264,82 @@ function parseOnTimeout(
 	if (!present) return undefined;
 	if (raw === "report" || raw === "block-resume") return raw;
 	throw new Error(`on-timeout must be "report" or "block-resume" (got ${JSON.stringify(raw ?? "")}) in ${path}.`);
+}
+
+/**
+ * Resolve the `llm-as-a-verifier` flag, rejecting anything but `true`/`false`.
+ *
+ * The candidate count moved to `llm-as-a-verifier-candidates` (ticket 10), so
+ * an integer here is a stale or mistyped definition. Accepting it would either
+ * guess a count the author meant to put on the sibling field or silently run
+ * the default — both wrong, so it fails agent loading instead.
+ */
+function parseLlmAsVerifier(
+	raw: string | undefined,
+	present: boolean,
+	path: string,
+): boolean | undefined {
+	if (!present) return undefined;
+	if (raw === "true" || raw === "false") return raw === "true";
+	throw new Error(`llm-as-a-verifier must be "true" or "false" (got ${JSON.stringify(raw ?? "")}) in ${path}.`);
+}
+
+/**
+ * Resolve `llm-as-a-verifier-candidates`. Invalid values fail agent loading
+ * rather than falling back to the default: a typo must never silently turn a
+ * 5-candidate fan-out into 3.
+ */
+function parseLlmAsVerifierCandidates(
+	raw: string | undefined,
+	present: boolean,
+	path: string,
+): number | undefined {
+	if (!present) return undefined;
+	const message = `llm-as-a-verifier-candidates must be an integer >= 2 (got ${JSON.stringify(raw ?? "")}) in ${path}.`;
+	if (raw === undefined || !/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) < 2) {
+		throw new Error(message);
+	}
+	return Number(raw);
+}
+
+/**
+ * Resolve `llm-as-a-verifier-model`, storing the canonical ref. The value is
+ * validated here so an unparseable ref fails agent loading — before any
+ * candidate spend — instead of exploding inside the bridge later.
+ */
+function parseLlmAsVerifierModel(
+	raw: string | undefined,
+	present: boolean,
+	path: string,
+): string | null | undefined {
+	if (!present) return undefined;
+	if (raw === undefined || !raw.trim()) {
+		throw new Error(`llm-as-a-verifier-model must be a verifier profile name or provider/model[:thinking] (got ${JSON.stringify(raw ?? "")}) in ${path}.`);
+	}
+	try {
+		return normalizeVerifierModelRef(raw).normalizedRef;
+	} catch (error) {
+		throw new Error(`llm-as-a-verifier-model: ${(error as Error).message} in ${path}.`);
+	}
+}
+
+/**
+ * Resolve `llm-as-a-verifier-criteria`. The value is stored verbatim — a
+ * built-in name or a path — and resolved to an absolute file at pre-flight
+ * (ticket 10), where an unresolvable file aborts the launch before any spend.
+ */
+function parseLlmAsVerifierCriteria(
+	raw: string | undefined,
+	present: boolean,
+	path: string,
+): string | undefined {
+	if (!present) return undefined;
+	if (raw === undefined || !raw.trim()) {
+		throw new Error(
+			`llm-as-a-verifier-criteria must be a built-in name (generic, code-change, research) or a path (got ${JSON.stringify(raw ?? "")}) in ${path}.`,
+		);
+	}
+	return raw.trim();
 }
 
 function parseVisibleTo(raw: string | undefined): string[] {

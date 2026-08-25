@@ -447,7 +447,8 @@ export function buildRunningItems(ctx: OverlayContext): OverlayItem[] {
 			canResume: false,
 			sessionFile: a.sessionFile,
 			onKill: async () => {
-				await stopRunningSubagent(a);
+				// Operator surface: a human may cancel even a non-recipient's run.
+				await stopRunningSubagent(a, { operator: true });
 				ctx.ui.notify(`Stopped ${a.name}`, "info");
 			},
 		});

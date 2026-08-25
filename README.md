@@ -172,6 +172,10 @@ For a fuller example of the intended style, see the [scout agent gist by edxeth]
 | `report-context-usage` | `true` | Add the child's final context use to the result that the parent receives. |
 | `timeout` | unset | Whole seconds for the whole run. Pi stops the child at this limit. Omit for no limit. |
 | `idle-timeout` | unset | Whole seconds without output from the child. Pi stops the child at this limit. Omit for no limit. |
+| `llm-as-a-verifier` | `false` | `true` turns every launch into a best-of-N run: several attempts in isolated git worktrees, an LLM verifier picks the best one, the parent gets one result. See [LLM-as-a-verifier](#llm-as-a-verifier). |
+| `llm-as-a-verifier-candidates` | `3` | Number of attempts per launch. Integer `>= 2`; the upper bound is the spawn-width ceiling (16). |
+| `llm-as-a-verifier-model` | none — **required** | The verifier model: `provider/model[:thinking]` (example: `deepseek/deepseek-v4-flash:high`) or a profile name (example: `fast` loads `.pi/agents/verifiers/fast.md`). The backend must return API logprobs. |
+| `llm-as-a-verifier-criteria` | `generic` | What the verifier judges by: a built-in name (`generic`, `code-change`, `research`), your own criteria file by name (`fix-focus` loads `.pi/agents/criteria/fix-focus.md`), or a path. |
 | `timeout-warn-threshold` | `false` | Reserve the remainder of the first threatened limit for reporting. At this percentage (`1%`–`99%`), the parent interrupts the active child and restarts the same session in report-only mode. `true` means `80%`. Decimals round down. Any other value turns the policy off. |
 | `on-timeout` | `report` | What the parent can do after a limit stops the child. `report` keeps `subagent_resume` available, and the new run gets the same limits. `block-resume` refuses the resume. Any other value fails to load. |
 | `spawning` | `false` | Let this child launch subagents of its own. `true` lets it launch any agent. A comma-separated list of agent names (for example `spawning: researcher, reviewer`) lets it launch only those agents. |
@@ -430,6 +434,75 @@ allowed-models: openai/gpt-5.5:low, nahcrof/glm-5.1:off, anthropic/claude-opus-4
 
 `model` is the default and is always allowed. `allowed-models` lists the other models Pi may use for this agent, so you do not need to repeat `model`. The `:thinking` suffix is optional: `provider/model:low` allows only that thinking level, while `provider/model` allows the model with whatever thinking level Pi resolves. If `allow-model-override: false`, Pi ignores launch-time and resume-time model choices as usual.
 
+## LLM-as-a-verifier
+
+This implements the [LLM-as-a-Verifier](https://github.com/llm-as-a-verifier/llm-as-a-verifier) technique ([paper](https://arxiv.org/abs/2607.05391), [Python library](https://pypi.org/project/llm-verifier/)): the agent runs several attempts at the task in parallel, and a second LLM picks the best one.
+
+```yaml
+---
+description: Best-of-N implementation worker
+model: zai/glm-5-turbo:high
+llm-as-a-verifier: true
+llm-as-a-verifier-candidates: 3
+llm-as-a-verifier-model: deepseek/deepseek-v4-flash
+llm-as-a-verifier-criteria: code-change
+---
+```
+
+### What happens on a launch
+
+1. Pi checks that the source tree is a clean Git repository. Then each attempt gets its own [git worktree](https://git-scm.com/docs/git-worktree). A worktree is a private copy of the repo. It separates the file changes of each attempt. It is not a sandbox: paths outside the repo, the network, and shared services stay shared. All attempts get the same task.
+2. When the attempts finish, the verifier LLM reads what each attempt did. It scores the attempts against the criteria file. At least two attempts must give different results. If all attempts give the same result, or the verifier cannot tell them apart, the run fails. Nothing is applied to your tree.
+3. You get one result: the report of the winning attempt, plus a short footer. If the winner changed code, the change is staged in your working tree. It is not committed. Inspect it with `git diff --staged`. If your tree changed during the run, nothing is applied, and the winner stays on a Git branch that the footer names.
+
+A run continues if you close or reload the parent session: a detached supervisor owns it end-to-end. The report is delivered only to the session that launched the run, or an ancestor of it — whichever starts next — and waits on disk until then. To stop a run early, kill the child with `subagent_kill` from the launching session; other sessions are refused unless you confirm the cancel yourself in the `/subagents` overlay.
+
+The verifier makes many small API calls: a 3-attempt run with the `code-change` criteria makes about 72 calls. Budget accordingly.
+
+### The verifier model
+
+You must set `llm-as-a-verifier-model`. If you do not, the launch fails and the agent asks you what to use. The agent does not pick a model for you and does not edit your files.
+
+You write one of two forms:
+
+- **`llm-as-a-verifier-model: provider/model`** — pick the model directly. Example: `deepseek/deepseek-v4-flash`. Add `:high` for more reasoning, `:low` for less: `deepseek/deepseek-v4-flash:high`.
+- **`llm-as-a-verifier-model: name`** — pick a profile file. Example: `fast` loads `.pi/agents/verifiers/fast.md` from your project, or the same file under your global Pi directory. A profile holds the same things you would write in the field, plus an env block for a server you run yourself (vLLM, llama.cpp):
+
+```yaml
+# .pi/agents/verifiers/lab.md
+---
+model: qwen3-32b
+env: |
+  OPENAI_BASE_URL=http://10.0.0.5:8000/v1
+  OPENAI_API_KEY=whatever-the-lab-uses
+---
+```
+
+Where the URL and key come from, in order:
+
+1. The env block of the profile, if you used one.
+2. The provider entry in your Pi config: `models.json`, then `models-store.json` (what Pi's `/login` wrote).
+3. Your exported `DEEPSEEK_API_KEY` or `VERTEX_API_KEY` alone. The library then calls the official DeepSeek or Google Vertex endpoint.
+4. Your exported `OPENAI_BASE_URL` (and `OPENAI_API_KEY` if the server needs one). This serves providers that Pi does not know, such as your own vLLM or llama.cpp server for example.
+
+One rule holds everywhere: a provider named in the field always uses its own URL. A stray `OPENAI_BASE_URL` in your shell never redirects a deepseek or gemini choice. If nothing names a working URL, the launch fails with an error that says what to set.
+
+#### Which backends work
+
+The library speaks one format: the OpenAI Chat Completions API with `logprobs` (the [OpenAI `logprobs` field](https://platform.openai.com/docs/api-reference/chat/object)). The verifier reads these numbers to score attempts.
+
+- Works: OpenAI, DeepSeek, Google Vertex (Gemini), and any self-hosted OpenAI-compatible server (vLLM, SGLang, llama.cpp).
+- Does not work: Anthropic and other non-OpenAI formats (no library client), and most proxies and aggregators (they strip the logprobs field).
+
+Before anything is paid for, Pi sends one small request to the backend you chose. If the backend does not return usable logprobs, the launch stops there. That one request is the only cost of a wrong pick.
+
+### Criteria
+
+`llm-as-a-verifier-criteria` sets what the verifier judges by. Three built-in templates ship with the extension: `generic` (the default), `code-change`, and `research`.
+
+- **Your own file** — a bare name loads `.pi/agents/criteria/<name>.md` from your project, or the same file under your global Pi directory. A project file with a built-in name replaces that built-in.
+- **Path** — a value with a `/` in it is a path, relative to the launch directory.
+
 ## Ambient awareness
 
 Ambient awareness is the quiet note Pi gives the parent model about available agents.
@@ -559,6 +632,8 @@ Use `caller_ping` when the child needs the parent. The child sends a message up,
 `subagent_resume` starts an existing child session again. You can pass a follow-up task.
 
 Resume tries to preserve the original launch shape: mode, model, prompt style, cwd, tools, extensions, and lifecycle settings. A resumed child should continue as the same child, even if the agent file changed after the first launch.
+
+One exception: attempt sessions of an `llm-as-a-verifier` launch are never resumable — their worktree copy is removed after the winner is picked. `subagent_resume` refuses with a dedicated error; launch the agent again instead.
 
 ## Child output
 
@@ -821,6 +896,7 @@ User-facing knobs:
 | `PI_SUBAGENT_ZELLIJ_PLACEMENT` | Zellij policy: `auto`, `right-stack`, `down-stack`, `floating`, or `tab-stack` |
 | `PI_SUBAGENT_ZELLIJ_MIN_COLUMNS` | Minimum usable columns for each side of a Zellij split (default: `50`) |
 | `PI_SUBAGENT_ZELLIJ_MIN_ROWS` | Minimum usable rows for each side of a Zellij split (default: `10`) |
+| `PI_SUBAGENT_LLM_VERIFIER_CANDIDATES` | Default candidate count for `llm-as-a-verifier` agents that do not set `llm-as-a-verifier-candidates` |
 
 Runtime internals you may see while debugging:
 
@@ -832,6 +908,8 @@ Runtime internals you may see while debugging:
 - `PI_SUBAGENT_SESSION`
 - `PI_SUBAGENT_SURFACE`
 - `PI_SUBAGENT_AUTO_EXIT`
+- `PI_SUBAGENT_LLM_VERIFIER_VENV` (llm-as-a-verifier: pre-provisioned `llm-verifier` venv root)
+- `PI_SUBAGENT_SUPERVISOR_RUNTIME` (llm-as-a-verifier: command that runs the detached supervisor `.ts` entry)
 
 Live test knobs:
 
@@ -839,6 +917,7 @@ Live test knobs:
 - `PI_SUBAGENT_LIVE_MODEL`
 - `PI_SUBAGENT_KEEP_E2E_TMP`
 - `PI_SUBAGENT_LIVE_LOCK_PATH`
+- `PI_SUBAGENT_ALLOW_VERIFIED_E2E` (llm-as-a-verifier live e2e; also needs `DEEPSEEK_API_KEY`)
 - `PI_SUBAGENT_PROVIDER_RECOVERY_DELAYS_MS` — override the provider-error recovery backoff windows (comma-separated ms, e.g. `10000,11000,12000`) so a live Pi process can exercise the wait → nudge → kill path without waiting the full 30/60/90s. Values below 10000ms are clamped so recovery does not race Pi's own default auto-retry backoff. Defaults to the production `30000,60000,90000`.
 
 ## Herdr placement
@@ -911,6 +990,7 @@ The mux tests cover Herdr detection, adapter errors, geometry-aware placement, s
 Live tests:
 
 ```bash
+PI_SUBAGENT_ALLOW_VERIFIED_E2E=1 DEEPSEEK_API_KEY=... npm run test:e2e-live-verified-fanout
 PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:e2e-live-blocking
 PI_SUBAGENT_ALLOW_LIVE_WINDOWS=1 npm run test:e2e-live-mix-blocking
 npm run test:e2e-live-deny-tools

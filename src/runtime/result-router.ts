@@ -99,6 +99,7 @@ export function deliverCompletedSubagentResult(
 				contextTokens: completed.contextTokens,
 				contextWindow: completed.contextWindow,
 				sessionFile: completed.sessionFile,
+				...(completed.deliveryId ? { deliveryId: completed.deliveryId } : {}),
 				...getTimeoutResultDetails(completed),
 				...(completed.timeoutWrapUp ? { timeoutWrapUp: completed.timeoutWrapUp } : {}),
 				...(completed.errorMessage ? { errorMessage: completed.errorMessage } : {}),

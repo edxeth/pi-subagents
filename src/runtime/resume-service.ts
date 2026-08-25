@@ -208,6 +208,18 @@ export async function resumeSubagentSession(
 	input: ResumeSessionInput,
 	runtime: ResumeServiceRuntime,
 ): Promise<RunningSubagent> {
+	// Verified fan-out candidates are non-resumable (SPEC): their run is
+	// finalized and their worktree workspace is deleted after selection, so a
+	// resume would resurrect a session whose cwd no longer exists. Follow-up
+	// work starts a fresh launch against the updated source tree.
+	const verifiedRunDir = process.env.PI_SUBAGENT_VF_RUN_DIR;
+	if (verifiedRunDir && verifiedRunDir.trim()) {
+		throw new Error(
+			`Session ${input.sessionFile} was one finished attempt of an llm-as-a-verifier run; ` +
+				"its worktree was removed after selection, so it cannot be resumed. " +
+				"Start a new launch of the agent for follow-up work.",
+		);
+	}
 	const widthLimit = getSpawnWidthLimit();
 	if (!tryAcquireSlots(1, widthLimit)) {
 		throw new Error(

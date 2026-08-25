@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { SubagentWidgetManager } from "../../src/runtime/widget.ts";
 import type { RunningSubagent } from "../../src/types.ts";
+import { writeVerifiedRunManifest, type VerifiedRunManifest } from "../../src/vf/run/types.ts";
 
 function stripAnsi(text: string): string {
 	return text.replace(new RegExp("\\x1b\\[[0-9;]*m", "g"), "");
@@ -214,5 +215,209 @@ describe("widget manager direct module tests", () => {
 		assert.equal(running.toolUses, 0);
 		assert.equal(running.totalTokens, 25);
 		assert.equal(running.lastAssistantText, "child work");
+	});
+});
+
+describe("verified fan-out widget rows", () => {
+	function writeCandidateSession(file: string, usage?: { totalTokens: number }): void {
+		const entries = [
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					provider: "openai-cpa",
+					model: "openai-cpa/gpt-5.6-luna",
+					...(usage ? { usage } : {}),
+					content: [{ type: "text", text: "working on the fix" }],
+				},
+			},
+		];
+		writeFileSync(file, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+	}
+
+	function buildVerifiedRun(options: {
+		state: VerifiedRunManifest["state"];
+		candidates: Array<{ settled?: boolean; exitCode?: number | null; usage?: { totalTokens: number } }>;
+	}): { runDir: string } {
+		const parent = mkdtempSync(join(tmpdir(), "widget-vf-"));
+		const runId = `vf-test-${Math.random().toString(16).slice(2, 8)}`;
+		const runDir = join(parent, runId);
+		mkdirSync(runDir, { recursive: true });
+		const sessions = options.candidates.map((candidate, index) => {
+			const file = join(runDir, `w${index + 1}.jsonl`);
+			writeCandidateSession(file, candidate.usage);
+			return file;
+		});
+		const now = new Date().toISOString();
+		writeVerifiedRunManifest(runDir, {
+			version: 2,
+			runId,
+			createdAt: now,
+			updatedAt: now,
+			state: options.state,
+			leaseId: "lease",
+			lease: null,
+			request: {
+				kind: "verified-fanout",
+				name: "vf-run",
+				title: "VF run",
+				piCommand: "pi",
+				piCommandArgs: [],
+				taskArtifact: join(runDir, "task.md"),
+				taskPrompt: "do the thing",
+				sourceRepo: parent,
+				baseCommit: "deadbeef",
+				agent: "vf-worker",
+				candidateCount: options.candidates.length,
+				candidates: options.candidates.map((_, index) => ({
+					index: index + 1,
+					sessionFile: sessions[index]!,
+					worktree: join(parent, `w${index + 1}`),
+					internalBranch: `vf/${runId}/w${index + 1}`,
+					args: [],
+					env: {},
+					launchEntryCount: 0,
+				})),
+				verifier: { model: "deepseek-v4-flash", thinking: null, env: {}, criteriaPath: "/tmp/c.md" },
+				env: {},
+				parentSessionId: null,
+				createdAt: now,
+			},
+			candidates: options.candidates.map((candidate, index) => ({
+				index: index + 1,
+				pid: 1000 + index,
+				pgid: 1000 + index,
+				startedAt: now,
+				exitCode: candidate.settled ? (candidate.exitCode ?? 0) : null,
+				exitSignal: null,
+				settled: candidate.settled ?? false,
+			})),
+			result: null,
+		});
+		return { runDir };
+	}
+
+	function verifiedAgent(runDir: string): RunningSubagent {
+		return {
+			id: "vf-1",
+			name: "vf-demo",
+			agent: "vf-worker",
+			task: "Fix the stats tests",
+			title: "Fix stats tests",
+			mode: "background",
+			executionState: "running",
+			deliveryState: "detached",
+			parentClosePolicy: "continue",
+			blocking: false,
+			async: true,
+			startTime: Date.now() - 1000,
+			sessionFile: join(runDir, "w1.jsonl"),
+			modelContextWindow: 372_000,
+			verifiedRunDir: runDir,
+			verifiedRunId: "vf-test",
+		};
+	}
+
+	it("renders one enumerated row per candidate with per-candidate stats", () => {
+		const { runDir } = buildVerifiedRun({
+			state: "running",
+			candidates: [
+				{ settled: true, exitCode: 0, usage: { totalTokens: 7400 } },
+				{ usage: { totalTokens: 5100 } },
+			],
+		});
+		const widget = new SubagentWidgetManager(() => [verifiedAgent(runDir)]);
+		const lines = widget.renderForTest().map(stripAnsi).join("\n");
+
+		assert.match(lines, /vf-demo \[vf-worker\] · 2 attempts · running/);
+		assert.match(lines, /attempt 1 · done/);
+		assert.match(lines, /attempt 2 ·/);
+		assert.match(lines, /7\.4K\/372K ctx/);
+		assert.match(lines, /working on the fix/);
+	});
+
+	it("shows the verifier row while traces are ranked", () => {
+		const { runDir } = buildVerifiedRun({
+			state: "verifying",
+			candidates: [{ settled: true }, { settled: true }, { settled: true }],
+		});
+		const widget = new SubagentWidgetManager(() => [verifiedAgent(runDir)]);
+		const lines = widget.renderForTest().map(stripAnsi).join("\n");
+
+		assert.match(lines, /3 attempts · verifying/);
+		assert.match(lines, /verifier · ranking 3 traces/);
+		assert.match(lines, /attempt 3 · done/);
+	});
+
+	it("truncates candidate rows within the widget budget with an overflow hint", () => {
+		const { runDir } = buildVerifiedRun({
+			state: "running",
+			candidates: Array.from({ length: 12 }, () => ({})),
+		});
+		const widget = new SubagentWidgetManager(() => [verifiedAgent(runDir)]);
+		const lines = widget.renderForTest().map(stripAnsi);
+
+		assert.ok(lines.length <= 10, `widget must stay within budget: ${lines.length}`);
+		assert.match(lines.join("\n"), /\(\+\d+ more attempts\)/);
+		assert.equal(lines.at(-1), "... — Alt+S to show all", "one hint for the whole widget");
+		assert.match(lines.join("\n"), /attempt 1 ·/);
+	});
+
+	it("renders a verified group next to an ordinary agent", () => {
+		const { runDir } = buildVerifiedRun({ state: "running", candidates: [{}, {}] });
+		const ordinary = makeRunningSubagent(9);
+		const widget = new SubagentWidgetManager(() => [ordinary, verifiedAgent(runDir)]);
+		const lines = widget.renderForTest().map(stripAnsi).join("\n");
+
+		assert.match(lines, /Child 9 \[scout\]/);
+		assert.match(lines, /2 attempts · running/);
+		assert.match(lines, /attempt 2 ·/);
+	});
+
+	it("renders a mixed batch: ordinary agents and verified groups side by side", () => {
+		const { runDir } = buildVerifiedRun({
+			state: "verifying",
+			candidates: [
+				{ settled: true, usage: { totalTokens: 9100 } },
+				{ usage: { totalTokens: 4200 } },
+				{ usage: { totalTokens: 6600 } },
+			],
+		});
+		const ordinaryA = makeRunningSubagent(1);
+		ordinaryA.activity = "searching 3 patterns…";
+		const ordinaryB = makeRunningSubagent(2);
+		const widget = new SubagentWidgetManager(() => [ordinaryA, verifiedAgent(runDir), ordinaryB]);
+		const lines = widget.renderForTest().map(stripAnsi);
+
+		assert.match(lines.join("\n"), /● Agents · 3 running/);
+		assert.match(lines.join("\n"), /Child 1 \[scout\]/);
+		assert.match(lines.join("\n"), /3 attempts · verifying/);
+		assert.match(lines.join("\n"), /attempt 1 · done · 9\.1K\/372K ctx/);
+		assert.match(lines.join("\n"), /verifier · ranking 3 traces…/);
+		// Two ordinary agents (3 lines each) plus the 5-line group exceed the
+		// budget: Child 2 folds into the single trailing hint.
+		assert.doesNotMatch(lines.join("\n"), /Child 2 \[scout\]/);
+		assert.equal(
+			lines.filter((line) => line.includes("Alt+S")).length,
+			1,
+			"exactly one Alt+S hint for the whole widget",
+		);
+		assert.equal(lines.at(-1), "... (+1 more subagent — Alt+S to show all)");
+	});
+
+	it("keeps the widget budget with several concurrent verified runs", () => {
+		const runDirs = [1, 2, 3].map((group) =>
+			buildVerifiedRun({
+				state: "verifying",
+				candidates: [{ settled: true }, { settled: true }, { settled: true }],
+			}).runDir,
+		);
+		const agents = runDirs.map((runDir) => verifiedAgent(runDir));
+		const widget = new SubagentWidgetManager(() => agents);
+		const lines = widget.renderForTest().map(stripAnsi);
+
+		assert.ok(lines.length <= 10, `widget must stay within budget: ${lines.length}\n${lines.join("\n")}`);
+		assert.match(lines.join("\n"), /attempt 1 · done/);
+		assert.match(lines.at(-1) ?? "", /\(\+1 more subagent — Alt\+S to show all\)/);
 	});
 });

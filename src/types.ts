@@ -36,6 +36,20 @@ export interface SubagentParamsInput {
 	background?: boolean;
 	async?: boolean;
 	blocking?: boolean;
+	/**
+	 * Internal, runtime-only launch override: force the child process cwd
+	 * (verified fan-out points each candidate at its own git worktree).
+	 * Privileged — the model-callable subagent tool strips it at the boundary
+	 * and its schema never advertises it.
+	 */
+	forcedCwd?: string;
+	/**
+	 * Internal, runtime-only per-candidate env applied on top of the frozen
+	 * launch blueprint (e.g. COMPOSE_PROJECT_NAME/PORT_OFFSET per worktree).
+	 * Wins over static frontmatter `env` on collision (warned). Stripped from
+	 * model-callable tool input like `forcedCwd`.
+	 */
+	launchEnv?: Record<string, string>;
 }
 
 export interface WaitParams {
@@ -53,6 +67,9 @@ export interface SubagentResult {
 	name: string;
 	task: string;
 	summary: string;
+	/** Verified fan-out delivery handshake id (`<runId>-g<generation>`); present
+	 * when this result carries a lease that must end in a delivery receipt. */
+	deliveryId?: string;
 	/** Origin of the summary text. Omitted legacy results are treated as subagent output. */
 	summarySource?: SubagentSummarySource;
 	sessionFile?: string;
@@ -164,6 +181,13 @@ export interface RunningSubagent {
 	allowSteerDelivery?: boolean;
 	shutdownTimer?: ReturnType<typeof setTimeout>;
 	doneSentinelFile?: string;
+	/** Verified fan-out (ticket 07): run dir of the supervised fan-out this entry fronts. */
+	verifiedRunDir?: string;
+	/** Verified fan-out: durable run id (manifest name). */
+	verifiedRunId?: string;
+	/** Verified fan-out: this session observes the run but is not an
+	 * authorized recipient, so it may not cancel the run. */
+	verifiedRunCancelDenied?: boolean;
 	zellijTarget?: { sessionName: string; parentPaneId: number };
 	surfaceClosePromise?: Promise<void>;
 }

@@ -25,6 +25,7 @@ import { parseCommandWords } from "./child-command.ts";
 import { buildChildLaunchPlan, type ModelRegistryLike } from "./child-launch-plan.ts";
 import { CHILD_CONTEXT_BOUNDARY_SYSTEM_PROMPT } from "./context-boundary.ts";
 import { parseEnvString } from "./env.ts";
+import { getLaunchEnvCollisions } from "./launch-overrides.ts";
 import {
 	resolveSubagentNoContextFiles,
 	resolveSubagentNoSession,
@@ -417,20 +418,22 @@ export function getBaseSubagentEnvVars(
 	resolveEffectiveSessionMode: (params: SubagentParamsInput, agentDefs: AgentDefaults | null) => SubagentSessionMode,
 ): Record<string, string> {
 	const envVars: Record<string, string> = { PI_PACKAGE_DIR: "" };
-	// Merge user-configured env vars from frontmatter first,
-	// so internal PI vars below can override them if needed.
+	// Merge user-configured env vars from frontmatter first, then the internal
+	// per-candidate launchEnv on top (it wins on collision, with a warning), so
+	// internal PI vars below can still override both if needed.
 	if (prepared.agentDefs?.env) {
 		const configuredEnv = parseEnvString(prepared.agentDefs.env);
-		for (const key of [
-			"PI_SUBAGENT_SPAWN_DEPTH",
-			"PI_SUBAGENT_SPAWN_WIDTH",
-			"PI_SUBAGENT_SPAWN_WIDTH_EFFECTIVE",
-			"PI_SUBAGENT_SPAWN_BUDGET",
-			"PI_SUBAGENT_SPAWNABLE",
-		]) {
-			delete configuredEnv[key];
-		}
+		deleteReservedSpawnKeys(configuredEnv);
 		Object.assign(envVars, configuredEnv);
+	}
+	if (params.launchEnv && Object.keys(params.launchEnv).length > 0) {
+		const launchEnv = { ...params.launchEnv };
+		deleteReservedSpawnKeys(launchEnv);
+		const collisions = getLaunchEnvCollisions(launchEnv, prepared.agentDefs?.env);
+		if (collisions.length > 0) {
+			console.warn(`[pi-subagents] launchEnv overrides frontmatter env: ${collisions.join(", ")}`);
+		}
+		Object.assign(envVars, launchEnv);
 	}
 	if (prepared.runtimePaths.localAgentConfigDir) {
 		envVars.PI_CODING_AGENT_DIR = prepared.runtimePaths.localAgentConfigDir;
@@ -465,4 +468,16 @@ export function getBaseSubagentEnvVars(
 	if (sessionMode !== "standalone") if (prepared.sessionFile) envVars.PI_SUBAGENT_PARENT_SESSION = prepared.sessionFile;
 	envVars.PI_ARTIFACT_PROJECT_ROOT = getArtifactStorageRoot();
 	return envVars;
+}
+
+const RESERVED_SPAWN_ENV_KEYS = [
+	"PI_SUBAGENT_SPAWN_DEPTH",
+	"PI_SUBAGENT_SPAWN_WIDTH",
+	"PI_SUBAGENT_SPAWN_WIDTH_EFFECTIVE",
+	"PI_SUBAGENT_SPAWN_BUDGET",
+	"PI_SUBAGENT_SPAWNABLE",
+];
+
+function deleteReservedSpawnKeys(env: Record<string, string>): void {
+	for (const key of RESERVED_SPAWN_ENV_KEYS) delete env[key];
 }

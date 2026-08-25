@@ -20,8 +20,9 @@
 		"test:e2e-live-tools": "node scripts/test-e2e-live-tools.mjs",
 		"test:e2e-live-extensions": "node scripts/test-e2e-live-extensions.mjs",
 		"test:e2e-live-stop-after-turn": "node scripts/test-e2e-live-stop-after-turn.mjs",
-		"test:e2e-live-mixed-batch": "node scripts/test-e2e-live-mixed-batch.mjs",
-		"test:frontmatter-timeout": "node scripts/test-frontmatter-timeout.mjs",
+    "test:e2e-live-mixed-batch": "node scripts/test-e2e-live-mixed-batch.mjs",
+    "test:e2e-live-verified-fanout": "node scripts/test-e2e-live-verified-fanout.mjs",
+    "test:frontmatter-timeout": "node scripts/test-frontmatter-timeout.mjs",
 		"test:frontmatter-idle-timeout": "node scripts/test-frontmatter-idle-timeout.mjs",
 		"test:frontmatter-timeout-warn": "node scripts/test-frontmatter-timeout-warn.mjs",
 		"test:frontmatter-on-timeout": "node scripts/test-frontmatter-on-timeout.mjs",
@@ -58,8 +59,9 @@
 			"wezterm",
 			"zellij"
 		],
-		"ignoreFiles": [
-			"scripts/check-file-sizes.mjs",
+    "ignoreFiles": [
+      "scripts/live-vf-candidate-router.mjs",
+      "scripts/check-file-sizes.mjs",
 			"src/launch/run-child.mjs"
 		]
 	},

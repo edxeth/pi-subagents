@@ -48,6 +48,7 @@ import {
 } from "./state.ts";
 import { type WaitRuntime, waitForSubagentResult as waitForSubagentResultWithRuntime } from "./wait.ts";
 import { restartSubagentForTimeoutWrapUp } from "./timeout-wrap-up.ts";
+import { requestVerifiedRunCancel } from "../vf/run/client.ts";
 
 export {
 	getWatcherSignal,
@@ -117,7 +118,27 @@ async function closeRunningSurface(running: RunningSubagent): Promise<void> {
 	}
 }
 
-export async function stopRunningSubagent(running: RunningSubagent): Promise<void> {
+export async function stopRunningSubagent(
+	running: RunningSubagent,
+	options: { operator?: boolean } = {},
+): Promise<void> {
+	// A verified fan-out has no child process in this parent: its candidates
+	// belong to a detached supervisor. Kill = cancel the run (supervisor kills
+	// the candidate groups and terminalizes the manifest).
+	if (running.verifiedRunDir) {
+		if (running.verifiedRunCancelDenied && !options.operator) {
+			throw new Error(
+				`Subagent "${running.name}" is a verified fan-out this session observes but is not an authorized ` +
+					`recipient of (${running.verifiedRunId}). Cancel it from the /subagents overlay as the operator, ` +
+					`or resume the run's originating session.`,
+			);
+		}
+		try {
+			requestVerifiedRunCancel(running.verifiedRunDir);
+		} catch {
+			// surfaced by the cancelled manifest state instead
+		}
+	}
 	await stopRunningSubagentWithDeps(running, closeRunningSurface);
 	updateWidget();
 }

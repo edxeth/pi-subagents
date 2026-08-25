@@ -157,6 +157,9 @@ export function enforceAgentFrontmatter(
 	params: SubagentParamsInput,
 	agentDefs: AgentDefaults | null,
 ): SubagentParamsInput {
+	// forcedCwd/launchEnv are internal runtime-only overrides: the model-facing
+	// tool path strips them from caller input (getRequestedChildren), so
+	// preserving them here only carries trusted internal launches through.
 	return {
 		name: params.name,
 		task: params.task,
@@ -166,5 +169,7 @@ export function enforceAgentFrontmatter(
 		...(agentDefs?.allowModelOverride !== false && params.thinking ? { thinking: params.thinking } : {}),
 		async: resolveSubagentAsync(params, agentDefs),
 		blocking: resolveSubagentBlocking(params, agentDefs),
+		...(params.forcedCwd ? { forcedCwd: params.forcedCwd } : {}),
+		...(params.launchEnv ? { launchEnv: params.launchEnv } : {}),
 	};
 }
