@@ -167,6 +167,7 @@ export async function restartSubagentForTimeoutWrapUp(
 		const child = spawn(invocation.command, invocation.args, {
 			...(launch.cwd ? { cwd: launch.cwd } : {}),
 			detached: true,
+			windowsHide: true,
 			stdio:
 				running.parentClosePolicy === "continue"
 					? (["pipe", "ignore", "ignore"] as const)
