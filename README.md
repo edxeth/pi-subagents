@@ -54,6 +54,20 @@ The backend command must exist, and Pi must be able to see the current pane or s
 
 Normal launches use a backend-specific surface. Herdr keeps children beside the parent while the tab has room, then uses dedicated tabs for overflow. Every Herdr child pane is labeled with its session title, such as `[reviewer] Auth implementation review`. Other backends may use windows, splits, or stacked panes.
 
+### Windows panes
+
+Interactive launches are staged as a POSIX script and typed into the child pane. On Windows that
+pane usually runs PowerShell, which prints a bare quoted path instead of executing it, so Pi invokes
+the staged script through `bash.exe` there. Pi asks Herdr for the pane process and picks the syntax
+from it, so a Herdr `default_shell` of bash still gets the plain POSIX line. Detection reads the
+pane's own shell; Pi falls back to the platform default when Herdr cannot report it.
+
+Pi looks for the interpreter in this order: `PI_SUBAGENT_WIN_BASH`, then `bash` on `PATH`, then the
+usual Git for Windows and MSYS2 install roots. WSL's `C:\Windows\System32\bash.exe` is skipped: it
+cannot open Windows paths or launch a Windows Pi. Set `PI_SUBAGENT_WIN_BASH` when the `bash` on your
+`PATH` is a Cygwin build, which resolves Windows paths differently. When no interpreter is found,
+the launch fails with a setup error instead of leaving a pane that never starts an agent.
+
 ### Orchestrator mode
 
 You can turn the parent session into an orchestrator — an agent that can only
@@ -881,6 +895,7 @@ User-facing knobs:
 | `PI_ORCHESTRATOR_MODE` | Set `1` to turn the parent into an orchestrator (delegation-only tools, replacement system prompt) |
 | `PI_SUBAGENT_PI_COMMAND` | Launch children through a wrapper command |
 | `PI_SUBAGENT_MUX` | Force `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm` |
+| `PI_SUBAGENT_WIN_BASH` | Windows only: path to the `bash.exe` that runs staged launch scripts in a PowerShell or cmd pane |
 | `PI_CODING_AGENT_DIR` | Use a different Pi agent config root |
 | `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN` | Set `1` to let the parent keep running after async launches |
 | `PI_SUBAGENT_DISABLE_CHILD_CONTEXT_BOUNDARY` | Set `1` for raw forks with no boundary marker |

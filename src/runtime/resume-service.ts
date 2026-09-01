@@ -465,6 +465,7 @@ async function resumeSubagentSessionWithoutWidth(
 		const child = spawn(invocation.command, invocation.args, {
 			...(resumeCwd ? { cwd: resumeCwd } : {}),
 			detached: true,
+			windowsHide: true,
 			stdio:
 				running.parentClosePolicy === "continue"
 					? (["pipe", "ignore", "ignore"] as const)

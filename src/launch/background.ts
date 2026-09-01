@@ -149,6 +149,7 @@ export async function launchBackgroundSubagent(
 	const child = spawn(invocation.command, invocation.args, {
 		cwd: launch.forcedCwd ?? prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
 		detached: true,
+		windowsHide: true,
 		stdio:
 			resolveSubagentParentClosePolicy(prepared.agentDefs) === "continue"
 				? ["ignore", "ignore", "ignore"]
