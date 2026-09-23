@@ -36,8 +36,19 @@ function isWezTermRuntimeAvailable(): boolean {
 	return !!process.env.WEZTERM_UNIX_SOCKET && hasCommand("wezterm");
 }
 
+// Each Herdr probe spawns two blocking herdr.exe calls, and one interactive launch
+// probes 4-5 times. Remember a positive result briefly; never cache a negative one,
+// so a dead server still falls through to the other backends. Keyed on PATH, like
+// the command cache in runtime-probe.ts, so a different herdr on PATH re-probes.
+const HERDR_PROBE_TTL_MS = 30_000;
+let herdrProbeOk: { path: string; until: number } | undefined;
+
 function isHerdrMuxRuntimeAvailable(): boolean {
-	return isHerdrRuntimeAvailable(hasCommand);
+	const path = process.env.PATH ?? "";
+	if (herdrProbeOk && herdrProbeOk.path === path && Date.now() < herdrProbeOk.until) return true;
+	const available = isHerdrRuntimeAvailable(hasCommand);
+	herdrProbeOk = available ? { path, until: Date.now() + HERDR_PROBE_TTL_MS } : undefined;
+	return available;
 }
 
 export function isCmuxAvailable(): boolean {

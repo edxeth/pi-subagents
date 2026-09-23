@@ -13,11 +13,13 @@ import {
 } from "./core.ts";
 import {
 	closeHerdrPane,
+	getHerdrPaneProcessNames,
 	readHerdrPaneScreen,
 	readHerdrPaneScreenAsync,
 	runHerdrPaneCommand,
 	sendHerdrPaneEnter,
 } from "./herdr.ts";
+import { buildStagedShellCommand, resolveStagedShellPlan } from "./staged-shell.ts";
 import { closeZellijSurface } from "./zellij-runtime.ts";
 
 export function sendCommand(surface: string, command: string): void {
@@ -72,8 +74,9 @@ function stageShellCommand(command: string): string {
 	return scriptPath;
 }
 
-function buildStagedShellCommand(scriptPath: string): string {
-	return `${shellEscape(scriptPath)}; rm -f ${shellEscape(scriptPath)}`;
+// Only Herdr can report the pane process today; cmux falls back to the platform default.
+function paneShellNames(backend: string, surface: string): string[] {
+	return backend === "herdr" ? getHerdrPaneProcessNames(surface) : [];
 }
 
 export function sendShellCommand(surface: string, command: string): void {
@@ -82,9 +85,12 @@ export function sendShellCommand(surface: string, command: string): void {
 		sendCommand(surface, command);
 		return;
 	}
+	// Resolved before staging: a missing interpreter must fail loudly instead of
+	// leaving an orphaned %TEMP% script and a pane that never starts an agent.
+	const plan = resolveStagedShellPlan(paneShellNames(backend, surface));
 	const scriptPath = stageShellCommand(command);
 	try {
-		sendCommand(surface, buildStagedShellCommand(scriptPath));
+		sendCommand(surface, buildStagedShellCommand(scriptPath, plan));
 	} catch (error) {
 		try {
 			rmSync(scriptPath, { force: true });

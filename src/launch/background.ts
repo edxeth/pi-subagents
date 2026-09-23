@@ -148,7 +148,8 @@ export async function launchBackgroundSubagent(
 	clearSubagentExitSidecar(prepared.subagentSessionFile);
 	const child = spawn(invocation.command, invocation.args, {
 		cwd: launch.forcedCwd ?? prepared.runtimePaths.effectiveCwd ?? ctx.cwd,
-		detached: true,
+		detached: process.platform !== "win32", // win32: DETACHED_PROCESS + CREATE_NO_WINDOW conflict leaves a stray console
+		windowsHide: true,
 		stdio:
 			resolveSubagentParentClosePolicy(prepared.agentDefs) === "continue"
 				? ["ignore", "ignore", "ignore"]
