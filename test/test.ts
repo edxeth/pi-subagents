@@ -87,6 +87,7 @@ import "./runtime/mixed-batch-classifier.test.ts";
 import "./launch/helpers.test.ts";
 import "./mux/mux.test.ts";
 import "./mux/poll.test.ts";
+import "./mux/cmux-close-surface.test.ts";
 import "./mux/herdr.test.ts";
 import "./mux/herdr-placement.test.ts";
 import "./mux/runtime-probe.test.ts";

@@ -160,12 +160,32 @@ export async function closeSurfaceAsync(
 	closeSurface(surface);
 }
 
+/** True when a mux backend refused an action that needs explicit force. cmux
+ *  answers `confirmation_required: Surface has a running process; retry with
+ *  force=true` when a surface is closed while its process still runs. */
+export function isMuxConfirmationRequired(err: unknown): boolean {
+	if (err instanceof Error) {
+		const parts = [err.message, (err as { stderr?: unknown }).stderr];
+		return parts.some((part) => typeof part === "string" && part.includes("confirmation_required"));
+	}
+	return typeof err === "string" && err.includes("confirmation_required");
+}
+
 export function closeSurface(surface: string): void {
 	const backend = requireMuxBackend();
 	if (backend === "cmux") {
-		execSync(`cmux close-surface --surface ${shellEscape(surface)}`, {
-			encoding: "utf8",
-		});
+		try {
+			execSync(`cmux close-surface --surface ${shellEscape(surface)}`, {
+				encoding: "utf8",
+			});
+		} catch (err) {
+			// The child already delivered its result; only pane cleanup is left.
+			// A lingering shell trips cmux's confirmation gate, so retry forced.
+			if (!isMuxConfirmationRequired(err)) throw err;
+			execSync(`cmux close-surface --surface ${shellEscape(surface)} --force`, {
+				encoding: "utf8",
+			});
+		}
 		return;
 	}
 	if (backend === "tmux") {
