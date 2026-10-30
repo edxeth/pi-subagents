@@ -4,7 +4,7 @@
 
 It began as a fork of [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents), then grew into a monumental refactor: named agents, interactive panes, background workers, async parallelism, blocking agents, child-to-parent communication, forked context, a beautiful TUI widget, orchestrator mode, and much more!
 
-Use it when one agent should hand work to another agent instead of trying to do everything in one transcript. Interactive children open in Herdr, cmux, tmux, zellij, or WezTerm; background children run headlessly.
+Use it when one agent should hand work to another agent instead of trying to do everything in one transcript. Interactive children open in Herdr app, Herdr, cmux, tmux, zellij, or WezTerm; background children run headlessly.
 
 https://github.com/user-attachments/assets/e0b97493-6c9b-4710-ba26-a6c08230ba28
 
@@ -38,7 +38,7 @@ Two axes matter:
 - `interactive` or `background`: where the child runs
 - async or sync: whether the parent waits
 
-`interactive` means foreground. Pi opens a visible surface through Herdr, cmux, tmux, zellij, or WezTerm. Normal launches use a backend-specific surface, such as a tab, window, split, or stacked pane.
+`interactive` means foreground. Pi opens a visible surface through Herdr app, Herdr, cmux, tmux, zellij, or WezTerm. Normal launches use a backend-specific surface, such as a tab, window, split, or stacked pane.
 
 `background` means headless. Pi starts a `pi -p` child process without opening a pane.
 
@@ -46,9 +46,9 @@ Async means the parent gets a “started” result and the child answer comes ba
 
 ### Interactive mux backends
 
-Interactive children open in your current terminal backend. `pi-subagents` supports Herdr, cmux, tmux, zellij, and WezTerm.
+Interactive children open in your current terminal backend. `pi-subagents` supports Herdr app, Herdr, cmux, tmux, zellij, and WezTerm.
 
-Start `pi` inside the backend you want to use. Leave `PI_SUBAGENT_MUX` unset to let Pi detect it, or set it to `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm` to force one.
+Start `pi` inside the backend you want to use. Leave `PI_SUBAGENT_MUX` unset to let Pi detect it, or set it to `herdr-app`, `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm` to force one.
 
 The backend command must exist, and Pi must be able to see the current pane or session context. If no supported backend is active, interactive launches fail with a setup hint.
 
@@ -911,7 +911,7 @@ User-facing knobs:
 | --- | --- |
 | `PI_ORCHESTRATOR_MODE` | Set `1` to turn the parent into an orchestrator (delegation-only tools, replacement system prompt) |
 | `PI_SUBAGENT_PI_COMMAND` | Launch children through a wrapper command |
-| `PI_SUBAGENT_MUX` | Force `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm` |
+| `PI_SUBAGENT_MUX` | Force `herdr-app`, `herdr`, `cmux`, `tmux`, `zellij`, or `wezterm` |
 | `PI_CODING_AGENT_DIR` | Use a different Pi agent config root |
 | `PI_SUBAGENT_DISABLE_COORDINATOR_ONLY_TURN` | Set `1` to let the parent keep running after async launches |
 | `PI_SUBAGENT_DISABLE_CHILD_CONTEXT_BOUNDARY` | Set `1` for raw forks with no boundary marker |
@@ -921,7 +921,7 @@ User-facing knobs:
 | `PI_SUBAGENT_ENABLE_SET_TAB_TITLE` | Register the optional `set_tab_title` tool |
 | `PI_SUBAGENT_RENAME_TMUX_WINDOW` | Let `set_tab_title` rename the tmux window |
 | `PI_SUBAGENT_RENAME_TMUX_SESSION` | Let `set_tab_title` rename the tmux session |
-| `PI_SUBAGENT_HERDR_PLACEMENT` | Herdr policy: `auto`, `right-stack`, `down-stack`, `right`, `down`, or `tab` |
+| `PI_SUBAGENT_HERDR_PLACEMENT` | Herdr and Herdr app policy: `auto`, `right-stack`, `down-stack`, `right`, `down`, or `tab` |
 | `PI_SUBAGENT_HERDR_MIN_COLUMNS` | Minimum columns preserved by Herdr `auto` placement (default: `50`) |
 | `PI_SUBAGENT_HERDR_MIN_ROWS` | Minimum rows preserved by Herdr `auto` placement (default: `12`) |
 | `PI_SUBAGENT_ZELLIJ_PLACEMENT` | Zellij policy: `auto`, `right-stack`, `down-stack`, `floating`, or `tab-stack` |
@@ -978,6 +978,18 @@ env: PI_SUBAGENT_HERDR_PLACEMENT=tab
 
 The parent reads this value before it creates the child surface. The agent value overrides the parent default. `PI_SUBAGENT_HERDR_MIN_COLUMNS` and `PI_SUBAGENT_HERDR_MIN_ROWS` remain parent-wide settings. On resume, a persisted per-agent `env` value wins; without one, the current parent default wins, then the originally persisted policy is the fallback.
 
+## Herdr app placement
+
+The `herdr-app` backend drives a local Herdr app window through `herdr-app` and its terminal runtime `hc` (`herdr-core`). It is local-only.
+
+- **Detection.** Pi must run in a Herdr app terminal: `HC_TERMINAL_ID` is set, `herdr-app` and `hc` (or `herdr-core`) are on `PATH`, and `herdr-app ls` lists that terminal. With `PI_SUBAGENT_MUX` unset, `herdr-app` is tried first, then `herdr`, cmux, tmux, zellij, and WezTerm. Force it with `PI_SUBAGENT_MUX=herdr-app`.
+- **Placement.** The Herdr placement policies and `PI_SUBAGENT_HERDR_MIN_COLUMNS` / `PI_SUBAGENT_HERDR_MIN_ROWS` apply unchanged, as does per-agent `env: PI_SUBAGENT_HERDR_PLACEMENT=...`. Children split the parent pane (`pane.split`); when no safe split remains, or the parent size cannot be read, a new tab named after the session title opens in the parent's space. Pane sizes come from `hc get`; for panes Pi just created it uses the smaller of its own estimate and the reported size.
+- **Titles.** Overflow tabs carry the session title. Split panes show the child program's own title; Pi also sets the `pi.subagent.title` label on the terminal. `set_tab_title` does nothing on this backend.
+- **Lifecycle.** The app creates each child terminal, so Pi never adds a parent or `--notify`: children send no notes into the parent and are not tied to its lifetime. The command is sent with `hc send`, long commands as a staged script. Closing kills the terminal, which removes its pane and tab, then removes the terminal record.
+- **Focus.** `tab.new` switches the visible tab; Pi puts the space, tab and focused pane back afterwards.
+
+The old `herdr` backend now also requires `HERDR_ENV=1` and a `HERDR_PANE_ID` that matches the pane the server reports, so a running but unrelated Herdr server is never selected.
+
 ## Zellij placement
 
 Zellij groups children by their immediate parent session. The first child splits that parent; later siblings stack on the same pane. Set `PI_SUBAGENT_ZELLIJ_PLACEMENT`:
@@ -1014,7 +1026,9 @@ Herdr-focused fake tests:
 ```bash
 node --test test/mux/herdr.test.ts
 node --test test/mux/herdr-placement.test.ts
+node --test test/mux/herdr-app.test.ts
 node --test test/launch/herdr-interactive-launch.test.ts
+node --test test/launch/herdr-app-interactive-launch.test.ts
 ```
 
 The mux tests cover Herdr detection, adapter errors, geometry-aware placement, small-window tab fallback, owned-pane isolation, pane titles, explicit policies, split limitations, I/O, and cleanup. The launch test covers Herdr parity for cwd, env, flags, trust-project approval, session settings, model and thinking resolution, tool narrowing, skills, lifecycle policy, and explicit `PI_SUBAGENT_MUX=herdr` selection.

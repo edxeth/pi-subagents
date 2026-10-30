@@ -118,6 +118,8 @@ function useFakeHerdr(): string {
 	const dir = createTestDir();
 	const logFile = writeFakeHerdr(dir);
 	clearHerdrPlacementEnv();
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_PANE_ID = "w1:p1";
 	process.env.PATH = dir;
 	process.env.FAKE_HERDR_LOG = logFile;
 	process.env.FAKE_HERDR_COUNTER = join(dir, "split-count");

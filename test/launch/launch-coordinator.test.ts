@@ -326,6 +326,8 @@ exit 1
 		const originalPath = process.env.PATH;
 		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
 		process.env.PI_SUBAGENT_MUX = "herdr";
+		process.env.HERDR_ENV = "1";
+		process.env.HERDR_PANE_ID = "w1:p1";
 		process.env.PI_SUBAGENT_HERDR_PLACEMENT = "auto";
 		try {
 			const launch = await coordinateSubagentLaunch(

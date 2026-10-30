@@ -75,7 +75,7 @@ export async function coordinateSubagentLaunch(
 	const systemPrompt = getCoordinatedSystemPrompt(prepared);
 	const agentEnv = parseEnvString(prepared.agentDefs?.env);
 	const herdrPlacementPolicy =
-		options.mode === "interactive" && getMuxBackend() === "herdr"
+		options.mode === "interactive" && ["herdr", "herdr-app"].includes(getMuxBackend() ?? "")
 			? resolveHerdrPlacementPolicy(agentEnv.PI_SUBAGENT_HERDR_PLACEMENT ?? process.env.PI_SUBAGENT_HERDR_PLACEMENT)
 			: undefined;
 	const zellijPlacementPolicy =

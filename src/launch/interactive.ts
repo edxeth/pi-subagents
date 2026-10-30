@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { getSubagentDisplayTitle, isSetTabTitleToolEnabled } from "../agents/titles.ts";
 import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
 import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
-import { createSurface, getMuxBackend, sendShellCommand } from "../mux.ts";
+import { closeSurface, createSurface, getMuxBackend, sendShellCommand } from "../mux.ts";
 import { clearSubagentExitSidecar } from "../session/exit-sidecar.ts";
 import { buildPiPromptArgs, getDoneSentinelFile } from "../session/session-files.ts";
 import { getSubagentToolLaunchArgs } from "../tools/policy.ts";
@@ -209,7 +209,19 @@ export async function launchInteractiveSubagent(
 			capsulePath,
 			envKeys: Object.keys(envVars).sort(),
 		});
-		if (!zellijTarget) sendShellCommand(surface, command);
+		if (!zellijTarget) {
+			try {
+				sendShellCommand(surface, command);
+			} catch (sendError) {
+				// A herdr-app terminal is created detached from pi, so nothing else would ever close it.
+				if (!surfacePreCreated && getMuxBackend() === "herdr-app") {
+					try {
+						closeSurface(surface);
+					} catch {}
+				}
+				throw sendError;
+			}
+		}
 	} catch (error) {
 		// The pane never received the command, so nothing will consume the
 		// capsule. Delete it rather than leaving credentials on disk.

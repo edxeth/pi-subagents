@@ -505,11 +505,14 @@ export function isHerdrRuntimeAvailable(
 	hasCommand: (command: string) => boolean = (command) => defaultMuxRuntimeProbe.hasCommand(command),
 ): boolean {
 	if (!hasCommand("herdr")) return false;
+	// A reachable server is not enough: a stray server must not capture pi
+	// instances that run outside any Herdr pane.
+	const envPaneId = process.env.HERDR_PANE_ID?.trim();
+	if (process.env.HERDR_ENV !== "1" || !envPaneId) return false;
 	try {
 		const status = getHerdrServerStatus();
 		if (!status.running || !status.compatible) return false;
-		getHerdrCurrentPane();
-		return true;
+		return getHerdrCurrentPane().paneId === envPaneId;
 	} catch {
 		return false;
 	}

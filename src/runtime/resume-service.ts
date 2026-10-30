@@ -31,6 +31,7 @@ import { buildInteractiveShellCommand } from "../launch/shell-command.ts";
 import { createZellijCommandSurface } from "../mux/zellij-placement.ts";
 import { getZellijShellCommand, resolveZellijTarget } from "../mux/zellij-runtime.ts";
 import {
+	closeSurface,
 	createSurface,
 	getMuxBackend,
 	muxSetupHint,
@@ -494,7 +495,7 @@ async function resumeSubagentSessionWithoutWidth(
 		const surfaceName = invocationMetadata?.sessionTitle ?? displayName;
 		const backend = getMuxBackend();
 		const herdrContext =
-			backend === "herdr"
+			backend === "herdr" || backend === "herdr-app"
 				? {
 						policy: resolveResumeHerdrPlacementPolicy(invocationMetadata, process.env.PI_SUBAGENT_HERDR_PLACEMENT),
 					}
@@ -542,7 +543,16 @@ async function resumeSubagentSessionWithoutWidth(
 				(await createZellijCommandSurface(surfaceName, zellijTarget!, getZellijShellCommand(command), zellijContext));
 			if (!zellijTarget) {
 				await new Promise<void>((resolve) => setTimeout(resolve, runtime.getShellReadyDelayMs()));
-				sendShellCommand(surface, command);
+				try {
+					sendShellCommand(surface, command);
+				} catch (sendError) {
+					if (backend === "herdr-app") {
+						try {
+							closeSurface(surface);
+						} catch {}
+					}
+					throw sendError;
+				}
 			}
 			running.surface = surface;
 			running.doneSentinelFile = doneSentinelFile;
