@@ -1,6 +1,7 @@
 import { execFileSync, execSync } from "node:child_process";
 import { createCmuxSplit, createCmuxSurface } from "./cmux-surfaces.ts";
 import { getMuxBackend, requireMuxBackend, shellEscape, zellijActionSync } from "./core.ts";
+import { createHerdrAppSplit, createHerdrAppSurface } from "./herdr-app-surfaces.ts";
 import {
 	createHerdrSplit,
 	createHerdrSurface,
@@ -42,6 +43,10 @@ export async function createSurface(name: string, options?: SurfaceCreationOptio
 
 	if (backend === "zellij") {
 		return createZellijSurface(name, options?.zellij);
+	}
+
+	if (backend === "herdr-app") {
+		return createHerdrAppSurface(name, options?.herdr);
 	}
 
 	if (backend === "herdr") {
@@ -260,6 +265,7 @@ export function createSurfaceSplit(
 	if (backend === "tmux") return createTmuxSplit(name, direction, fromSurface);
 	if (backend === "wezterm") return createWezTermSplit(name, direction, fromSurface);
 	if (backend === "zellij") return createZellijSplit(name, direction, fromSurface);
+	if (backend === "herdr-app") return createHerdrAppSplit(name, direction, fromSurface);
 	return createHerdrSplit(name, direction, fromSurface);
 }
 
@@ -299,6 +305,7 @@ export function renameCurrentTab(title: string): void {
 		else zellijActionSync(["rename-tab", title]);
 		return;
 	}
+	if (backend === "herdr-app") return;
 	if (backend === "herdr") {
 		renameHerdrCurrentTab(title);
 		return;
@@ -335,6 +342,7 @@ export function renameWorkspace(title: string): void {
 		return;
 	}
 	if (backend === "zellij") return;
+	if (backend === "herdr-app") return;
 	if (backend === "herdr") {
 		renameHerdrCurrentWorkspace(title);
 		return;

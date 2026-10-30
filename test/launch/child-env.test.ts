@@ -126,6 +126,16 @@ describe("child env policy", () => {
 			});
 		});
 
+		it("keeps the pane's own herdr-core terminal identity so nested children split beside it", () => {
+			const picked = pickPaneIdentityEnv({
+				HC_TERMINAL_ID: "t2",
+				HC_SCOPE: "scope-1",
+				HC_SESSION: "s",
+				PATH: "/usr/bin",
+			});
+			assert.deepEqual(picked, { HC_TERMINAL_ID: "t2", HC_SCOPE: "scope-1", HC_SESSION: "s" });
+		});
+
 		it("skips unset and empty values", () => {
 			assert.deepEqual(pickPaneIdentityEnv({ TMUX_PANE: undefined, TERM: "" }), {});
 		});

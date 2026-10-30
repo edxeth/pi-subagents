@@ -108,7 +108,7 @@ function canSplitHerdrPane(pane: HerdrPaneRect, direction: HerdrSplitDirection, 
 		: pane.width >= minimums.columns && Math.min(first, second) >= minimums.rows;
 }
 
-function selectFirstAutoSplit(pane: HerdrPaneRect): HerdrSplitPlan | null {
+export function selectFirstAutoSplit(pane: HerdrPaneRect): HerdrSplitPlan | null {
 	for (const direction of ["right", "down"] as const) {
 		for (const ratio of [0.62, 0.5]) {
 			if (canSplitHerdrPane(pane, direction, ratio)) {
@@ -119,7 +119,7 @@ function selectFirstAutoSplit(pane: HerdrPaneRect): HerdrSplitPlan | null {
 	return null;
 }
 
-function selectOwnedAutoSplit(panes: HerdrPaneRect[]): HerdrSplitPlan | null {
+export function selectOwnedAutoSplit(panes: HerdrPaneRect[]): HerdrSplitPlan | null {
 	const largestFirst = [...panes].sort((a, b) => b.width * b.height - a.width * a.height);
 	for (const pane of largestFirst) {
 		const preferred = pane.width >= pane.height * 4 ? "right" : "down";

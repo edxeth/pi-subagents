@@ -221,6 +221,8 @@ function useFakeHerdr(mode = "available"): {
 	const screenFile = join(dir, "herdr-screen.txt");
 	writeFileSync(screenFile, "herdr line 1\nherdr line 2\n");
 	clearMuxRuntimeEnv();
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_PANE_ID = "w1:p1";
 	process.env.PATH = dir;
 	process.env.FAKE_HERDR_LOG = logFile;
 	process.env.FAKE_HERDR_MODE = mode;
@@ -271,6 +273,38 @@ describe("Herdr mux backend", async () => {
 			process.env.TMUX_PANE = "%1";
 
 			assert.equal(getMuxBackend(), "herdr");
+		});
+
+		it("does not select Herdr when the server is reachable but HERDR_PANE_ID is unset", async () => {
+			useFakeHerdr();
+			delete process.env.HERDR_PANE_ID;
+
+			assert.equal(isHerdrAvailable(), false);
+			assert.equal(getMuxBackend(), null);
+		});
+
+		it("does not select Herdr when HERDR_ENV is not 1", async () => {
+			useFakeHerdr();
+			delete process.env.HERDR_ENV;
+
+			assert.equal(isHerdrAvailable(), false);
+			assert.equal(getMuxBackend(), null);
+		});
+
+		it("does not select Herdr when HERDR_PANE_ID names a different pane than the server reports", async () => {
+			useFakeHerdr();
+			process.env.HERDR_PANE_ID = "w9:p9";
+
+			assert.equal(isHerdrAvailable(), false);
+			assert.equal(getMuxBackend(), null);
+		});
+
+		it("rejects forced Herdr without a pane id", async () => {
+			useFakeHerdr();
+			delete process.env.HERDR_PANE_ID;
+			process.env.PI_SUBAGENT_MUX = "herdr";
+
+			assert.equal(getMuxBackend(), null);
 		});
 
 		it("uses forced Herdr only when Herdr is actually available", async () => {

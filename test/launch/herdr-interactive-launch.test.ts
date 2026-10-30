@@ -128,6 +128,8 @@ function useFakeHerdr(): { dir: string; logFile: string } {
 	const dir = createTestDir();
 	const logFile = writeFakeHerdr(dir);
 	clearMuxRuntimeEnv();
+	process.env.HERDR_ENV = "1";
+	process.env.HERDR_PANE_ID = "w1:p1";
 	process.env.PATH = dir;
 	return { dir, logFile };
 }

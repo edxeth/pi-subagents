@@ -1,4 +1,5 @@
 import { afterEach, beforeEach } from "node:test";
+import { resetHerdrAppDetectionCache } from "../../src/mux/herdr-app.ts";
 
 export const TRACKED_ENV_KEYS = [
 	"CMUX_SOCKET_PATH",
@@ -6,6 +7,10 @@ export const TRACKED_ENV_KEYS = [
 	"DEEPSEEK_API_KEY",
 	"FAKE_CMUX_LOG",
 	"FAKE_CMUX_SCREEN",
+	"FAKE_HERDR_APP_COUNTER",
+	"FAKE_HERDR_APP_LOG",
+	"FAKE_HERDR_APP_MODE",
+	"FAKE_HERDR_APP_SCREEN",
 	"FAKE_HERDR_LOG",
 	"FAKE_HERDR_MODE",
 	"FAKE_HERDR_SCREEN",
@@ -16,6 +21,10 @@ export const TRACKED_ENV_KEYS = [
 	"FAKE_ZELLIJ_LOG",
 	"FAKE_ZELLIJ_PANE_ID",
 	"FAKE_ZELLIJ_SCREEN",
+	"HC_SCOPE",
+	"HC_TERMINAL_ID",
+	"HC_TERMINAL_SOCKET",
+	"HERDR_ENV",
 	"HERDR_PANE_ID",
 	"HERDR_TAB_ID",
 	"HERDR_WORKSPACE_ID",
@@ -71,11 +80,17 @@ export const ISOLATED_SUBAGENT_ENV_KEYS = [
 	"PI_SUBAGENT_SURFACE",
 ] as const;
 
+/** Real herdr-core terminals export these; they must not make a test run select the herdr-app backend. */
+export const ISOLATED_MUX_ENV_KEYS = ["HC_TERMINAL_ID", "HC_SCOPE", "HC_TERMINAL_SOCKET"] as const;
+
 export function clearIsolatedSubagentEnv(): void {
 	for (const key of ISOLATED_SUBAGENT_ENV_KEYS) delete process.env[key];
+	for (const key of ISOLATED_MUX_ENV_KEYS) delete process.env[key];
+	resetHerdrAppDetectionCache();
 }
 
 export function restoreTrackedEnv(): void {
+	resetHerdrAppDetectionCache();
 	for (const key of TRACKED_ENV_KEYS) {
 		const value = ORIGINAL_ENV[key];
 		if (value === undefined) delete process.env[key];

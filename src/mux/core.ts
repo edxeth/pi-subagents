@@ -1,12 +1,13 @@
 import { execFile, execFileSync } from "node:child_process";
 import { basename } from "node:path";
 import { promisify } from "node:util";
+import { isHerdrAppRuntimeAvailable } from "./herdr-app.ts";
 import { isHerdrRuntimeAvailable } from "./herdr.ts";
 import { defaultMuxRuntimeProbe } from "./runtime-probe.ts";
 
 export const execFileAsync = promisify(execFile);
 
-export type MuxBackend = "cmux" | "tmux" | "zellij" | "wezterm" | "herdr";
+export type MuxBackend = "cmux" | "tmux" | "zellij" | "wezterm" | "herdr" | "herdr-app";
 
 function hasCommand(command: string): boolean {
 	return defaultMuxRuntimeProbe.hasCommand(command);
@@ -14,7 +15,7 @@ function hasCommand(command: string): boolean {
 
 function muxPreference(): MuxBackend | null {
 	const pref = (process.env.PI_SUBAGENT_MUX ?? "").trim().toLowerCase();
-	if (pref === "cmux" || pref === "tmux" || pref === "zellij" || pref === "wezterm" || pref === "herdr") {
+	if (pref === "cmux" || pref === "tmux" || pref === "zellij" || pref === "wezterm" || pref === "herdr" || pref === "herdr-app") {
 		return pref;
 	}
 	return null;
@@ -34,6 +35,10 @@ function isZellijRuntimeAvailable(): boolean {
 
 function isWezTermRuntimeAvailable(): boolean {
 	return !!process.env.WEZTERM_UNIX_SOCKET && hasCommand("wezterm");
+}
+
+function isHerdrAppMuxRuntimeAvailable(): boolean {
+	return isHerdrAppRuntimeAvailable(hasCommand);
 }
 
 function isHerdrMuxRuntimeAvailable(): boolean {
@@ -63,7 +68,9 @@ export function getMuxBackend(): MuxBackend | null {
 	if (pref === "zellij") return isZellijRuntimeAvailable() ? "zellij" : null;
 	if (pref === "wezterm") return isWezTermRuntimeAvailable() ? "wezterm" : null;
 	if (pref === "herdr") return isHerdrMuxRuntimeAvailable() ? "herdr" : null;
+	if (pref === "herdr-app") return isHerdrAppMuxRuntimeAvailable() ? "herdr-app" : null;
 
+	if (isHerdrAppMuxRuntimeAvailable()) return "herdr-app";
 	if (isHerdrMuxRuntimeAvailable()) return "herdr";
 	if (isCmuxRuntimeAvailable()) return "cmux";
 	if (isTmuxRuntimeAvailable()) return "tmux";
@@ -87,7 +94,8 @@ export function muxSetupHint(): string {
 	}
 	if (pref === "wezterm") return "Start pi inside WezTerm.";
 	if (pref === "herdr") return "Start pi inside Herdr (`herdr`, then run `pi`).";
-	return "Start pi inside Herdr (`herdr`, then run `pi`), cmux (`cmux pi`), tmux (`tmux new -A -s pi 'pi'`), zellij (`zellij --session pi`, then run `pi`), or WezTerm.";
+	if (pref === "herdr-app") return "Start pi inside a Herdr app terminal (`herdr-app`, then run `pi`).";
+	return "Start pi inside a Herdr app terminal (`herdr-app`), Herdr (`herdr`, then run `pi`), cmux (`cmux pi`), tmux (`tmux new -A -s pi 'pi'`), zellij (`zellij --session pi`, then run `pi`), or WezTerm.";
 }
 
 export function requireMuxBackend(): MuxBackend {

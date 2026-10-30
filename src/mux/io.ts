@@ -11,6 +11,8 @@ import {
 	zellijActionSync,
 	zellijPaneId,
 } from "./core.ts";
+import { closeHerdrAppSurface } from "./herdr-app-surfaces.ts";
+import { readHerdrAppScreen, readHerdrAppScreenAsync, sendHerdrAppText } from "./herdr-app.ts";
 import {
 	closeHerdrPane,
 	readHerdrPaneScreen,
@@ -60,6 +62,11 @@ export function sendCommand(surface: string, command: string): void {
 		else sendHerdrPaneEnter(surface);
 		return;
 	}
+	if (backend === "herdr-app") {
+		// `hc send` pastes the text and presses Enter itself.
+		sendHerdrAppText(surface, command);
+		return;
+	}
 	throw new Error("Unsupported mux backend");
 }
 
@@ -78,7 +85,7 @@ function buildStagedShellCommand(scriptPath: string): string {
 
 export function sendShellCommand(surface: string, command: string): void {
 	const backend = requireMuxBackend();
-	if (backend !== "cmux" && backend !== "herdr") {
+	if (backend !== "cmux" && backend !== "herdr" && backend !== "herdr-app") {
 		sendCommand(surface, command);
 		return;
 	}
@@ -116,6 +123,7 @@ export function readScreen(surface: string, lines = 50): string {
 		return tailLines(raw, lines);
 	}
 	if (backend === "herdr") return readHerdrPaneScreen(surface, lines);
+	if (backend === "herdr-app") return readHerdrAppScreen(surface, lines);
 	throw new Error("Unsupported mux backend");
 }
 
@@ -146,6 +154,7 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
 		return tailLines(stdout, lines);
 	}
 	if (backend === "herdr") return readHerdrPaneScreenAsync(surface, lines);
+	if (backend === "herdr-app") return readHerdrAppScreenAsync(surface, lines);
 	throw new Error("Unsupported mux backend");
 }
 
@@ -184,6 +193,10 @@ export function closeSurface(surface: string): void {
 	}
 	if (backend === "herdr") {
 		closeHerdrPane(surface);
+		return;
+	}
+	if (backend === "herdr-app") {
+		closeHerdrAppSurface(surface);
 		return;
 	}
 	throw new Error("Unsupported mux backend");
