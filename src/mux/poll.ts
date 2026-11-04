@@ -204,7 +204,14 @@ export async function pollForExit(
 				const sentinel = readDoneSentinel(options.doneSentinelFile);
 				if (sentinel) return sentinel;
 			}
-			throw new Error("Failed to read subagent surface while polling for exit");
+			// A launcher record that survived the exit check above means the child is
+			// still running, so a failed read alone does not end supervision.
+			if (
+				!options.doneSentinelFile ||
+				readInteractiveProcessId(getInteractiveProcessFile(options.doneSentinelFile)) === null
+			) {
+				throw new Error("Failed to read subagent surface while polling for exit");
+			}
 		}
 
 		const elapsed = Math.floor((Date.now() - start) / 1000);

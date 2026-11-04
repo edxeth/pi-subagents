@@ -211,6 +211,97 @@ if [ "$1" = "read-screen" ]; then printf 'clean pane output\\n'; fi
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
+	describe("unreadable surface", () => {
+		function configureUnreadableCmux(dir: string): void {
+			writeExecutable(
+				dir,
+				"cmux",
+				`#!/bin/sh
+if [ "$1" = "read-screen" ]; then echo 'surface unavailable' >&2; exit 1; fi
+`,
+			);
+			process.env.PATH = `${dir}:${ORIGINAL_ENV.PATH ?? ""}`;
+			process.env.PI_SUBAGENT_MUX = "cmux";
+			process.env.CMUX_SOCKET_PATH = "fake-cmux-socket";
+		}
+
+		it("keeps supervising a live launcher and returns its later done sentinel", async () => {
+			const dir = createTestDir();
+			const doneSentinelFile = join(dir, "done.txt");
+			configureUnreadableCmux(dir);
+			writeFileSync(`${doneSentinelFile}.pid`, `${process.pid}\n`);
+			let ticks = 0;
+
+			try {
+				const result = await pollForExit("surface:unreadable-live", new AbortController().signal, {
+					interval: 10,
+					doneSentinelFile,
+					onTick: () => {
+						ticks += 1;
+						if (ticks === 3) writeFileSync(doneSentinelFile, "__SUBAGENT_DONE_0__\n");
+					},
+				});
+				assert.deepEqual(result, { reason: "sentinel", exitCode: 0 });
+				assert.equal(ticks, 3);
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		it("reports the launcher's death once it stops answering", async () => {
+			const dir = createTestDir();
+			const doneSentinelFile = join(dir, "done.txt");
+			const pid = 42_424_246;
+			configureUnreadableCmux(dir);
+			writeFileSync(`${doneSentinelFile}.pid`, `${pid}\n`);
+			let alive = true;
+
+			const originalKill = process.kill;
+			process.kill = (candidatePid: Parameters<typeof process.kill>[0], signal?: Parameters<typeof process.kill>[1]) => {
+				if (candidatePid === pid && signal === 0) {
+					if (alive) return true;
+					throw Object.assign(new Error("No such process"), { code: "ESRCH" });
+				}
+				return originalKill(candidatePid, signal);
+			};
+
+			try {
+				const result = await pollForExit("surface:unreadable-then-dead", new AbortController().signal, {
+					interval: 10,
+					doneSentinelFile,
+					onTick: () => {
+						alive = false;
+					},
+				});
+				assert.deepEqual(result, {
+					reason: "error",
+					exitCode: 1,
+					errorMessage: "Interactive child process exited without a completion signal.",
+				});
+			} finally {
+				process.kill = originalKill;
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+
+		it("still fails without a launcher record", async () => {
+			const dir = createTestDir();
+			const doneSentinelFile = join(dir, "done.txt");
+			configureUnreadableCmux(dir);
+
+			try {
+				await assert.rejects(
+					pollForExit("surface:unreadable-unsupervised", new AbortController().signal, {
+						interval: 10,
+						doneSentinelFile,
+					}),
+					/Failed to read subagent surface while polling for exit/,
+				);
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+	});
 });
 
 describe("interpretExitSidecar", () => {
